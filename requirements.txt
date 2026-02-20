@@ -1,0 +1,10 @@
+opencv-contrib-python
+numpy
+python-dotenv
+pymysql
+facenet-pytorch
+torch
+torchvision
+Pillow
+pyttsx3
+mediapipe==0.10.14
