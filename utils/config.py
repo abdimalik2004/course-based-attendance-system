@@ -43,8 +43,13 @@ class AppConfig:
     anti_spoof_enabled: bool
     anti_spoof_threshold: float
     anti_spoof_model_path: Path
+    anti_spoof_backend: str
+    anti_spoof_input_size: int
+    anti_spoof_live_index: int
+    anti_spoof_use_onnxruntime: bool
     anti_spoof_required_frames: int
     anti_spoof_margin: float
+    anti_spoof_min_pass_ratio: float
     db_host: str
     db_port: int
     db_name: str
@@ -94,8 +99,13 @@ def load_config(base_dir=None):
         anti_spoof_model_path=Path(
             os.getenv("ATTENDANCE_ANTI_SPOOF_MODEL_PATH", base_dir / "models" / "anti_spoof.onnx")
         ),
+        anti_spoof_backend=os.getenv("ATTENDANCE_ANTI_SPOOF_BACKEND", "auto").lower(),
+        anti_spoof_input_size=_env_int("ATTENDANCE_ANTI_SPOOF_INPUT_SIZE", 80),
+        anti_spoof_live_index=_env_int("ATTENDANCE_ANTI_SPOOF_LIVE_INDEX", 1),
+        anti_spoof_use_onnxruntime=_env_bool("ATTENDANCE_ANTI_SPOOF_USE_ONNXRUNTIME", True),
         anti_spoof_required_frames=_env_int("ATTENDANCE_ANTI_SPOOF_REQUIRED_FRAMES", 3),
-        anti_spoof_margin=_env_float("ATTENDANCE_ANTI_SPOOF_MARGIN", 0.05),
+        anti_spoof_margin=_env_float("ATTENDANCE_ANTI_SPOOF_MARGIN", 0.0),
+        anti_spoof_min_pass_ratio=_env_float("ATTENDANCE_ANTI_SPOOF_MIN_PASS_RATIO", 0.67),
         db_host=os.getenv("ATTENDANCE_DB_HOST", "localhost"),
         db_port=_env_int("ATTENDANCE_DB_PORT", 3306),
         db_name=os.getenv("ATTENDANCE_DB_NAME", "attendance"),

@@ -4,5 +4,7 @@
   "texture": 0.85,
   "colorfulness": 0.35,
   "specular_penalty": 1.25,
-  "moire_penalty": 1.45
+  "moire_penalty": 1.45,
+  "screen_penalty": 1.55,
+  "banding_penalty": 0.85
 }

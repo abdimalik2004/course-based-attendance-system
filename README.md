@@ -75,6 +75,11 @@ Set environment variables to override defaults:
 - `ATTENDANCE_CONFIDENCE_THRESHOLD` (LBPH threshold; lower means stricter)
 - `ATTENDANCE_RECOGNIZER` (`lbph` or `facenet`)
 - `ATTENDANCE_EMBEDDING_MIN_SIMILARITY` (FaceNet similarity; higher means stricter)
+- `ATTENDANCE_ANTI_SPOOF_ENABLED` (true/false)
+- `ATTENDANCE_ANTI_SPOOF_THRESHOLD` (live score threshold)
+- `ATTENDANCE_ANTI_SPOOF_REQUIRED_FRAMES` (stabilization window size)
+- `ATTENDANCE_ANTI_SPOOF_MARGIN` (extra average score margin over threshold, default `0.0`)
+- `ATTENDANCE_ANTI_SPOOF_MIN_PASS_RATIO` (fraction of window frames that must pass threshold, default `0.67`)
 - `ATTENDANCE_CAMERA_INDEX`
 - `ATTENDANCE_HAAR_CASCADE_PATH` (optional)
 - `ATTENDANCE_AUTO_SCHEDULE` (true/false to auto-pick course by time)

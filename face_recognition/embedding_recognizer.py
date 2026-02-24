@@ -136,22 +136,29 @@ class FaceEmbeddingRecognizer:
                     is_live, spoof_score = self.anti_spoof.check(frame, (x, y, w, h))
                     student_id = result["student_id"]
                     window = self.spoof_windows[student_id]
-                    window.append(spoof_score)
-                    avg_score = sum(window) / len(window)
+                    if spoof_score > 0.0:
+                        window.append(spoof_score)
+                    window_len = len(window)
+                    avg_score = (sum(window) / window_len) if window_len else 0.0
+                    pass_count = sum(1 for s in window if s >= self.config.anti_spoof_threshold)
+                    pass_ratio = (pass_count / window_len) if window_len else 0.0
                     stable_live = (
-                        len(window) >= self.config.anti_spoof_required_frames
-                        and min(window) >= self.config.anti_spoof_threshold
+                        window_len >= self.config.anti_spoof_required_frames
+                        and pass_ratio >= self.config.anti_spoof_min_pass_ratio
                         and avg_score >= (self.config.anti_spoof_threshold + self.config.anti_spoof_margin)
                     )
 
                     if not is_live or not stable_live:
                         logger.info(
-                            "Anti-spoof failed (score=%.2f avg=%.2f threshold=%.2f need_frames=%d got=%d)",
+                            "Anti-spoof failed (score=%.2f avg=%.2f threshold=%.2f margin=%.2f pass_ratio=%.2f need_ratio=%.2f need_frames=%d got=%d)",
                             spoof_score,
                             avg_score,
                             self.config.anti_spoof_threshold,
+                            self.config.anti_spoof_margin,
+                            pass_ratio,
+                            self.config.anti_spoof_min_pass_ratio,
                             self.config.anti_spoof_required_frames,
-                            len(window),
+                            window_len,
                         )
                         cv2.putText(
                             frame,
