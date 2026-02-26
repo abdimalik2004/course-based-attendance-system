@@ -24,11 +24,13 @@ class AntiSpoofModel:
         self.input_size = int(config.anti_spoof_input_size)
         self.live_index = int(config.anti_spoof_live_index)
         self.use_onnxruntime = bool(config.anti_spoof_use_onnxruntime)
+        self.model_path = str(config.anti_spoof_model_path)
         self.onnx_net = None
         self.ort_session = None
         self.ort_input_name = None
         self.model_input_h = None
         self.model_input_w = None
+        self.active_backend = "disabled" if not self.enabled else "heuristic"
         self.weights = {
             "bias": -0.15,
             "laplacian": 0.95,
@@ -67,6 +69,7 @@ class AntiSpoofModel:
                             self.model_input_h = h
                             self.model_input_w = w
                     onnx_loaded = True
+                    self.active_backend = "onnxruntime"
                     logger.info("Anti-spoof ONNX model loaded via onnxruntime: %s", model_path)
                 except Exception as exc:
                     logger.warning("Failed to load anti-spoof ONNX model via onnxruntime: %s", exc)
@@ -75,6 +78,7 @@ class AntiSpoofModel:
                 try:
                     self.onnx_net = cv2.dnn.readNetFromONNX(str(model_path))
                     onnx_loaded = True
+                    self.active_backend = "opencv_dnn"
                     logger.info("Anti-spoof ONNX model loaded via OpenCV DNN: %s", model_path)
                 except Exception as exc:
                     logger.warning("Failed to load anti-spoof ONNX model via OpenCV DNN: %s", exc)
@@ -94,6 +98,28 @@ class AntiSpoofModel:
                 logger.info("Anti-spoof coefficient model loaded: %s", coeff_path)
             except Exception as exc:
                 logger.warning("Failed to load anti-spoof coefficient model: %s", exc)
+
+    def get_status(self):
+        if not self.enabled:
+            return {
+                "enabled": False,
+                "backend": "disabled",
+                "configured_backend": self.backend,
+                "model_path": self.model_path,
+                "input_size": self.input_size,
+                "live_index": self.live_index,
+                "threshold": self.threshold,
+            }
+
+        return {
+            "enabled": True,
+            "backend": self.active_backend,
+            "configured_backend": self.backend,
+            "model_path": self.model_path,
+            "input_size": self.model_input_h if self.model_input_h else self.input_size,
+            "live_index": self.live_index,
+            "threshold": self.threshold,
+        }
 
     def check(self, frame, bbox):
         if not self.enabled:

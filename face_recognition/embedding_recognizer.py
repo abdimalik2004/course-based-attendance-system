@@ -9,6 +9,7 @@ import torch
 from facenet_pytorch import InceptionResnetV1, MTCNN
 
 from face_recognition.anti_spoof import AntiSpoofModel
+from face_recognition.occlusion import OcclusionChecker
 from utils.logging import get_logger
 
 
@@ -29,6 +30,7 @@ class FaceEmbeddingRecognizer:
         self.mean_embeddings = None
         self.mean_student_ids = None
         self.anti_spoof = AntiSpoofModel(config)
+        self.occlusion = OcclusionChecker(config)
         self.spoof_windows = defaultdict(lambda: deque(maxlen=self.config.anti_spoof_required_frames))
 
     def load_model(self):
@@ -119,6 +121,24 @@ class FaceEmbeddingRecognizer:
             raise RuntimeError("Camera not available")
         self._apply_resolution(cap)
 
+        anti_spoof_status = self.anti_spoof.get_status()
+        logger.info(
+            "Startup status | anti_spoof: enabled=%s backend=%s configured=%s model=%s input=%s live_index=%s threshold=%.2f",
+            anti_spoof_status["enabled"],
+            anti_spoof_status["backend"],
+            anti_spoof_status["configured_backend"],
+            anti_spoof_status["model_path"],
+            anti_spoof_status["input_size"],
+            anti_spoof_status["live_index"],
+            anti_spoof_status["threshold"],
+        )
+        logger.info(
+            "Startup status | occlusion: enabled=%s min_eyes=%d min_eye_variance=%.1f",
+            self.occlusion.enabled,
+            self.occlusion.min_eyes_visible,
+            self.occlusion.min_eye_variance,
+        )
+
         match_counts = {}
         while True:
             if stop_event is not None and stop_event.is_set():
@@ -133,6 +153,20 @@ class FaceEmbeddingRecognizer:
             for result in results:
                 if result["is_known"]:
                     x, y, w, h = result["bbox"]
+                    visible, reason = self.occlusion.check(frame, (x, y, w, h))
+                    if not visible:
+                        logger.info("Occlusion check failed (%s)", reason)
+                        cv2.putText(
+                            frame,
+                            "Face uncovered required",
+                            (x, y + h + 16),
+                            cv2.FONT_HERSHEY_SIMPLEX,
+                            0.5,
+                            (0, 165, 255),
+                            1,
+                        )
+                        continue
+
                     is_live, spoof_score = self.anti_spoof.check(frame, (x, y, w, h))
                     student_id = result["student_id"]
                     window = self.spoof_windows[student_id]
