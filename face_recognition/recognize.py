@@ -77,10 +77,15 @@ class FaceRecognizer:
             anti_spoof_status["threshold"],
         )
         logger.info(
-            "Startup status | occlusion: enabled=%s min_eyes=%d min_eye_variance=%.1f",
+            "Startup status | occlusion: enabled=%s backend=%s requested=%s min_eyes=%d min_eye_variance=%.1f min_lap_var=%.1f min_edge_density=%.2f max_dark_ratio=%.2f",
             self.occlusion.enabled,
+            self.occlusion.backend,
+            self.occlusion.requested_backend,
             self.occlusion.min_eyes_visible,
             self.occlusion.min_eye_variance,
+            self.occlusion.min_laplacian_variance,
+            self.occlusion.min_edge_density,
+            self.occlusion.max_dark_ratio,
         )
 
         match_counts = {}

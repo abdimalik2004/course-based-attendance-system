@@ -32,6 +32,7 @@ class FaceEmbeddingRecognizer:
         self.anti_spoof = AntiSpoofModel(config)
         self.occlusion = OcclusionChecker(config)
         self.spoof_windows = defaultdict(lambda: deque(maxlen=self.config.anti_spoof_required_frames))
+        self.occlusion_windows = defaultdict(lambda: deque(maxlen=self.config.occlusion_required_frames))
 
     def load_model(self):
         embed_path = Path(self.config.embedding_path)
@@ -133,10 +134,17 @@ class FaceEmbeddingRecognizer:
             anti_spoof_status["threshold"],
         )
         logger.info(
-            "Startup status | occlusion: enabled=%s min_eyes=%d min_eye_variance=%.1f",
+            "Startup status | occlusion: enabled=%s backend=%s requested=%s min_eyes=%d min_eye_variance=%.1f min_lap_var=%.1f min_edge_density=%.2f max_dark_ratio=%.2f frames=%d pass_ratio=%.2f",
             self.occlusion.enabled,
+            self.occlusion.backend,
+            self.occlusion.requested_backend,
             self.occlusion.min_eyes_visible,
             self.occlusion.min_eye_variance,
+            self.occlusion.min_laplacian_variance,
+            self.occlusion.min_edge_density,
+            self.occlusion.max_dark_ratio,
+            self.config.occlusion_required_frames,
+            self.config.occlusion_min_pass_ratio,
         )
 
         match_counts = {}
@@ -150,11 +158,24 @@ class FaceEmbeddingRecognizer:
 
             results = self.recognize_frame(frame)
             seen_ids = set()
+            seen_known_ids = set()
             for result in results:
                 if result["is_known"]:
                     x, y, w, h = result["bbox"]
+                    student_id = result["student_id"]
+                    seen_known_ids.add(student_id)
+
                     visible, reason = self.occlusion.check(frame, (x, y, w, h))
-                    if not visible:
+                    occ_window = self.occlusion_windows[student_id]
+                    occ_window.append(1 if visible else 0)
+                    occ_len = len(occ_window)
+                    occ_ratio = (sum(occ_window) / occ_len) if occ_len else 0.0
+                    stable_visible = (
+                        occ_len >= self.config.occlusion_required_frames
+                        and occ_ratio >= self.config.occlusion_min_pass_ratio
+                    )
+
+                    if not visible or not stable_visible:
                         logger.info("Occlusion check failed (%s)", reason)
                         cv2.putText(
                             frame,
@@ -165,10 +186,18 @@ class FaceEmbeddingRecognizer:
                             (0, 165, 255),
                             1,
                         )
+                        logger.info(
+                            "Occlusion gate blocked (student=%s reason=%s pass_ratio=%.2f need_ratio=%.2f need_frames=%d got=%d)",
+                            student_id,
+                            reason,
+                            occ_ratio,
+                            self.config.occlusion_min_pass_ratio,
+                            self.config.occlusion_required_frames,
+                            occ_len,
+                        )
                         continue
 
                     is_live, spoof_score = self.anti_spoof.check(frame, (x, y, w, h))
-                    student_id = result["student_id"]
                     window = self.spoof_windows[student_id]
                     if spoof_score > 0.0:
                         window.append(spoof_score)
@@ -226,6 +255,14 @@ class FaceEmbeddingRecognizer:
             for student_id in list(match_counts.keys()):
                 if student_id not in seen_ids:
                     match_counts.pop(student_id, None)
+
+            for student_id in list(self.spoof_windows.keys()):
+                if student_id not in seen_known_ids:
+                    self.spoof_windows.pop(student_id, None)
+
+            for student_id in list(self.occlusion_windows.keys()):
+                if student_id not in seen_known_ids:
+                    self.occlusion_windows.pop(student_id, None)
 
             if self.config.preview_width and self.config.preview_height:
                 preview = cv2.resize(

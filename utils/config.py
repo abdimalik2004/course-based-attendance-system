@@ -51,8 +51,14 @@ class AppConfig:
     anti_spoof_margin: float
     anti_spoof_min_pass_ratio: float
     occlusion_check_enabled: bool
+    occlusion_backend: str
     occlusion_min_eyes_visible: int
     occlusion_min_eye_variance: float
+    occlusion_min_laplacian_variance: float
+    occlusion_min_edge_density: float
+    occlusion_max_dark_ratio: float
+    occlusion_required_frames: int
+    occlusion_min_pass_ratio: float
     db_host: str
     db_port: int
     db_name: str
@@ -110,8 +116,14 @@ def load_config(base_dir=None):
         anti_spoof_margin=_env_float("ATTENDANCE_ANTI_SPOOF_MARGIN", 0.0),
         anti_spoof_min_pass_ratio=_env_float("ATTENDANCE_ANTI_SPOOF_MIN_PASS_RATIO", 0.67),
         occlusion_check_enabled=_env_bool("ATTENDANCE_OCCLUSION_CHECK_ENABLED", True),
+        occlusion_backend=os.getenv("ATTENDANCE_OCCLUSION_BACKEND", "auto").lower(),
         occlusion_min_eyes_visible=_env_int("ATTENDANCE_OCCLUSION_MIN_EYES_VISIBLE", 2),
         occlusion_min_eye_variance=_env_float("ATTENDANCE_OCCLUSION_MIN_EYE_VARIANCE", 120.0),
+        occlusion_min_laplacian_variance=_env_float("ATTENDANCE_OCCLUSION_MIN_LAPLACIAN_VARIANCE", 35.0),
+        occlusion_min_edge_density=_env_float("ATTENDANCE_OCCLUSION_MIN_EDGE_DENSITY", 0.05),
+        occlusion_max_dark_ratio=_env_float("ATTENDANCE_OCCLUSION_MAX_DARK_RATIO", 0.70),
+        occlusion_required_frames=_env_int("ATTENDANCE_OCCLUSION_REQUIRED_FRAMES", 5),
+        occlusion_min_pass_ratio=_env_float("ATTENDANCE_OCCLUSION_MIN_PASS_RATIO", 0.80),
         db_host=os.getenv("ATTENDANCE_DB_HOST", "localhost"),
         db_port=_env_int("ATTENDANCE_DB_PORT", 3306),
         db_name=os.getenv("ATTENDANCE_DB_NAME", "attendance"),
