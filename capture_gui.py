@@ -24,7 +24,7 @@ class CaptureGUI:
         self.config = load_config()
         setup_logging(self.config.log_file)
 
-        self.detector = FaceDetector(self.config.haar_cascade_path)
+        self.detector = FaceDetector(self.config)
         self.capture_thread = None
         self.stop_event = threading.Event()
 

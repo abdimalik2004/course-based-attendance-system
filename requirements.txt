@@ -9,3 +9,4 @@ Pillow
 pyttsx3
 mediapipe==0.10.14
 onnxruntime
+insightface

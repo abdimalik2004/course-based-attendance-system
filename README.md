@@ -1,10 +1,10 @@
 # Course-Based Attendance System (Face Recognition)
 
-A modular Python system that uses Haar Cascade face detection and LBPH face recognition to mark attendance per course session. The architecture is designed for future expansion to APIs, web or mobile clients, and cloud storage.
+A modular Python system that uses SCRFD face detection (with 5 keypoints) and LBPH/FaceNet recognition to mark attendance per course session. The architecture is designed for future expansion to APIs, web or mobile clients, and cloud storage.
 
 ## Features
 
-- Face detection with Haar Cascade
+- Face detection with SCRFD (+ 5 keypoints)
 - Face recognition with LBPH (OpenCV contrib)
 - Session-based attendance with duplicate prevention
 - SQLite database by default, MySQL-ready abstraction
@@ -81,7 +81,12 @@ Set environment variables to override defaults:
 - `ATTENDANCE_ANTI_SPOOF_MARGIN` (extra average score margin over threshold, default `0.0`)
 - `ATTENDANCE_ANTI_SPOOF_MIN_PASS_RATIO` (fraction of window frames that must pass threshold, default `0.67`)
 - `ATTENDANCE_CAMERA_INDEX`
-- `ATTENDANCE_HAAR_CASCADE_PATH` (optional)
+- `ATTENDANCE_SCRFD_DET_SIZE` (detector input size, e.g. `640`)
+- `ATTENDANCE_SCRFD_THRESHOLD` (SCRFD confidence threshold)
+- `ATTENDANCE_SCRFD_MAX_FACES` (max faces processed per frame)
+- `ATTENDANCE_QUALITY_CHECK_ENABLED` (optional pre-recognition blur/brightness gate)
+- `ATTENDANCE_QUALITY_MIN_BLUR_VARIANCE`
+- `ATTENDANCE_QUALITY_MIN_BRIGHTNESS`, `ATTENDANCE_QUALITY_MAX_BRIGHTNESS`
 - `ATTENDANCE_AUTO_SCHEDULE` (true/false to auto-pick course by time)
 
 ## Course Scheduling

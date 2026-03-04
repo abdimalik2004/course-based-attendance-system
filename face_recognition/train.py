@@ -4,8 +4,7 @@ from pathlib import Path
 import cv2
 import numpy as np
 import torch
-from PIL import Image
-from facenet_pytorch import InceptionResnetV1, MTCNN
+from facenet_pytorch import InceptionResnetV1
 
 from face_recognition.detector import FaceDetector
 from utils.logging import get_logger
@@ -21,7 +20,7 @@ def _largest_face(faces):
 
 
 def train_from_dataset(config):
-    detector = FaceDetector(config.haar_cascade_path)
+    detector = FaceDetector(config)
     label_map = {"labels": {}, "students": {}}
     faces_data = []
     labels = []
@@ -72,12 +71,7 @@ def train_from_dataset(config):
 
 def train_embeddings_from_dataset(config):
     device = torch.device("cpu")
-    mtcnn = MTCNN(
-        image_size=160,
-        margin=0,
-        min_face_size=max(20, int(config.min_face_size)),
-        device=device,
-    )
+    detector = FaceDetector(config)
     model = InceptionResnetV1(pretrained="vggface2").eval().to(device)
 
     dataset_dir = Path(config.dataset_dir)
@@ -95,22 +89,35 @@ def train_embeddings_from_dataset(config):
             image = cv2.imread(str(img_path))
             if image is None:
                 continue
-            rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
-            pil_img = Image.fromarray(rgb)
-            boxes, _ = mtcnn.detect(pil_img)
-            if boxes is None or len(boxes) == 0:
+            _, detections = detector.detect_with_keypoints(image)
+            if detections is None or len(detections) == 0:
                 continue
-            box = max(boxes, key=lambda b: (b[2] - b[0]) * (b[3] - b[1]))
-            box = np.expand_dims(box, axis=0)
-            faces = mtcnn.extract(pil_img, box, save_path=None)
-            if faces is None or len(faces) == 0:
+
+            det = max(detections, key=lambda d: d["bbox"][2] * d["bbox"][3])
+            x, y, w, h = det["bbox"]
+            quality_ok, _ = detector.passes_quality(image, (x, y, w, h))
+            if not quality_ok:
                 continue
+
+            h_img, w_img = image.shape[:2]
+            x1 = max(0, x)
+            y1 = max(0, y)
+            x2 = min(w_img, x + w)
+            y2 = min(h_img, y + h)
+            if x2 <= x1 or y2 <= y1:
+                continue
+
+            face = image[y1:y2, x1:x2]
+            if face.size == 0:
+                continue
+
+            resized = cv2.resize(face, (160, 160), interpolation=cv2.INTER_AREA)
+            rgb = cv2.cvtColor(resized, cv2.COLOR_BGR2RGB).astype(np.float32)
+            norm = (rgb - 127.5) / 128.0
+            face_tensor = torch.from_numpy(np.transpose(norm, (2, 0, 1))).unsqueeze(0)
+
             with torch.no_grad():
-                if isinstance(faces, list):
-                    faces = faces[0]
-                if faces.dim() == 3:
-                    faces = faces.unsqueeze(0)
-                emb = model(faces.to(device)).cpu().numpy()[0]
+                emb = model(face_tensor.to(device)).cpu().numpy()[0]
             emb = emb / (np.linalg.norm(emb) + 1e-12)
             embeddings.append(emb)
             student_ids.append(student_id)

@@ -18,7 +18,7 @@ logger = get_logger(__name__)
 class FaceRecognizer:
     def __init__(self, config):
         self.config = config
-        self.detector = FaceDetector(config.haar_cascade_path)
+        self.detector = FaceDetector(config)
         self.recognizer = cv2.face.LBPHFaceRecognizer_create()
         self.label_map = {}
         self.anti_spoof = AntiSpoofModel(config)
@@ -64,6 +64,7 @@ class FaceRecognizer:
         if not cap.isOpened():
             raise RuntimeError("Camera not available")
         self._apply_resolution(cap)
+        self._ensure_display_available()
 
         anti_spoof_status = self.anti_spoof.get_status()
         logger.info(
@@ -112,6 +113,20 @@ class FaceRecognizer:
                         "Face too small for reliable match (size=%dx%d)",
                         w,
                         h,
+                    )
+                    continue
+
+                quality_ok, quality_reason = self.detector.passes_quality(frame, (x, y, w, h))
+                if not quality_ok:
+                    logger.info("Quality check failed (%s)", quality_reason)
+                    cv2.putText(
+                        frame,
+                        "Improve lighting/focus",
+                        (x, y + h + 16),
+                        cv2.FONT_HERSHEY_SIMPLEX,
+                        0.5,
+                        (0, 165, 255),
+                        1,
                     )
                     continue
 
@@ -193,7 +208,6 @@ class FaceRecognizer:
                 if student_id not in seen_ids:
                     match_counts.pop(student_id, None)
 
-            cv2.imshow(f"Attendance - {course_id}", frame)
             if self.config.preview_width and self.config.preview_height:
                 preview = cv2.resize(
                     frame,
@@ -230,3 +244,15 @@ class FaceRecognizer:
             ok, _ = cap.read()
             if ok:
                 return
+
+    def _ensure_display_available(self):
+        try:
+            cv2.namedWindow("__attendance_display_test__", cv2.WINDOW_NORMAL)
+            cv2.destroyWindow("__attendance_display_test__")
+        except cv2.error as exc:
+            raise RuntimeError(
+                "OpenCV GUI backend is not available in this environment. "
+                "Install GUI-enabled OpenCV in your venv: "
+                "pip uninstall -y opencv-python-headless opencv-python opencv-contrib-python-headless && "
+                "pip install opencv-contrib-python"
+            ) from exc

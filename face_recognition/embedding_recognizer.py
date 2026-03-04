@@ -4,11 +4,11 @@ from collections import defaultdict, deque
 
 import cv2
 import numpy as np
-from PIL import Image
 import torch
-from facenet_pytorch import InceptionResnetV1, MTCNN
+from facenet_pytorch import InceptionResnetV1
 
 from face_recognition.anti_spoof import AntiSpoofModel
+from face_recognition.detector import FaceDetector
 from face_recognition.occlusion import OcclusionChecker
 from utils.logging import get_logger
 
@@ -20,12 +20,7 @@ class FaceEmbeddingRecognizer:
     def __init__(self, config):
         self.config = config
         self.device = torch.device("cpu")
-        self.mtcnn = MTCNN(
-            image_size=160,
-            margin=0,
-            min_face_size=max(20, int(config.min_face_size)),
-            device=self.device,
-        )
+        self.detector = FaceDetector(config)
         self.model = InceptionResnetV1(pretrained="vggface2").eval().to(self.device)
         self.mean_embeddings = None
         self.mean_student_ids = None
@@ -62,32 +57,13 @@ class FaceEmbeddingRecognizer:
         self.mean_student_ids = mean_student_ids
 
     def recognize_frame(self, frame):
-        rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-        image = Image.fromarray(rgb)
-        boxes, _ = self.mtcnn.detect(image)
+        _, detections = self.detector.detect_with_keypoints(frame)
         results = []
-        if boxes is None or len(boxes) == 0:
+        if detections is None or len(detections) == 0:
             return results
 
-        faces = self.mtcnn.extract(image, boxes, save_path=None)
-        if faces is None or len(faces) == 0:
-            return results
-
-        if isinstance(faces, list):
-            faces = torch.stack(faces, dim=0)
-        if faces.dim() == 3:
-            faces = faces.unsqueeze(0)
-
-        with torch.no_grad():
-            embeddings = self.model(faces.to(self.device)).cpu().numpy()
-
-        if embeddings.ndim == 1:
-            embeddings = embeddings.reshape(1, -1)
-
-        for box, emb in zip(boxes, embeddings):
-            x1, y1, x2, y2 = box.astype(int).tolist()
-            w = max(0, x2 - x1)
-            h = max(0, y2 - y1)
+        for detection in detections:
+            x1, y1, w, h = detection["bbox"]
             if w < self.config.min_face_size or h < self.config.min_face_size:
                 results.append(
                     {
@@ -98,6 +74,33 @@ class FaceEmbeddingRecognizer:
                     }
                 )
                 continue
+
+            quality_ok, _ = self.detector.passes_quality(frame, (x1, y1, w, h))
+            if not quality_ok:
+                results.append(
+                    {
+                        "bbox": (x1, y1, w, h),
+                        "student_id": None,
+                        "confidence": 0.0,
+                        "is_known": False,
+                    }
+                )
+                continue
+
+            face_tensor = self._extract_face_tensor(frame, (x1, y1, w, h))
+            if face_tensor is None:
+                results.append(
+                    {
+                        "bbox": (x1, y1, w, h),
+                        "student_id": None,
+                        "confidence": 0.0,
+                        "is_known": False,
+                    }
+                )
+                continue
+
+            with torch.no_grad():
+                emb = self.model(face_tensor.to(self.device)).cpu().numpy()[0]
 
             emb = emb / (np.linalg.norm(emb) + 1e-12)
             scores = np.dot(self.mean_embeddings, emb)
@@ -115,12 +118,33 @@ class FaceEmbeddingRecognizer:
             )
         return results
 
+    def _extract_face_tensor(self, frame, bbox):
+        x, y, w, h = bbox
+        h_img, w_img = frame.shape[:2]
+        x1 = max(0, x)
+        y1 = max(0, y)
+        x2 = min(w_img, x + w)
+        y2 = min(h_img, y + h)
+        if x2 <= x1 or y2 <= y1:
+            return None
+
+        face = frame[y1:y2, x1:x2]
+        if face.size == 0:
+            return None
+
+        resized = cv2.resize(face, (160, 160), interpolation=cv2.INTER_AREA)
+        rgb = cv2.cvtColor(resized, cv2.COLOR_BGR2RGB).astype(np.float32)
+        norm = (rgb - 127.5) / 128.0
+        tensor = torch.from_numpy(np.transpose(norm, (2, 0, 1))).unsqueeze(0)
+        return tensor
+
     def run_webcam(self, course_id, on_recognized, camera_index=None, stop_event=None):
         index = self.config.camera_index if camera_index is None else camera_index
         cap = self._open_camera(index)
         if not cap.isOpened():
             raise RuntimeError("Camera not available")
         self._apply_resolution(cap)
+        self._ensure_display_available()
 
         anti_spoof_status = self.anti_spoof.get_status()
         logger.info(
@@ -175,7 +199,17 @@ class FaceEmbeddingRecognizer:
                         and occ_ratio >= self.config.occlusion_min_pass_ratio
                     )
 
-                    if not visible or not stable_visible:
+                    # Recovery behavior:
+                    # - If current frame is visible, allow recognition immediately.
+                    # - If current frame is not visible, block only when occlusion is persistent.
+                    should_block_occlusion = False
+                    if not visible:
+                        if occ_len < self.config.occlusion_required_frames:
+                            should_block_occlusion = True
+                        else:
+                            should_block_occlusion = not stable_visible
+
+                    if should_block_occlusion:
                         logger.info("Occlusion check failed (%s)", reason)
                         cv2.putText(
                             frame,
@@ -300,3 +334,15 @@ class FaceEmbeddingRecognizer:
             ok, _ = cap.read()
             if ok:
                 return
+
+    def _ensure_display_available(self):
+        try:
+            cv2.namedWindow("__attendance_display_test__", cv2.WINDOW_NORMAL)
+            cv2.destroyWindow("__attendance_display_test__")
+        except cv2.error as exc:
+            raise RuntimeError(
+                "OpenCV GUI backend is not available in this environment. "
+                "Install GUI-enabled OpenCV in your venv: "
+                "pip uninstall -y opencv-python-headless opencv-python opencv-contrib-python-headless && "
+                "pip install opencv-contrib-python"
+            ) from exc

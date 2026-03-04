@@ -10,7 +10,7 @@ logger = get_logger(__name__)
 
 
 def validate_dataset(config):
-    detector = FaceDetector(config.haar_cascade_path)
+    detector = FaceDetector(config)
     dataset_dir = Path(config.dataset_dir)
     if not dataset_dir.exists():
         raise RuntimeError(f"Dataset folder not found: {dataset_dir}")

@@ -64,7 +64,13 @@ class AppConfig:
     db_name: str
     db_user: str
     db_password: str
-    haar_cascade_path: str
+    scrfd_det_size: int
+    scrfd_threshold: float
+    scrfd_max_faces: int
+    quality_check_enabled: bool
+    quality_min_blur_variance: float
+    quality_min_brightness: float
+    quality_max_brightness: float
     confidence_threshold: float
     embedding_min_similarity: float
     min_face_size: int
@@ -129,7 +135,13 @@ def load_config(base_dir=None):
         db_name=os.getenv("ATTENDANCE_DB_NAME", "attendance"),
         db_user=os.getenv("ATTENDANCE_DB_USER", "root"),
         db_password=os.getenv("ATTENDANCE_DB_PASSWORD", ""),
-        haar_cascade_path=os.getenv("ATTENDANCE_HAAR_CASCADE_PATH", ""),
+        scrfd_det_size=_env_int("ATTENDANCE_SCRFD_DET_SIZE", 640),
+        scrfd_threshold=_env_float("ATTENDANCE_SCRFD_THRESHOLD", 0.50),
+        scrfd_max_faces=_env_int("ATTENDANCE_SCRFD_MAX_FACES", 20),
+        quality_check_enabled=_env_bool("ATTENDANCE_QUALITY_CHECK_ENABLED", False),
+        quality_min_blur_variance=_env_float("ATTENDANCE_QUALITY_MIN_BLUR_VARIANCE", 60.0),
+        quality_min_brightness=_env_float("ATTENDANCE_QUALITY_MIN_BRIGHTNESS", 45.0),
+        quality_max_brightness=_env_float("ATTENDANCE_QUALITY_MAX_BRIGHTNESS", 210.0),
         confidence_threshold=_env_float("ATTENDANCE_CONFIDENCE_THRESHOLD", 60.0),
         embedding_min_similarity=_env_float("ATTENDANCE_EMBEDDING_MIN_SIMILARITY", 0.6),
         min_face_size=_env_int("ATTENDANCE_MIN_FACE_SIZE", 60),

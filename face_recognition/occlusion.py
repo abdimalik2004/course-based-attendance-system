@@ -19,7 +19,6 @@ class OcclusionChecker:
         self.min_laplacian_variance = float(getattr(config, "occlusion_min_laplacian_variance", 35.0))
         self.min_edge_density = float(getattr(config, "occlusion_min_edge_density", 0.05))
         self.max_dark_ratio = float(getattr(config, "occlusion_max_dark_ratio", 0.70))
-        self.eye_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + "haarcascade_eye.xml")
         self.face_mesh = None
 
         if self.requested_backend in {"auto", "mediapipe"} and mp is not None:
@@ -31,7 +30,7 @@ class OcclusionChecker:
                 min_tracking_confidence=0.5,
             )
 
-        self.backend = "mediapipe" if self.face_mesh is not None else "haar"
+        self.backend = "mediapipe" if self.face_mesh is not None else "heuristic"
 
     def check(self, frame, bbox):
         if not self.enabled:
@@ -45,9 +44,40 @@ class OcclusionChecker:
         if self.face_mesh is not None:
             mp_result = self._check_mediapipe(frame, gray, bbox)
             if mp_result is not None:
+                if mp_result[0]:
+                    return mp_result
+
+                # If MediaPipe flags occlusion, try a relaxed uncovered-face hint
+                # to avoid false rejection after glasses removal.
+                if self._uncovered_face_hint(gray, bbox):
+                    return True, "ok_relaxed_uncovered"
                 return mp_result
 
-        return self._check_haar(gray, bbox)
+        # When MediaPipe is unavailable, use lightweight heuristic fallback.
+        if self._uncovered_face_hint(gray, bbox):
+            return True, "ok_heuristic"
+        return False, "eyes_covered_heuristic"
+
+    def _uncovered_face_hint(self, gray, bbox):
+        x, y, w, h = bbox
+        face_roi = gray[y : y + h, x : x + w]
+        if face_roi.size == 0:
+            return False
+
+        top = int(h * 0.20)
+        bottom = int(h * 0.58)
+        left = int(w * 0.15)
+        right = int(w * 0.85)
+        eye_band = face_roi[top:bottom, left:right]
+        if eye_band.size == 0:
+            return False
+
+        lap = cv2.Laplacian(eye_band, cv2.CV_64F)
+        lap_var = float(np.var(lap))
+        dark_ratio = float(np.mean(eye_band < 50))
+
+        # Heuristic: uncovered eyes usually keep moderate texture and are not heavily dark.
+        return lap_var >= 12.0 and dark_ratio <= 0.60
 
     def _check_mediapipe(self, frame, gray, bbox):
         x, y, w, h = bbox
@@ -144,36 +174,6 @@ class OcclusionChecker:
         if roi.size == 0:
             return None
         return roi
-
-    def _check_haar(self, gray, bbox):
-        x, y, w, h = bbox
-        face_roi = gray[y : y + h, x : x + w]
-        if face_roi.size == 0:
-            return False, "empty_face"
-
-        min_eye = max(10, int(min(w, h) * 0.12))
-        eyes = self.eye_cascade.detectMultiScale(
-            face_roi,
-            scaleFactor=1.1,
-            minNeighbors=6,
-            minSize=(min_eye, min_eye),
-        )
-
-        valid_eyes = []
-        upper_limit = int(h * 0.65)
-        for (ex, ey, ew, eh) in eyes:
-            if ey + eh > upper_limit:
-                continue
-            eye_roi = face_roi[ey : ey + eh, ex : ex + ew]
-            if not self._eye_quality_ok(eye_roi):
-                continue
-
-            valid_eyes.append((ex, ey, ew, eh))
-
-        if len(valid_eyes) < self.min_eyes_visible:
-            return False, "eyes_covered_haar"
-
-        return True, "ok_haar"
 
     def _eye_quality_ok(self, eye_roi):
         if eye_roi is None or eye_roi.size == 0:
