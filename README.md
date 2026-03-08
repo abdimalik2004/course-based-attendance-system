@@ -4,9 +4,9 @@ An intelligent, course-aware attendance platform that combines modern face detec
 
 ## Overview
 
-This project evolved from a prototype into a layered biometric pipeline. It now uses SCRFD for robust face detection and keypoints, applies occlusion and anti-spoof validation, then performs FaceNet embedding recognition before attendance is written to the database.
+This project evolved from a prototype into a layered AI attendance pipeline. The active production flow uses SCRFD for face detection/alignment, then security gates (anti-spoof and occlusion), then FaceNet embedding recognition before attendance validation and storage.
 
-The system supports both CLI and GUI workflows, multi-student environments, and configurable thresholds via `.env` for different classrooms and camera setups.
+The system supports both CLI and GUI workflows, multi-student environments, and configurable thresholds via `.env` for different classrooms and camera setups. LBPH mode remains available as a lightweight fallback, but FaceNet is the primary recognition path.
 
 ## System Architecture
 
@@ -28,7 +28,35 @@ Attendance Logic
 Database Storage
 ```
 
-The pipeline first detects and aligns faces using SCRFD with 5-point landmarks. Each candidate face is then validated with anti-spoof and occlusion checks to reduce spoof or covered-face errors before final recognition. FaceNet embeddings are matched against enrolled student vectors, then attendance rules (`on_time`, `late`, `absent`) are applied and stored.
+The pipeline first detects and aligns faces using SCRFD with 5-point landmarks. Each candidate face is validated through anti-spoof and occlusion gates to reduce spoof and covered-face errors before final recognition. FaceNet embeddings are matched against enrolled student vectors, then attendance rules (`on_time`, `late`, `absent`) are applied and stored.
+
+## Recognition Pipeline
+
+```text
+Camera Frame
+  ↓
+SCRFD Face Detection
+  ↓
+Face Alignment (5 landmarks)
+  ↓
+MiniFASNet Anti-Spoof
+  ↓
+Occlusion Check
+  ↓
+FaceNet / LBPH Recognition
+  ↓
+Attendance Validation
+  ↓
+Database Storage
+```
+
+Pipeline meaning:
+
+- `SCRFD`: detects multiple faces and provides stable keypoints.
+- `Anti-Spoof`: filters fake inputs such as printed/photo/screen attacks.
+- `Occlusion`: checks whether facial visibility is sufficient for reliable identity matching.
+- `FaceNet/LBPH`: performs identity recognition (FaceNet primary, LBPH optional fallback).
+- `Attendance Validation`: enforces enrollment and session-time rules before saving.
 
 Architecture step summary:
 
@@ -45,14 +73,16 @@ Architecture step summary:
 
 - Course-based automated attendance system
 - SCRFD face detection with 5-point alignment
-- FaceNet deep learning recognition with embedding index
+- FaceNet deep learning recognition with embedding index (primary)
 - LBPH recognition path available as lightweight fallback
 - MiniFASNet ONNX anti-spoof protection
-- Occlusion detection (sunglasses/partial eye coverage handling)
-- Multi-frame verification for stable anti-spoof decisions
-- Configurable runtime thresholds using `.env`
+- Occlusion detection and stability checks (sunglasses/partial eye coverage)
+- Multi-frame verification for stable security decisions
+- Session-based attendance validation with duplicate prevention
 - Auto session scheduling from course timetable
 - Multi-face detection support in real time
+- Preview and quality-check tuning for different camera environments
+- Configurable runtime thresholds using `.env`
 - Desktop enrollment and attendance interfaces
 - Modular architecture ready for API/web expansion
 
@@ -105,23 +135,69 @@ pip install -r requirements.txt
 
 ## Configuration (.env)
 
-Important runtime behavior is controlled in `.env`. These are the core variables used most often during tuning:
+Important runtime behavior is controlled in `.env` and grouped by subsystem.
 
-| Variable                                | Description                                   |
-| --------------------------------------- | --------------------------------------------- |
-| `ATTENDANCE_RECOGNIZER`                 | Recognition mode: `facenet` or `lbph`         |
-| `ATTENDANCE_EMBEDDING_MIN_SIMILARITY`   | Minimum FaceNet similarity to accept identity |
-| `ATTENDANCE_ANTI_SPOOF_ENABLED`         | Enable/disable anti-spoof validation          |
-| `ATTENDANCE_ANTI_SPOOF_THRESHOLD`       | Minimum liveness confidence threshold         |
-| `ATTENDANCE_ANTI_SPOOF_REQUIRED_FRAMES` | Frame window size for stable spoof decision   |
-| `ATTENDANCE_OCCLUSION_CHECK_ENABLED`    | Enable/disable occlusion validation           |
-| `ATTENDANCE_OCCLUSION_BACKEND`          | Occlusion backend mode                        |
-| `ATTENDANCE_MIN_FACE_SIZE`              | Minimum face size to process                  |
-| `ATTENDANCE_SCRFD_DET_SIZE`             | SCRFD detector input size                     |
-| `ATTENDANCE_SCRFD_THRESHOLD`            | SCRFD detection confidence threshold          |
-| `ATTENDANCE_SCRFD_MAX_FACES`            | Max faces processed per frame                 |
-| `ATTENDANCE_QUALITY_CHECK_ENABLED`      | Optional blur/brightness quality gate         |
-| `ATTENDANCE_AUTO_SCHEDULE`              | Automatically pick active course/session      |
+Database:
+
+| Variable                                                           | Description                           |
+| ------------------------------------------------------------------ | ------------------------------------- |
+| `ATTENDANCE_DB_TYPE`                                               | Database engine (`sqlite` or `mysql`) |
+| `ATTENDANCE_DB_HOST` `ATTENDANCE_DB_PORT`                          | MySQL host and port                   |
+| `ATTENDANCE_DB_NAME` `ATTENDANCE_DB_USER` `ATTENDANCE_DB_PASSWORD` | MySQL credentials                     |
+
+Recognition:
+
+| Variable                              | Description                                   |
+| ------------------------------------- | --------------------------------------------- |
+| `ATTENDANCE_RECOGNIZER`               | Recognition mode (`facenet` or `lbph`)        |
+| `ATTENDANCE_EMBEDDING_MIN_SIMILARITY` | Minimum FaceNet similarity to accept identity |
+| `ATTENDANCE_CONFIDENCE_THRESHOLD`     | LBPH threshold (distance-based)               |
+| `ATTENDANCE_MIN_FACE_SIZE`            | Minimum face size to process                  |
+
+Anti-Spoof:
+
+| Variable                                | Description                      |
+| --------------------------------------- | -------------------------------- |
+| `ATTENDANCE_ANTI_SPOOF_ENABLED`         | Enable/disable anti-spoof checks |
+| `ATTENDANCE_ANTI_SPOOF_MODEL_PATH`      | MiniFASNet ONNX model path       |
+| `ATTENDANCE_ANTI_SPOOF_THRESHOLD`       | Minimum liveness score           |
+| `ATTENDANCE_ANTI_SPOOF_REQUIRED_FRAMES` | Frame window for stable decision |
+| `ATTENDANCE_ANTI_SPOOF_MIN_PASS_RATIO`  | Minimum passing-frame ratio      |
+
+Occlusion:
+
+| Variable                                | Description                          |
+| --------------------------------------- | ------------------------------------ |
+| `ATTENDANCE_OCCLUSION_CHECK_ENABLED`    | Enable/disable occlusion checks      |
+| `ATTENDANCE_OCCLUSION_BACKEND`          | Occlusion backend mode               |
+| `ATTENDANCE_OCCLUSION_MIN_EYES_VISIBLE` | Required visible eyes                |
+| `ATTENDANCE_OCCLUSION_REQUIRED_FRAMES`  | Frame window for occlusion stability |
+| `ATTENDANCE_OCCLUSION_MIN_PASS_RATIO`   | Minimum visible-frame ratio          |
+
+Quality:
+
+| Variable                               | Description                           |
+| -------------------------------------- | ------------------------------------- |
+| `ATTENDANCE_QUALITY_CHECK_ENABLED`     | Optional pre-recognition quality gate |
+| `ATTENDANCE_QUALITY_MIN_BLUR_VARIANCE` | Minimum sharpness requirement         |
+| `ATTENDANCE_QUALITY_MIN_BRIGHTNESS`    | Minimum brightness level              |
+| `ATTENDANCE_QUALITY_MAX_BRIGHTNESS`    | Maximum brightness level              |
+
+Detector:
+
+| Variable                     | Description                          |
+| ---------------------------- | ------------------------------------ |
+| `ATTENDANCE_SCRFD_DET_SIZE`  | SCRFD detector input size            |
+| `ATTENDANCE_SCRFD_THRESHOLD` | SCRFD detection confidence threshold |
+| `ATTENDANCE_SCRFD_MAX_FACES` | Maximum faces processed per frame    |
+
+Scheduling and camera:
+
+| Variable                                               | Description                                    |
+| ------------------------------------------------------ | ---------------------------------------------- |
+| `ATTENDANCE_AUTO_SCHEDULE`                             | Auto-select active course/session by timetable |
+| `ATTENDANCE_CAMERA_WIDTH` `ATTENDANCE_CAMERA_HEIGHT`   | Camera capture resolution                      |
+| `ATTENDANCE_PREVIEW_WIDTH` `ATTENDANCE_PREVIEW_HEIGHT` | Preview window size                            |
 
 Recommended tuning approach:
 
@@ -137,6 +213,11 @@ Train model data:
 ```bash
 python main.py train
 ```
+
+Training output by mode:
+
+- When `ATTENDANCE_RECOGNIZER=facenet`: training builds `models/face_embeddings.npz`.
+- When `ATTENDANCE_RECOGNIZER=lbph`: training builds `models/lbph_trainer.yml` and `models/label_map.json`.
 
 Validate dataset images:
 
