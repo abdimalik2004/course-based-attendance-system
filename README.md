@@ -1,102 +1,175 @@
-# Course-Based Attendance System (Face Recognition)
+# Course-Based Attendance System
 
-A modular Python system that uses SCRFD face detection (with 5 keypoints) and LBPH/FaceNet recognition to mark attendance per course session. The architecture is designed for future expansion to APIs, web or mobile clients, and cloud storage.
+An intelligent, course-aware attendance platform that combines modern face detection, anti-spoof security, occlusion checks, and deep recognition to mark attendance in real time.
 
-## Features
+## Overview
 
-- Face detection with SCRFD (+ 5 keypoints)
-- Face recognition with LBPH (OpenCV contrib)
-- Session-based attendance with duplicate prevention
-- SQLite database by default, MySQL-ready abstraction
-- Configurable via environment variables
-- File logging for audit trails
+This project evolved from a prototype into a layered biometric pipeline. It now uses SCRFD for robust face detection and keypoints, applies occlusion and anti-spoof validation, then performs FaceNet embedding recognition before attendance is written to the database.
 
-## Dataset Structure
+The system supports both CLI and GUI workflows, multi-student environments, and configurable thresholds via `.env` for different classrooms and camera setups.
 
+## System Architecture
+
+```text
+Camera Frame
+  ↓
+SCRFD Face Detection
+  ↓
+Face Alignment (5 keypoints)
+  ↓
+Occlusion Detection
+  ↓
+MiniFASNet Anti-Spoof Model
+  ↓
+FaceNet Embedding Recognition
+  ↓
+Attendance Logic
+  ↓
+Database Storage
 ```
-dataset/
-  student_id/
-    img1.jpg
-    img2.jpg
+
+The pipeline first detects and localizes faces using SCRFD. Each detected face is checked for visibility/occlusion and liveness to block spoof attacks (photo/video/screen). Only then does FaceNet matching run, and successful identities are processed by attendance rules (`on_time`, `late`, `absent`) and saved.
+
+## Key Features
+
+- Course-based automated attendance system
+- SCRFD face detection with 5-point alignment
+- FaceNet deep learning recognition with embedding index
+- LBPH recognition path available as lightweight fallback
+- MiniFASNet ONNX anti-spoof protection
+- Occlusion detection (sunglasses/partial eye coverage handling)
+- Multi-frame verification for stable anti-spoof decisions
+- Configurable runtime thresholds using `.env`
+- Auto session scheduling from course timetable
+- Multi-face detection support in real time
+- Desktop enrollment and attendance interfaces
+- Modular architecture ready for API/web expansion
+
+## Project Structure
+
+```text
+attendance_system/
+├── api/                     # Future backend integration
+├── attendance/              # Attendance rules and marking logic
+├── database/                # DB access layer + SQL schemas
+├── dataset/                 # Student face images (training input)
+├── face_recognition/        # Detection, recognition, anti-spoof, occlusion
+│   ├── anti_spoof.py
+│   ├── detector.py
+│   ├── embedding_recognizer.py
+│   ├── occlusion.py
+│   ├── recognize.py
+│   ├── train.py
+│   └── validate_dataset.py
+├── models/                  # Trained and inference models
+├── utils/                   # Config/logging/TTS helpers
+├── capture_gui.py           # Student image enrollment GUI
+├── gui.py                   # Desktop admin GUI
+├── main.py                  # Main CLI entry point
+├── requirements.txt
+└── README.md
 ```
 
-Folder name is the student ID. Images are read dynamically during training.
+## Installation
 
-## Setup
-
-1. Create a virtual environment and install dependencies:
-
+```bash
+git clone https://github.com/abdimalik2004/course-based-attendance-system.git
+cd course-based-attendance-system/attendance_system
+python -m venv .venv
 ```
+
+Windows:
+
+```powershell
+.venv\Scripts\Activate.ps1
 pip install -r requirements.txt
 ```
 
-2. Create the database schema (auto-run on first launch):
+Linux/macOS:
 
-- SQLite uses [attendance_system/database/schema_sqlite.sql](attendance_system/database/schema_sqlite.sql).
-- MySQL uses [attendance_system/database/schema_mysql.sql](attendance_system/database/schema_mysql.sql).
-
-3. Prepare the dataset in [attendance_system/dataset](attendance_system/dataset).
-
-## Train
-
+```bash
+source .venv/bin/activate
+pip install -r requirements.txt
 ```
+
+## Configuration (.env)
+
+Important runtime behavior is controlled in `.env`.
+
+| Variable                                | Description                                   |
+| --------------------------------------- | --------------------------------------------- |
+| `ATTENDANCE_RECOGNIZER`                 | Recognition mode: `facenet` or `lbph`         |
+| `ATTENDANCE_EMBEDDING_MIN_SIMILARITY`   | Minimum FaceNet similarity to accept identity |
+| `ATTENDANCE_ANTI_SPOOF_ENABLED`         | Enable/disable anti-spoof validation          |
+| `ATTENDANCE_ANTI_SPOOF_THRESHOLD`       | Minimum liveness confidence threshold         |
+| `ATTENDANCE_ANTI_SPOOF_REQUIRED_FRAMES` | Frame window size for stable spoof decision   |
+| `ATTENDANCE_OCCLUSION_CHECK_ENABLED`    | Enable/disable occlusion validation           |
+| `ATTENDANCE_OCCLUSION_BACKEND`          | Occlusion backend mode                        |
+| `ATTENDANCE_MIN_FACE_SIZE`              | Minimum face size to process                  |
+| `ATTENDANCE_SCRFD_DET_SIZE`             | SCRFD detector input size                     |
+| `ATTENDANCE_SCRFD_THRESHOLD`            | SCRFD detection confidence threshold          |
+| `ATTENDANCE_SCRFD_MAX_FACES`            | Max faces processed per frame                 |
+| `ATTENDANCE_QUALITY_CHECK_ENABLED`      | Optional blur/brightness quality gate         |
+| `ATTENDANCE_AUTO_SCHEDULE`              | Automatically pick active course/session      |
+
+## Usage
+
+Train model data:
+
+```bash
 python main.py train
 ```
 
-## Validate Dataset Images
+Validate dataset images:
 
-```
+```bash
 python main.py validate-dataset
 ```
 
-This reports which images did not yield a detectable face.
+Run attendance recognition (auto schedule):
 
-This writes the LBPH model to [attendance_system/models/lbph_trainer.yml](attendance_system/models/lbph_trainer.yml) and label mapping to `models/label_map.json`.
-
-## Recognize and Mark Attendance
-
-```
-python main.py recognize --course-id CSC101 --session-label lecture-1
+```bash
+python main.py recognize --auto-schedule --camera-index 1
 ```
 
-## GUI (Admin + Recognition)
+Run attendance recognition (manual course/session):
 
+```bash
+python main.py recognize --course-id CSC101 --session-label lecture-1 --camera-index 0
 ```
+
+Launch GUIs:
+
+```bash
 python gui.py
+python capture_gui.py
 ```
 
-## Configuration
+## Models Used
 
-Set environment variables to override defaults:
+- `models/anti_spoof_minifasnet.onnx` for anti-spoof inference
+- `models/anti_spoof.json` for heuristic fallback coefficients
+- `models/face_embeddings.npz` for FaceNet identity embeddings
+- `models/lbph_trainer.yml` for LBPH recognizer fallback path
+- `models/label_map.json` for label-to-student mapping
 
-- `ATTENDANCE_DB_TYPE` (sqlite or mysql)
-- `ATTENDANCE_DB_PATH` (for sqlite)
-- `ATTENDANCE_DB_HOST`, `ATTENDANCE_DB_PORT`, `ATTENDANCE_DB_NAME`, `ATTENDANCE_DB_USER`, `ATTENDANCE_DB_PASSWORD`
-- `ATTENDANCE_CONFIDENCE_THRESHOLD` (LBPH threshold; lower means stricter)
-- `ATTENDANCE_RECOGNIZER` (`lbph` or `facenet`)
-- `ATTENDANCE_EMBEDDING_MIN_SIMILARITY` (FaceNet similarity; higher means stricter)
-- `ATTENDANCE_ANTI_SPOOF_ENABLED` (true/false)
-- `ATTENDANCE_ANTI_SPOOF_THRESHOLD` (live score threshold)
-- `ATTENDANCE_ANTI_SPOOF_REQUIRED_FRAMES` (stabilization window size)
-- `ATTENDANCE_ANTI_SPOOF_MARGIN` (extra average score margin over threshold, default `0.0`)
-- `ATTENDANCE_ANTI_SPOOF_MIN_PASS_RATIO` (fraction of window frames that must pass threshold, default `0.67`)
-- `ATTENDANCE_CAMERA_INDEX`
-- `ATTENDANCE_SCRFD_DET_SIZE` (detector input size, e.g. `640`)
-- `ATTENDANCE_SCRFD_THRESHOLD` (SCRFD confidence threshold)
-- `ATTENDANCE_SCRFD_MAX_FACES` (max faces processed per frame)
-- `ATTENDANCE_QUALITY_CHECK_ENABLED` (optional pre-recognition blur/brightness gate)
-- `ATTENDANCE_QUALITY_MIN_BLUR_VARIANCE`
-- `ATTENDANCE_QUALITY_MIN_BRIGHTNESS`, `ATTENDANCE_QUALITY_MAX_BRIGHTNESS`
-- `ATTENDANCE_AUTO_SCHEDULE` (true/false to auto-pick course by time)
+## Screenshots
 
-## Course Scheduling
+Create a `screenshots/` folder and place your latest UI captures there, then render them in the README:
 
-Courses can store schedule fields so the app can auto-pick by time:
+```markdown
+![Attendance Preview](screenshots/attendance_gui.png)
+![Recognition Preview](screenshots/recognition_preview.png)
+```
 
-- `start_time` and `end_time` use `HH:MM` (24h)
-- `days` is a CSV list like `sat,sun,mon,tue,wed,thu`
+## Future Development
 
-## Notes
+- FastAPI backend for centralized attendance APIs
+- Web dashboard (React) for reports/analytics
+- Cloud deployment and centralized monitoring
+- Mobile portal for students and instructors
+- Notification integration (SMS/email)
 
-- The LBPH confidence is a distance measure; lower is a better match.
-- Avoid storing raw face images outside the dataset; treat biometric data carefully.
+## License
+
+Academic Research Project - Zamzam University
