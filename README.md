@@ -17,9 +17,9 @@ SCRFD Face Detection
   ↓
 Face Alignment (5 keypoints)
   ↓
-Occlusion Detection
-  ↓
 MiniFASNet Anti-Spoof Model
+  ↓
+Occlusion Detection
   ↓
 FaceNet Embedding Recognition
   ↓
@@ -28,7 +28,18 @@ Attendance Logic
 Database Storage
 ```
 
-The pipeline first detects and localizes faces using SCRFD. Each detected face is checked for visibility/occlusion and liveness to block spoof attacks (photo/video/screen). Only then does FaceNet matching run, and successful identities are processed by attendance rules (`on_time`, `late`, `absent`) and saved.
+The pipeline first detects and aligns faces using SCRFD with 5-point landmarks. Each candidate face is then validated with anti-spoof and occlusion checks to reduce spoof or covered-face errors before final recognition. FaceNet embeddings are matched against enrolled student vectors, then attendance rules (`on_time`, `late`, `absent`) are applied and stored.
+
+Architecture step summary:
+
+- `Camera Frame`: Captures live frames from the selected webcam stream.
+- `SCRFD Face Detection`: Detects one or more faces in real time.
+- `Face Alignment (5 keypoints)`: Normalizes face orientation/position before downstream checks.
+- `MiniFASNet Anti-Spoof`: Estimates whether the face is live vs spoofed (photo/video/screen).
+- `Occlusion Detection`: Verifies face visibility (especially eye-region quality and coverage).
+- `FaceNet Embedding Recognition`: Computes embeddings and matches identity using cosine similarity.
+- `Attendance Logic`: Applies enrollment and course-time rules before marking attendance.
+- `Database Storage`: Writes verified attendance records to MySQL/SQLite.
 
 ## Key Features
 
@@ -94,7 +105,7 @@ pip install -r requirements.txt
 
 ## Configuration (.env)
 
-Important runtime behavior is controlled in `.env`.
+Important runtime behavior is controlled in `.env`. These are the core variables used most often during tuning:
 
 | Variable                                | Description                                   |
 | --------------------------------------- | --------------------------------------------- |
@@ -111,6 +122,13 @@ Important runtime behavior is controlled in `.env`.
 | `ATTENDANCE_SCRFD_MAX_FACES`            | Max faces processed per frame                 |
 | `ATTENDANCE_QUALITY_CHECK_ENABLED`      | Optional blur/brightness quality gate         |
 | `ATTENDANCE_AUTO_SCHEDULE`              | Automatically pick active course/session      |
+
+Recommended tuning approach:
+
+- Start with detector quality (`ATTENDANCE_SCRFD_THRESHOLD`, `ATTENDANCE_MIN_FACE_SIZE`).
+- Tune recognition strictness (`ATTENDANCE_EMBEDDING_MIN_SIMILARITY`).
+- Then tune security gates (`ATTENDANCE_ANTI_SPOOF_*`, `ATTENDANCE_OCCLUSION_*`).
+- Keep values camera-specific when moving between low-light and bright environments.
 
 ## Usage
 
@@ -155,12 +173,15 @@ python capture_gui.py
 
 ## Screenshots
 
-Create a `screenshots/` folder and place your latest UI captures there, then render them in the README:
+Add your latest captures under `screenshots/`:
 
-```markdown
-![Attendance Preview](screenshots/attendance_gui.png)
-![Recognition Preview](screenshots/recognition_preview.png)
-```
+- `screenshots/attendance_preview.png`
+- `screenshots/recognition_view.png`
+
+Then render them directly:
+
+![Attendance System](screenshots/attendance_preview.png)
+![Recognition View](screenshots/recognition_view.png)
 
 ## Future Development
 
