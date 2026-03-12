@@ -24,6 +24,9 @@ class FaceRecognizer:
         self.anti_spoof = AntiSpoofModel(config)
         self.occlusion = OcclusionChecker(config)
         self.spoof_windows = defaultdict(lambda: deque(maxlen=self.config.anti_spoof_required_frames))
+        self.display_available = True
+        self._smoothed_bbox = None
+        self._bbox_miss_count = 0
 
     def load_model(self):
         model_path = Path(self.config.model_path)
@@ -64,7 +67,7 @@ class FaceRecognizer:
         if not cap.isOpened():
             raise RuntimeError("Camera not available")
         self._apply_resolution(cap)
-        self._ensure_display_available()
+        self.display_available = self._ensure_display_available()
 
         anti_spoof_status = self.anti_spoof.get_status()
         logger.info(
@@ -92,6 +95,12 @@ class FaceRecognizer:
         match_counts = {}
         start_time = time.monotonic()
         max_runtime = self.config.max_runtime_seconds
+        process_every_n = max(1, int(getattr(self.config, "process_every_n_frames", 1)))
+        frame_count = 0
+        smooth_alpha = float(getattr(self.config, "bbox_smooth_alpha", 0.35))
+        max_misses = int(getattr(self.config, "bbox_smooth_max_misses", 8))
+        max_step = int(getattr(self.config, "bbox_max_step_px", 18))
+        max_size_step = float(getattr(self.config, "bbox_max_size_step_ratio", 0.10))
 
         while True:
             if stop_event is not None and stop_event.is_set():
@@ -104,10 +113,55 @@ class FaceRecognizer:
                 logger.warning("Failed to read from camera")
                 break
 
+            frame_count += 1
+            if process_every_n > 1 and (frame_count % process_every_n) != 0:
+                if self.display_available:
+                    if self.config.preview_width and self.config.preview_height:
+                        preview = cv2.resize(
+                            frame,
+                            (self.config.preview_width, self.config.preview_height),
+                            interpolation=cv2.INTER_AREA,
+                        )
+                        cv2.imshow(f"Attendance - {course_id}", preview)
+                    else:
+                        cv2.imshow(f"Attendance - {course_id}", frame)
+                    if cv2.waitKey(1) & 0xFF == ord("q"):
+                        break
+                continue
+
             results = self.recognize_frame(frame)
+
+            if len(results) > 1:
+                logger.info("Multiple faces detected (%d). Frame rejected.", len(results))
+                match_counts.clear()
+                primary = max(results, key=lambda r: r["bbox"][2] * r["bbox"][3])
+                x, y, w, h = primary["bbox"]
+                cv2.rectangle(frame, (x, y), (x + w, y + h), (0, 200, 0), 2)
+                if self.display_available:
+                    if self.config.preview_width and self.config.preview_height:
+                        preview = cv2.resize(
+                            frame,
+                            (self.config.preview_width, self.config.preview_height),
+                            interpolation=cv2.INTER_AREA,
+                        )
+                        cv2.imshow(f"Attendance - {course_id}", preview)
+                    else:
+                        cv2.imshow(f"Attendance - {course_id}", frame)
+                    if cv2.waitKey(1) & 0xFF == ord("q"):
+                        break
+                continue
+
             seen_ids = set()
             for result in results:
                 x, y, w, h = result["bbox"]
+                if len(results) == 1:
+                    x, y, w, h = self._smooth_bbox(
+                        (x, y, w, h),
+                        smooth_alpha,
+                        max_step,
+                        max_size_step,
+                    )
+                    result["bbox"] = (x, y, w, h)
                 if w < self.config.min_face_size or h < self.config.min_face_size:
                     logger.info(
                         "Face too small for reliable match (size=%dx%d)",
@@ -203,25 +257,58 @@ class FaceRecognizer:
                 cv2.rectangle(frame, (x, y), (x + w, y + h), (0, 200, 0), 2)
                 cv2.putText(frame, text, (x, y - 8), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
 
+            if len(results) == 0:
+                self._bbox_miss_count += 1
+                if self._bbox_miss_count > max_misses:
+                    self._smoothed_bbox = None
+            else:
+                self._bbox_miss_count = 0
+
             # Reset counts for faces that left the frame.
             for student_id in list(match_counts.keys()):
                 if student_id not in seen_ids:
                     match_counts.pop(student_id, None)
 
-            if self.config.preview_width and self.config.preview_height:
-                preview = cv2.resize(
-                    frame,
-                    (self.config.preview_width, self.config.preview_height),
-                    interpolation=cv2.INTER_AREA,
-                )
-                cv2.imshow(f"Attendance - {course_id}", preview)
-            else:
-                cv2.imshow(f"Attendance - {course_id}", frame)
-            if cv2.waitKey(1) & 0xFF == ord("q"):
-                break
+            if self.display_available:
+                if self.config.preview_width and self.config.preview_height:
+                    preview = cv2.resize(
+                        frame,
+                        (self.config.preview_width, self.config.preview_height),
+                        interpolation=cv2.INTER_AREA,
+                    )
+                    cv2.imshow(f"Attendance - {course_id}", preview)
+                else:
+                    cv2.imshow(f"Attendance - {course_id}", frame)
+                if cv2.waitKey(1) & 0xFF == ord("q"):
+                    break
 
         cap.release()
         cv2.destroyAllWindows()
+
+    def _smooth_bbox(self, bbox, alpha, max_step, max_size_step_ratio):
+        x, y, w, h = bbox
+        if self._smoothed_bbox is None:
+            self._smoothed_bbox = (float(x), float(y), float(w), float(h))
+            return x, y, w, h
+
+        px, py, pw, ph = self._smoothed_bbox
+
+        # Clamp sudden jumps before smoothing to prevent "pouncing" box behavior.
+        tx = min(max(float(x), px - max_step), px + max_step)
+        ty = min(max(float(y), py - max_step), py + max_step)
+
+        max_dw = max(1.0, pw * max_size_step_ratio)
+        max_dh = max(1.0, ph * max_size_step_ratio)
+        tw = min(max(float(w), pw - max_dw), pw + max_dw)
+        th = min(max(float(h), ph - max_dh), ph + max_dh)
+
+        sx = (alpha * tx) + ((1.0 - alpha) * px)
+        sy = (alpha * ty) + ((1.0 - alpha) * py)
+        sw = (alpha * tw) + ((1.0 - alpha) * pw)
+        sh = (alpha * th) + ((1.0 - alpha) * ph)
+        self._smoothed_bbox = (sx, sy, sw, sh)
+
+        return int(sx), int(sy), int(sw), int(sh)
 
     def _open_camera(self, index):
         if platform.system().lower().startswith("win"):
@@ -233,6 +320,8 @@ class FaceRecognizer:
         return cv2.VideoCapture(index)
 
     def _apply_resolution(self, cap):
+        cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+
         candidates = []
         if self.config.camera_width and self.config.camera_height:
             candidates.append((self.config.camera_width, self.config.camera_height))
@@ -249,10 +338,13 @@ class FaceRecognizer:
         try:
             cv2.namedWindow("__attendance_display_test__", cv2.WINDOW_NORMAL)
             cv2.destroyWindow("__attendance_display_test__")
+            return True
         except cv2.error as exc:
-            raise RuntimeError(
-                "OpenCV GUI backend is not available in this environment. "
-                "Install GUI-enabled OpenCV in your venv: "
+            logger.warning(
+                "OpenCV GUI backend is unavailable; running in headless mode (no preview window). "
+                "If you want preview UI, install GUI-enabled OpenCV in this venv: "
                 "pip uninstall -y opencv-python-headless opencv-python opencv-contrib-python-headless && "
                 "pip install opencv-contrib-python"
-            ) from exc
+            )
+            logger.debug("Display check failure: %s", exc)
+            return False

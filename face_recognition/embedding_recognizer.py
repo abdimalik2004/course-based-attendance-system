@@ -28,6 +28,7 @@ class FaceEmbeddingRecognizer:
         self.occlusion = OcclusionChecker(config)
         self.spoof_windows = defaultdict(lambda: deque(maxlen=self.config.anti_spoof_required_frames))
         self.occlusion_windows = defaultdict(lambda: deque(maxlen=self.config.occlusion_required_frames))
+        self.display_available = True
 
     def load_model(self):
         embed_path = Path(self.config.embedding_path)
@@ -144,7 +145,7 @@ class FaceEmbeddingRecognizer:
         if not cap.isOpened():
             raise RuntimeError("Camera not available")
         self._apply_resolution(cap)
-        self._ensure_display_available()
+        self.display_available = self._ensure_display_available()
 
         anti_spoof_status = self.anti_spoof.get_status()
         logger.info(
@@ -172,6 +173,8 @@ class FaceEmbeddingRecognizer:
         )
 
         match_counts = {}
+        process_every_n = max(1, int(getattr(self.config, "process_every_n_frames", 1)))
+        frame_count = 0
         while True:
             if stop_event is not None and stop_event.is_set():
                 break
@@ -179,6 +182,22 @@ class FaceEmbeddingRecognizer:
             if not ret:
                 logger.warning("Failed to read from camera")
                 break
+
+            frame_count += 1
+            if process_every_n > 1 and (frame_count % process_every_n) != 0:
+                if self.display_available:
+                    if self.config.preview_width and self.config.preview_height:
+                        preview = cv2.resize(
+                            frame,
+                            (self.config.preview_width, self.config.preview_height),
+                            interpolation=cv2.INTER_AREA,
+                        )
+                        cv2.imshow(f"Attendance - {course_id}", preview)
+                    else:
+                        cv2.imshow(f"Attendance - {course_id}", frame)
+                    if cv2.waitKey(1) & 0xFF == ord("q"):
+                        break
+                continue
 
             results = self.recognize_frame(frame)
             seen_ids = set()
@@ -298,17 +317,18 @@ class FaceEmbeddingRecognizer:
                 if student_id not in seen_known_ids:
                     self.occlusion_windows.pop(student_id, None)
 
-            if self.config.preview_width and self.config.preview_height:
-                preview = cv2.resize(
-                    frame,
-                    (self.config.preview_width, self.config.preview_height),
-                    interpolation=cv2.INTER_AREA,
-                )
-                cv2.imshow(f"Attendance - {course_id}", preview)
-            else:
-                cv2.imshow(f"Attendance - {course_id}", frame)
-            if cv2.waitKey(1) & 0xFF == ord("q"):
-                break
+            if self.display_available:
+                if self.config.preview_width and self.config.preview_height:
+                    preview = cv2.resize(
+                        frame,
+                        (self.config.preview_width, self.config.preview_height),
+                        interpolation=cv2.INTER_AREA,
+                    )
+                    cv2.imshow(f"Attendance - {course_id}", preview)
+                else:
+                    cv2.imshow(f"Attendance - {course_id}", frame)
+                if cv2.waitKey(1) & 0xFF == ord("q"):
+                    break
 
         cap.release()
         cv2.destroyAllWindows()
@@ -323,6 +343,8 @@ class FaceEmbeddingRecognizer:
         return cv2.VideoCapture(index)
 
     def _apply_resolution(self, cap):
+        cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+
         candidates = []
         if self.config.camera_width and self.config.camera_height:
             candidates.append((self.config.camera_width, self.config.camera_height))
@@ -339,10 +361,13 @@ class FaceEmbeddingRecognizer:
         try:
             cv2.namedWindow("__attendance_display_test__", cv2.WINDOW_NORMAL)
             cv2.destroyWindow("__attendance_display_test__")
+            return True
         except cv2.error as exc:
-            raise RuntimeError(
-                "OpenCV GUI backend is not available in this environment. "
-                "Install GUI-enabled OpenCV in your venv: "
+            logger.warning(
+                "OpenCV GUI backend is unavailable; running in headless mode (no preview window). "
+                "If you want preview UI, install GUI-enabled OpenCV in this venv: "
                 "pip uninstall -y opencv-python-headless opencv-python opencv-contrib-python-headless && "
                 "pip install opencv-contrib-python"
-            ) from exc
+            )
+            logger.debug("Display check failure: %s", exc)
+            return False

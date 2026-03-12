@@ -85,7 +85,7 @@ def list_schedules(
     skip: int = Query(default=0, ge=0, description="Number of rows to skip", examples=[0]),
     limit: int = Query(default=50, ge=1, le=200, description="Page size", examples=[20]),
     course_id: int | None = Query(default=None, description="Filter by course id", examples=[1]),
-    weekday: int | None = Query(default=None, ge=0, le=6, description="Filter by weekday (0=Monday)", examples=[0]),
+    weekday: int | None = Query(default=None, ge=1, le=7, description="Filter by weekday (1=Saturday, 7=Friday)", examples=[1]),
 ):
     query = db.query(CourseSchedule)
     if course_id is not None:

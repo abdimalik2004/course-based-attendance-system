@@ -37,6 +37,9 @@ class CaptureGUI:
         self._build_ui()
         self.root.protocol("WM_DELETE_WINDOW", self._on_close)
 
+        self._last_hint_text = ""
+        self._last_hint_time = 0.0
+
     def _build_ui(self):
         form = ttk.Frame(self.root)
         form.pack(fill=tk.BOTH, expand=True, padx=12, pady=12)
@@ -93,8 +96,12 @@ class CaptureGUI:
         self._set_progress(0)
         self._set_status(f"Capturing {photo_count} photos for {student_id}...")
         self.root.update_idletasks()
-
-        self._run_capture(camera_index, photo_count, dataset_dir)
+        self.capture_thread = threading.Thread(
+            target=self._run_capture,
+            args=(camera_index, photo_count, dataset_dir),
+            daemon=True,
+        )
+        self.capture_thread.start()
 
     def _stop_capture(self):
         self.stop_event.set()
@@ -107,12 +114,40 @@ class CaptureGUI:
                 return cap
         return cv2.VideoCapture(camera_index)
 
+    def _apply_capture_resolution(self, cap):
+        candidates = []
+        if self.config.camera_width and self.config.camera_height:
+            candidates.append((self.config.camera_width, self.config.camera_height))
+        candidates.extend([(1280, 720), (640, 480)])
+
+        for width, height in candidates:
+            cap.set(cv2.CAP_PROP_FRAME_WIDTH, width)
+            cap.set(cv2.CAP_PROP_FRAME_HEIGHT, height)
+            ok, _ = cap.read()
+            if ok:
+                break
+
+        # Keep buffer shallow to reduce perceived lag when processing is slower than camera FPS.
+        cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+
+    def _show_error(self, title, message):
+        self.root.after(0, lambda: messagebox.showerror(title, message))
+
+    def _hint(self, text):
+        now = time.monotonic()
+        if text != self._last_hint_text or (now - self._last_hint_time) >= 0.7:
+            self._last_hint_text = text
+            self._last_hint_time = now
+            self._set_status(text)
+
     def _run_capture(self, camera_index, photo_count, dataset_dir):
         cap = self._open_camera(camera_index)
         if not cap.isOpened():
             self._set_status("Camera not available.")
-            messagebox.showerror("Camera Error", "Camera not available. Check the index and permissions.")
+            self._show_error("Camera Error", "Camera not available. Check the index and permissions.")
             return
+
+        self._apply_capture_resolution(cap)
 
         cv2.namedWindow("Capture", cv2.WINDOW_NORMAL)
 
@@ -123,18 +158,30 @@ class CaptureGUI:
                 if not ret:
                     self._set_status("Failed to read from camera.")
                     break
-
-                cv2.imshow("Capture", frame)
-                if cv2.waitKey(1) & 0xFF == ord("q"):
-                    break
-
                 gray, faces = self.detector.detect(frame)
-                if len(faces) == 0:
-                    self.root.update_idletasks()
-                    self.root.update()
+
+                if len(faces) != 1:
+                    label = "No face" if len(faces) == 0 else "Multiple faces"
+                    color = (0, 165, 255) if len(faces) == 0 else (0, 0, 255)
+                    if faces:
+                        fx, fy, fw, fh = max(faces, key=lambda f: f[2] * f[3])
+                        cv2.rectangle(frame, (fx, fy), (fx + fw, fy + fh), color, 2)
+                    cv2.putText(
+                        frame,
+                        f"{label} - keep exactly one face in frame",
+                        (10, 30),
+                        cv2.FONT_HERSHEY_SIMPLEX,
+                        0.7,
+                        color,
+                        2,
+                    )
+                    self._hint("Keep exactly one face visible.")
+                    cv2.imshow("Capture", frame)
+                    if cv2.waitKey(1) & 0xFF == ord("q"):
+                        break
                     continue
 
-                x, y, w, h = max(faces, key=lambda f: f[2] * f[3])
+                x, y, w, h = faces[0]
                 x1, y1, x2, y2 = self._expand_box(x, y, w, h, frame.shape)
                 face_img = gray[y1:y2, x1:x2]
                 filename = dataset_dir / f"img_{saved + 1:03d}.jpg"
@@ -142,12 +189,24 @@ class CaptureGUI:
                 saved += 1
                 self._set_progress(saved)
 
+                cv2.rectangle(frame, (x, y), (x + w, y + h), (0, 200, 0), 2)
+                cv2.putText(
+                    frame,
+                    f"Captured {saved}/{photo_count}",
+                    (10, 30),
+                    cv2.FONT_HERSHEY_SIMPLEX,
+                    0.7,
+                    (0, 200, 0),
+                    2,
+                )
+                cv2.imshow("Capture", frame)
+                if cv2.waitKey(1) & 0xFF == ord("q"):
+                    break
+
                 if saved >= photo_count:
                     break
 
                 time.sleep(0.1)
-                self.root.update_idletasks()
-                self.root.update()
         finally:
             cap.release()
             cv2.destroyAllWindows()

@@ -67,6 +67,7 @@ class AppConfig:
     scrfd_det_size: int
     scrfd_threshold: float
     scrfd_max_faces: int
+    detect_max_width: int
     quality_check_enabled: bool
     quality_min_blur_variance: float
     quality_min_brightness: float
@@ -75,6 +76,11 @@ class AppConfig:
     embedding_min_similarity: float
     min_face_size: int
     required_matches: int
+    process_every_n_frames: int
+    bbox_smooth_alpha: float
+    bbox_smooth_max_misses: int
+    bbox_max_step_px: int
+    bbox_max_size_step_ratio: float
     camera_width: int
     camera_height: int
     camera_index: int
@@ -138,6 +144,7 @@ def load_config(base_dir=None):
         scrfd_det_size=_env_int("ATTENDANCE_SCRFD_DET_SIZE", 640),
         scrfd_threshold=_env_float("ATTENDANCE_SCRFD_THRESHOLD", 0.50),
         scrfd_max_faces=_env_int("ATTENDANCE_SCRFD_MAX_FACES", 20),
+        detect_max_width=_env_int("ATTENDANCE_DETECTION_MAX_WIDTH", 960),
         quality_check_enabled=_env_bool("ATTENDANCE_QUALITY_CHECK_ENABLED", False),
         quality_min_blur_variance=_env_float("ATTENDANCE_QUALITY_MIN_BLUR_VARIANCE", 60.0),
         quality_min_brightness=_env_float("ATTENDANCE_QUALITY_MIN_BRIGHTNESS", 45.0),
@@ -146,6 +153,11 @@ def load_config(base_dir=None):
         embedding_min_similarity=_env_float("ATTENDANCE_EMBEDDING_MIN_SIMILARITY", 0.6),
         min_face_size=_env_int("ATTENDANCE_MIN_FACE_SIZE", 60),
         required_matches=_env_int("ATTENDANCE_REQUIRED_MATCHES", 5),
+        process_every_n_frames=_env_int("ATTENDANCE_PROCESS_EVERY_N_FRAMES", 2),
+        bbox_smooth_alpha=_env_float("ATTENDANCE_BBOX_SMOOTH_ALPHA", 0.35),
+        bbox_smooth_max_misses=_env_int("ATTENDANCE_BBOX_SMOOTH_MAX_MISSES", 8),
+        bbox_max_step_px=_env_int("ATTENDANCE_BBOX_MAX_STEP_PX", 18),
+        bbox_max_size_step_ratio=_env_float("ATTENDANCE_BBOX_MAX_SIZE_STEP_RATIO", 0.10),
         camera_width=_env_int("ATTENDANCE_CAMERA_WIDTH", 1920),
         camera_height=_env_int("ATTENDANCE_CAMERA_HEIGHT", 1080),
         camera_index=_env_int("ATTENDANCE_CAMERA_INDEX", 0),
