@@ -1,12 +1,31 @@
 # Course-Based Attendance System
 
-An intelligent, course-aware attendance platform that combines modern face detection, anti-spoof security, occlusion checks, and deep recognition to mark attendance in real time.
+An AI-powered attendance platform that now includes both the original desktop recognition workflow and a FastAPI backend for production-style API access, scheduling, reporting, and role-based administration.
 
 ## Overview
 
-This project evolved from a prototype into a layered AI attendance pipeline. The active production flow uses SCRFD for face detection/alignment, then security gates (anti-spoof and occlusion), then FaceNet embedding recognition before attendance validation and storage.
+This repository currently contains two working surfaces:
 
-The system supports both CLI and GUI workflows, multi-student environments, and configurable thresholds via `.env` for different classrooms and camera setups. LBPH mode remains available as a lightweight fallback, but FaceNet is the primary recognition path.
+1. A desktop and CLI recognition pipeline for training, validating, and running face-based attendance.
+2. A backend API that manages authentication, faculties, classes, teachers, students, courses, schedules, attendance sessions, frame submission, and attendance reports.
+
+The recognition flow uses SCRFD for face detection and alignment, MiniFASNet anti-spoof checks, occlusion validation, and FaceNet embeddings for the primary recognition path. LBPH remains available as a lightweight fallback mode.
+
+## Latest Additions
+
+- FastAPI backend under `backend/` with modular routers and SQLAlchemy models
+- JWT-based authentication with access and refresh tokens
+- Role-based authorization for `ACADEMIA`, `FACULTY_ADMIN`, and `TEACHER`
+- Automatic session scheduling from course schedules
+- Attendance session lifecycle with `present`, `late`, and `absent` handling
+- Duplicate-attendance prevention in API attendance processing
+- Course reports by totals, date range, student breakdown, and session breakdown
+- Health, liveness, and readiness endpoints for service monitoring
+- Startup checks for database access, model files, and secret-key strength
+- Structured logging, CORS configuration, and rate limiting
+- Alembic migrations and seed data for backend setup
+- Dockerfile and `docker-compose.yml` for backend container runs
+- Backend tests covering permissions, scheduling, attendance logic, and timeout behavior
 
 ## System Architecture
 
@@ -16,28 +35,6 @@ Camera Frame
 SCRFD Face Detection
   ↓
 Face Alignment (5 keypoints)
-  ↓
-MiniFASNet Anti-Spoof Model
-  ↓
-Occlusion Detection
-  ↓
-FaceNet Embedding Recognition
-  ↓
-Attendance Logic
-  ↓
-Database Storage
-```
-
-The pipeline first detects and aligns faces using SCRFD with 5-point landmarks. Each candidate face is validated through anti-spoof and occlusion gates to reduce spoof and covered-face errors before final recognition. FaceNet embeddings are matched against enrolled student vectors, then attendance rules (`on_time`, `late`, `absent`) are applied and stored.
-
-## Recognition Pipeline
-
-```text
-Camera Frame
-  ↓
-SCRFD Face Detection
-  ↓
-Face Alignment (5 landmarks)
   ↓
 MiniFASNet Anti-Spoof
   ↓
@@ -50,64 +47,51 @@ Attendance Validation
 Database Storage
 ```
 
-Pipeline meaning:
-
-- `SCRFD`: detects multiple faces and provides stable keypoints.
-- `Anti-Spoof`: filters fake inputs such as printed/photo/screen attacks.
-- `Occlusion`: checks whether facial visibility is sufficient for reliable identity matching.
-- `FaceNet/LBPH`: performs identity recognition (FaceNet primary, LBPH optional fallback).
-- `Attendance Validation`: enforces enrollment and session-time rules before saving.
-
-Architecture step summary:
-
-- `Camera Frame`: Captures live frames from the selected webcam stream.
-- `SCRFD Face Detection`: Detects one or more faces in real time.
-- `Face Alignment (5 keypoints)`: Normalizes face orientation/position before downstream checks.
-- `MiniFASNet Anti-Spoof`: Estimates whether the face is live vs spoofed (photo/video/screen).
-- `Occlusion Detection`: Verifies face visibility (especially eye-region quality and coverage).
-- `FaceNet Embedding Recognition`: Computes embeddings and matches identity using cosine similarity.
-- `Attendance Logic`: Applies enrollment and course-time rules before marking attendance.
-- `Database Storage`: Writes verified attendance records to MySQL/SQLite.
+The same recognition stack supports both the desktop flow and the backend attendance frame endpoint. In the backend path, recognized students are validated against active sessions, enrollments, and grace-period rules before records are stored.
 
 ## Key Features
 
-- Course-based automated attendance system
-- SCRFD face detection with 5-point alignment
-- FaceNet deep learning recognition with embedding index (primary)
-- LBPH recognition path available as lightweight fallback
-- MiniFASNet ONNX anti-spoof protection
-- Occlusion detection and stability checks (sunglasses/partial eye coverage)
-- Multi-frame verification for stable security decisions
-- Session-based attendance validation with duplicate prevention
-- Auto session scheduling from course timetable
-- Multi-face detection support in real time
-- Preview and quality-check tuning for different camera environments
-- Configurable runtime thresholds using `.env`
-- Desktop enrollment and attendance interfaces
-- Modular architecture ready for API/web expansion
+- Course-aware face recognition attendance
+- Multi-face detection and aligned face processing
+- FaceNet embedding recognition with LBPH fallback
+- MiniFASNet anti-spoof protection
+- Occlusion and quality gating before recognition
+- Auto-schedule support from timetable data
+- Desktop CLI and GUI workflows
+- FastAPI backend with OpenAPI docs
+- JWT auth with refresh-token flow
+- Role-based CRUD APIs for core academic entities
+- Active-session discovery for teachers and admins
+- Attendance reports for courses, students, sessions, and date ranges
+- Dockerized backend deployment path
 
 ## Project Structure
 
 ```text
 attendance_system/
-├── api/                     # Future backend integration
-├── attendance/              # Attendance rules and marking logic
-├── database/                # DB access layer + SQL schemas
-├── dataset/                 # Student face images (training input)
-├── face_recognition/        # Detection, recognition, anti-spoof, occlusion
-│   ├── anti_spoof.py
-│   ├── detector.py
-│   ├── embedding_recognizer.py
-│   ├── occlusion.py
-│   ├── recognize.py
-│   ├── train.py
-│   └── validate_dataset.py
-├── models/                  # Trained and inference models
-├── utils/                   # Config/logging/TTS helpers
-├── capture_gui.py           # Student image enrollment GUI
-├── gui.py                   # Desktop admin GUI
-├── main.py                  # Main CLI entry point
-├── requirements.txt
+├── api/                          # Legacy/future integration area
+├── attendance/                   # Desktop attendance rules and marking logic
+├── backend/                      # FastAPI backend, Alembic, tests, schemas
+│   ├── app/
+│   │   ├── core/                 # Config, security, rate limiting, startup checks
+│   │   ├── db/                   # SQLAlchemy models, session, seed helpers
+│   │   ├── routers/              # Auth, attendance, reports, academic CRUD APIs
+│   │   ├── schemas/              # Pydantic request/response models
+│   │   ├── services/             # Face service, attendance service, scheduler
+│   │   └── utils/
+│   ├── alembic/
+│   └── tests/
+├── database/                     # Desktop DB access layer + SQL schemas
+├── dataset/                      # Student face image dataset
+├── face_recognition/             # Detection, recognition, anti-spoof, occlusion
+├── models/                       # Trained and inference models
+├── utils/                        # Desktop config, logging, TTS helpers
+├── capture_gui.py                # Student image enrollment GUI
+├── gui.py                        # Desktop admin GUI
+├── main.py                       # Desktop CLI entry point
+├── Dockerfile                    # Backend container image
+├── docker-compose.yml            # Backend container orchestration
+├── requirements.txt              # Desktop/CLI dependencies
 └── README.md
 ```
 
@@ -124,6 +108,8 @@ Windows:
 ```powershell
 .venv\Scripts\Activate.ps1
 pip install -r requirements.txt
+pip install -r backend\requirements.txt
+pip install -r backend\requirements-dev.txt
 ```
 
 Linux/macOS:
@@ -131,82 +117,52 @@ Linux/macOS:
 ```bash
 source .venv/bin/activate
 pip install -r requirements.txt
+pip install -r backend/requirements.txt
+pip install -r backend/requirements-dev.txt
 ```
 
-## Configuration (.env)
+## Desktop Configuration
 
-Important runtime behavior is controlled in `.env` and grouped by subsystem.
+The desktop recognition flow uses environment variables prefixed with `ATTENDANCE_`.
 
-Database:
+Common groups:
 
-| Variable                                                           | Description                           |
-| ------------------------------------------------------------------ | ------------------------------------- |
-| `ATTENDANCE_DB_TYPE`                                               | Database engine (`sqlite` or `mysql`) |
-| `ATTENDANCE_DB_HOST` `ATTENDANCE_DB_PORT`                          | MySQL host and port                   |
-| `ATTENDANCE_DB_NAME` `ATTENDANCE_DB_USER` `ATTENDANCE_DB_PASSWORD` | MySQL credentials                     |
+- Database: `ATTENDANCE_DB_TYPE`, `ATTENDANCE_DB_HOST`, `ATTENDANCE_DB_PORT`, `ATTENDANCE_DB_NAME`, `ATTENDANCE_DB_USER`, `ATTENDANCE_DB_PASSWORD`
+- Recognition: `ATTENDANCE_RECOGNIZER`, `ATTENDANCE_EMBEDDING_MIN_SIMILARITY`, `ATTENDANCE_CONFIDENCE_THRESHOLD`, `ATTENDANCE_MIN_FACE_SIZE`
+- Anti-spoof: `ATTENDANCE_ANTI_SPOOF_ENABLED`, `ATTENDANCE_ANTI_SPOOF_MODEL_PATH`, `ATTENDANCE_ANTI_SPOOF_THRESHOLD`
+- Occlusion: `ATTENDANCE_OCCLUSION_CHECK_ENABLED`, `ATTENDANCE_OCCLUSION_BACKEND`, `ATTENDANCE_OCCLUSION_MIN_EYES_VISIBLE`
+- Quality: `ATTENDANCE_QUALITY_CHECK_ENABLED`, `ATTENDANCE_QUALITY_MIN_BLUR_VARIANCE`, `ATTENDANCE_QUALITY_MIN_BRIGHTNESS`, `ATTENDANCE_QUALITY_MAX_BRIGHTNESS`
+- Detector: `ATTENDANCE_SCRFD_DET_SIZE`, `ATTENDANCE_SCRFD_THRESHOLD`, `ATTENDANCE_SCRFD_MAX_FACES`
+- Scheduling and camera: `ATTENDANCE_AUTO_SCHEDULE`, `ATTENDANCE_CAMERA_WIDTH`, `ATTENDANCE_CAMERA_HEIGHT`, `ATTENDANCE_PREVIEW_WIDTH`, `ATTENDANCE_PREVIEW_HEIGHT`
 
-Recognition:
+Recommended tuning order:
 
-| Variable                              | Description                                   |
-| ------------------------------------- | --------------------------------------------- |
-| `ATTENDANCE_RECOGNIZER`               | Recognition mode (`facenet` or `lbph`)        |
-| `ATTENDANCE_EMBEDDING_MIN_SIMILARITY` | Minimum FaceNet similarity to accept identity |
-| `ATTENDANCE_CONFIDENCE_THRESHOLD`     | LBPH threshold (distance-based)               |
-| `ATTENDANCE_MIN_FACE_SIZE`            | Minimum face size to process                  |
+1. Tune detector quality first.
+2. Tune recognition strictness second.
+3. Tune anti-spoof and occlusion thresholds last.
 
-Anti-Spoof:
+## Backend Configuration
 
-| Variable                                | Description                      |
-| --------------------------------------- | -------------------------------- |
-| `ATTENDANCE_ANTI_SPOOF_ENABLED`         | Enable/disable anti-spoof checks |
-| `ATTENDANCE_ANTI_SPOOF_MODEL_PATH`      | MiniFASNet ONNX model path       |
-| `ATTENDANCE_ANTI_SPOOF_THRESHOLD`       | Minimum liveness score           |
-| `ATTENDANCE_ANTI_SPOOF_REQUIRED_FRAMES` | Frame window for stable decision |
-| `ATTENDANCE_ANTI_SPOOF_MIN_PASS_RATIO`  | Minimum passing-frame ratio      |
+The backend loads configuration in this order:
 
-Occlusion:
+1. `backend/.env`
+2. `backend/.env.<APP_ENV>`
 
-| Variable                                | Description                          |
-| --------------------------------------- | ------------------------------------ |
-| `ATTENDANCE_OCCLUSION_CHECK_ENABLED`    | Enable/disable occlusion checks      |
-| `ATTENDANCE_OCCLUSION_BACKEND`          | Occlusion backend mode               |
-| `ATTENDANCE_OCCLUSION_MIN_EYES_VISIBLE` | Required visible eyes                |
-| `ATTENDANCE_OCCLUSION_REQUIRED_FRAMES`  | Frame window for occlusion stability |
-| `ATTENDANCE_OCCLUSION_MIN_PASS_RATIO`   | Minimum visible-frame ratio          |
+Example profiles:
 
-Quality:
+- `backend/.env.development`
+- `backend/.env.production`
 
-| Variable                               | Description                           |
-| -------------------------------------- | ------------------------------------- |
-| `ATTENDANCE_QUALITY_CHECK_ENABLED`     | Optional pre-recognition quality gate |
-| `ATTENDANCE_QUALITY_MIN_BLUR_VARIANCE` | Minimum sharpness requirement         |
-| `ATTENDANCE_QUALITY_MIN_BRIGHTNESS`    | Minimum brightness level              |
-| `ATTENDANCE_QUALITY_MAX_BRIGHTNESS`    | Maximum brightness level              |
+Important backend settings:
 
-Detector:
+- App and auth: `APP_ENV`, `APP_NAME`, `SECRET_KEY`, `JWT_ALGORITHM`, `ACCESS_TOKEN_EXPIRE_MINUTES`, `REFRESH_TOKEN_EXPIRE_MINUTES`
+- Database: `DB_TYPE`, `MYSQL_HOST`, `MYSQL_PORT`, `MYSQL_USER`, `MYSQL_PASSWORD`, `MYSQL_DB`, `SQLITE_PATH`
+- Scheduler: `SCHEDULER_POLL_SECONDS`, `DEFAULT_GRACE_PERIOD_MINUTES`
+- Attendance service: `FACE_CONFIDENCE_THRESHOLD`, `FACE_TIMEOUT_SECONDS`
+- API runtime: `CORS_ALLOW_ORIGINS`, `CORS_ALLOW_METHODS`, `CORS_ALLOW_HEADERS`, `CORS_ALLOW_CREDENTIALS`, `LOG_LEVEL`
+- Rate limits: `AUTH_RATE_LIMIT_REQUESTS`, `AUTH_RATE_LIMIT_WINDOW_SECONDS`, `FRAME_RATE_LIMIT_REQUESTS`, `FRAME_RATE_LIMIT_WINDOW_SECONDS`
 
-| Variable                     | Description                          |
-| ---------------------------- | ------------------------------------ |
-| `ATTENDANCE_SCRFD_DET_SIZE`  | SCRFD detector input size            |
-| `ATTENDANCE_SCRFD_THRESHOLD` | SCRFD detection confidence threshold |
-| `ATTENDANCE_SCRFD_MAX_FACES` | Maximum faces processed per frame    |
-
-Scheduling and camera:
-
-| Variable                                               | Description                                    |
-| ------------------------------------------------------ | ---------------------------------------------- |
-| `ATTENDANCE_AUTO_SCHEDULE`                             | Auto-select active course/session by timetable |
-| `ATTENDANCE_CAMERA_WIDTH` `ATTENDANCE_CAMERA_HEIGHT`   | Camera capture resolution                      |
-| `ATTENDANCE_PREVIEW_WIDTH` `ATTENDANCE_PREVIEW_HEIGHT` | Preview window size                            |
-
-Recommended tuning approach:
-
-- Start with detector quality (`ATTENDANCE_SCRFD_THRESHOLD`, `ATTENDANCE_MIN_FACE_SIZE`).
-- Tune recognition strictness (`ATTENDANCE_EMBEDDING_MIN_SIMILARITY`).
-- Then tune security gates (`ATTENDANCE_ANTI_SPOOF_*`, `ATTENDANCE_OCCLUSION_*`).
-- Keep values camera-specific when moving between low-light and bright environments.
-
-## Usage
+## Desktop Usage
 
 Train model data:
 
@@ -216,8 +172,8 @@ python main.py train
 
 Training output by mode:
 
-- When `ATTENDANCE_RECOGNIZER=facenet`: training builds `models/face_embeddings.npz`.
-- When `ATTENDANCE_RECOGNIZER=lbph`: training builds `models/lbph_trainer.yml` and `models/label_map.json`.
+- `facenet` builds `models/face_embeddings.npz`
+- `lbph` builds `models/lbph_trainer.yml` and `models/label_map.json`
 
 Validate dataset images:
 
@@ -225,13 +181,13 @@ Validate dataset images:
 python main.py validate-dataset
 ```
 
-Run attendance recognition (auto schedule):
+Run attendance recognition with auto-schedule:
 
 ```bash
-python main.py recognize --auto-schedule --camera-index 1
+python main.py recognize --auto-schedule --camera-index 0
 ```
 
-Run attendance recognition (manual course/session):
+Run attendance recognition with manual course and session:
 
 ```bash
 python main.py recognize --course-id CSC101 --session-label lecture-1 --camera-index 0
@@ -244,6 +200,112 @@ python gui.py
 python capture_gui.py
 ```
 
+## Backend Usage
+
+From `attendance_system/backend/`:
+
+Apply migrations:
+
+```bash
+python -m alembic upgrade head
+```
+
+Seed initial data and accounts:
+
+```bash
+python -m app.db.seed
+```
+
+Optional password-hash refresh for older seeded users:
+
+```bash
+python -m app.db.migrate_hashes
+```
+
+Run the API locally:
+
+```bash
+python -m uvicorn app.main:app --reload
+```
+
+OpenAPI docs:
+
+- `http://localhost:8000/docs`
+
+Health endpoints:
+
+- `GET /health`
+- `GET /health/live`
+- `GET /health/ready`
+
+## API Highlights
+
+Authentication:
+
+- `POST /auth/token`
+- `POST /auth/refresh`
+- `POST /auth/register`
+- `GET /auth/me`
+
+Academic management:
+
+- `GET/POST/PUT/DELETE /faculties`
+- `GET/POST/PUT/DELETE /classes`
+- `GET/POST/PUT/DELETE /students`
+- `GET/POST/PUT/DELETE /teachers`
+- `GET/POST/PUT/DELETE /courses`
+- `POST /courses/assign-teacher`
+- `POST /courses/{course_id}/enroll/{student_id}`
+- `GET/POST/PUT/DELETE /schedules`
+
+Attendance and sessions:
+
+- `GET /sessions`
+- `GET /sessions/active`
+- `POST /attendance/frame`
+
+Reports:
+
+- `GET /reports/course/{course_id}`
+- `GET /reports/course/{course_id}/range`
+- `GET /reports/course/{course_id}/students`
+- `GET /reports/course/{course_id}/sessions`
+
+## Seeded Accounts
+
+The backend seed currently provides these users:
+
+- `academia / academia123`
+- `facultyadmin / faculty123`
+- `teacher1 / teacher123`
+
+## Testing
+
+Run backend tests from `attendance_system/backend/`:
+
+```bash
+pytest -q tests/test_attendance_logic.py tests/test_attendance_performance.py tests/test_api_permissions_and_scheduler.py
+```
+
+These tests cover:
+
+- Permission enforcement for role-protected endpoints
+- Schedule overlap and teacher/faculty consistency rules
+- Attendance duplicate prevention
+- Present, late, and absent status behavior
+- Scheduler idempotency and date rollover handling
+- Frame processing timeout behavior
+
+## Docker
+
+From the project root:
+
+```bash
+docker compose up --build
+```
+
+This starts the backend container and exposes the API on port `8000` with a readiness health check against `GET /health/ready`.
+
 ## Models Used
 
 - `models/anti_spoof_minifasnet.onnx` for anti-spoof inference
@@ -252,12 +314,11 @@ python capture_gui.py
 - `models/lbph_trainer.yml` for LBPH recognizer fallback path
 - `models/label_map.json` for label-to-student mapping
 
-## Screenshots
+## Notes
 
-Add your latest captures under `screenshots/`:
-
-- `screenshots/attendance_preview.png`
-- `screenshots/recognition_view.png`
+- The backend expects required model files to exist at startup.
+- SQLite is supported for development, and MySQL is supported through backend configuration.
+- The desktop and backend layers currently coexist in the same repository and share the model assets under `models/`.
 
 Then render them directly:
 
