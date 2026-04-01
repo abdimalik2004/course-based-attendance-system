@@ -1,5 +1,6 @@
 import argparse
 import os
+import sys
 from datetime import datetime
 from pathlib import Path
 
@@ -19,6 +20,7 @@ from face_recognition.recognize import FaceRecognizer
 from face_recognition.train import train_embeddings_from_dataset, train_from_dataset
 from face_recognition.validate_dataset import validate_dataset
 from utils.config import load_config
+from utils.dataset_paths import reorganize_dataset_layout
 from utils.logging import get_logger, setup_logging
 
 
@@ -30,6 +32,8 @@ def _parse_args():
     train_cmd.add_argument("--dataset", default=None, help="Dataset path override")
 
     subparsers.add_parser("validate-dataset", help="Validate dataset images for detectable faces")
+    subparsers.add_parser("organize-dataset", help="Move dataset folders into faculty buckets, e.g. dataset/CIS/CIS001")
+    subparsers.add_parser("normalize-student-ids", help="Rename legacy student ids to year+faculty format and align dataset folders")
 
     rec_cmd = subparsers.add_parser("recognize", help="Recognize faces and mark attendance")
     rec_cmd.add_argument("--course-id", required=False, help="Course ID for attendance")
@@ -53,6 +57,44 @@ def run_validation():
     config = load_config()
     setup_logging(config.log_file)
     validate_dataset(config)
+
+
+def run_dataset_organization():
+    config = load_config()
+    setup_logging(config.log_file)
+    logger = get_logger(__name__)
+    moved = reorganize_dataset_layout(config.dataset_dir)
+    if not moved:
+        logger.info("Dataset already organized. No folders moved.")
+        return
+    for source, target in moved:
+        logger.info("Moved dataset folder: %s -> %s", source, target)
+
+
+def run_student_id_normalization():
+    config = load_config()
+    setup_logging(config.log_file)
+    logger = get_logger(__name__)
+
+    backend_dir = Path(__file__).resolve().parent / "backend"
+    if str(backend_dir) not in sys.path:
+        sys.path.insert(0, str(backend_dir))
+
+    from app.db.session import SessionLocal  # noqa: WPS433
+    from app.utils.student_numbering import normalize_legacy_student_numbers  # noqa: WPS433
+
+    db = SessionLocal()
+    try:
+        renamed = normalize_legacy_student_numbers(db)
+    finally:
+        db.close()
+
+    if not renamed:
+        logger.info("Student ids already normalized. No changes made.")
+        return
+
+    for old, new in renamed:
+        logger.info("Renamed student id: %s -> %s", old, new)
 
 
 def run_recognition(course_id: str, session_label: str, camera_index=None, auto_schedule=False):
@@ -177,6 +219,10 @@ def main():
         run_training()
     elif args.command == "validate-dataset":
         run_validation()
+    elif args.command == "organize-dataset":
+        run_dataset_organization()
+    elif args.command == "normalize-student-ids":
+        run_student_id_normalization()
     elif args.command == "recognize":
         run_recognition(
             args.course_id,

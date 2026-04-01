@@ -6,17 +6,72 @@ from sqlalchemy import or_
 from sqlalchemy.exc import IntegrityError
 
 from app.core.security import require_roles
+from app.db.faculty_scope import (
+    enforce_faculty_scope,
+    get_central_user_for_faculty,
+    get_optional_faculty_scope_context,
+)
 from app.db.models import Teacher
-from app.db.session import get_db
+from app.db.role_scoped import get_role_scoped_db
 from app.schemas.teacher import TeacherCreate, TeacherRead, TeacherUpdate, PaginatedTeacherRead
+from app.utils.organization import ensure_department_belongs_to_faculty, get_department_or_404, get_faculty_or_404
 
 
 router = APIRouter(prefix="/teachers", tags=["teachers"])
 
 
+def _generate_teacher_number(db: Session, faculty_code: str) -> str:
+    prefix = f"{faculty_code.strip().upper()}T"
+    if not prefix or prefix == "T":
+        raise HTTPException(status_code=400, detail="Faculty code is required for teacher number generation")
+
+    existing = (
+        db.query(Teacher.teacher_number)
+        .filter(Teacher.teacher_number.ilike(f"{prefix}%"))
+        .all()
+    )
+
+    max_seq = 0
+    for (value,) in existing:
+        if not value:
+            continue
+        normalized = value.strip().upper()
+        if not normalized.startswith(prefix):
+            continue
+        suffix = normalized[len(prefix):]
+        if suffix.isdigit():
+            max_seq = max(max_seq, int(suffix))
+
+    return f"{prefix}{max_seq + 1:03d}"
+
+
 @router.post("", response_model=TeacherRead, dependencies=[Depends(require_roles("FACULTY_ADMIN"))])
-def create_teacher(payload: TeacherCreate, db: Session = Depends(get_db)):
-    obj = Teacher(**payload.model_dump())
+def create_teacher(
+    payload: TeacherCreate,
+    db: Session = Depends(get_role_scoped_db),
+    faculty_scope = Depends(get_optional_faculty_scope_context),
+):
+    if faculty_scope is None:
+        faculty = get_faculty_or_404(db, payload.faculty_id)
+        faculty_code = faculty.code
+    else:
+        enforce_faculty_scope(payload.faculty_id, faculty_scope)
+        faculty_code = faculty_scope.faculty_code
+
+    department = get_department_or_404(db, payload.department_id)
+    ensure_department_belongs_to_faculty(department, payload.faculty_id)
+    if payload.user_id is not None:
+        get_central_user_for_faculty(payload.user_id, faculty_scope)
+
+    teacher_number = _generate_teacher_number(db, faculty_code)
+
+    obj = Teacher(
+        teacher_number=teacher_number,
+        full_name=payload.full_name,
+        faculty_id=payload.faculty_id,
+        department_id=payload.department_id,
+        user_id=payload.user_id,
+    )
     db.add(obj)
     try:
         db.commit()
@@ -29,15 +84,18 @@ def create_teacher(payload: TeacherCreate, db: Session = Depends(get_db)):
 
 @router.get("", response_model=PaginatedTeacherRead, dependencies=[Depends(require_roles("FACULTY_ADMIN", "ACADEMIA"))])
 def list_teachers(
-    db: Session = Depends(get_db),
+    db: Session = Depends(get_role_scoped_db),
     skip: int = Query(default=0, ge=0, description="Number of rows to skip", examples=[0]),
     limit: int = Query(default=50, ge=1, le=200, description="Page size", examples=[20]),
     faculty_id: int | None = Query(default=None, description="Filter by faculty id", examples=[1]),
+    department_id: int | None = Query(default=None, description="Filter by department id", examples=[1]),
     search: str | None = Query(default=None, description="Search by teacher number or full name", examples=["T-1001"]),
 ):
     query = db.query(Teacher)
     if faculty_id is not None:
         query = query.filter(Teacher.faculty_id == faculty_id)
+    if department_id is not None:
+        query = query.filter(Teacher.department_id == department_id)
     if search:
         pattern = f"%{search.strip()}%"
         query = query.filter(or_(Teacher.full_name.ilike(pattern), Teacher.teacher_number.ilike(pattern)))
@@ -47,10 +105,27 @@ def list_teachers(
 
 
 @router.put("/{teacher_id}", response_model=TeacherRead, dependencies=[Depends(require_roles("FACULTY_ADMIN"))])
-def update_teacher(teacher_id: int, payload: TeacherUpdate, db: Session = Depends(get_db)):
+def update_teacher(
+    teacher_id: int,
+    payload: TeacherUpdate,
+    db: Session = Depends(get_role_scoped_db),
+    faculty_scope = Depends(get_optional_faculty_scope_context),
+):
     obj = db.query(Teacher).filter(Teacher.id == teacher_id).first()
     if not obj:
         raise HTTPException(status_code=404, detail="Teacher not found")
+
+    target_faculty_id = payload.faculty_id if payload.faculty_id is not None else obj.faculty_id
+    target_department_id = payload.department_id if payload.department_id is not None else obj.department_id
+    if faculty_scope is None:
+        get_faculty_or_404(db, target_faculty_id)
+    else:
+        enforce_faculty_scope(target_faculty_id, faculty_scope)
+
+    department = get_department_or_404(db, target_department_id)
+    ensure_department_belongs_to_faculty(department, target_faculty_id)
+    if payload.user_id is not None:
+        get_central_user_for_faculty(payload.user_id, faculty_scope)
 
     for field, value in payload.model_dump(exclude_unset=True).items():
         setattr(obj, field, value)
@@ -66,7 +141,7 @@ def update_teacher(teacher_id: int, payload: TeacherUpdate, db: Session = Depend
 
 
 @router.delete("/{teacher_id}", dependencies=[Depends(require_roles("FACULTY_ADMIN"))])
-def delete_teacher(teacher_id: int, db: Session = Depends(get_db)):
+def delete_teacher(teacher_id: int, db: Session = Depends(get_role_scoped_db)):
     obj = db.query(Teacher).filter(Teacher.id == teacher_id).first()
     if not obj:
         raise HTTPException(status_code=404, detail="Teacher not found")

@@ -3,6 +3,7 @@ from tkinter import messagebox, ttk
 
 from database.db import Database
 from utils.config import load_config
+from utils.dataset_paths import student_dataset_dir
 from utils.logging import get_logger, setup_logging
 
 
@@ -197,7 +198,7 @@ class AttendanceGUI:
             self.student_id_var.set(student_id)
 
         if not image_path:
-            image_path = f"dataset/{student_id}/"
+                image_path = student_dataset_dir("dataset", student_id).as_posix() + "/"
 
         self.db.add_student(student_id, name, department, image_path)
         self._admin_status.set(f"Student {student_id} added")

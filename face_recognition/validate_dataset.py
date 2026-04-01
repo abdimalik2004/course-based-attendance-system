@@ -3,6 +3,7 @@ from pathlib import Path
 import cv2
 
 from face_recognition.detector import FaceDetector
+from utils.dataset_paths import iter_student_dataset_dirs
 from utils.logging import get_logger
 
 
@@ -19,9 +20,7 @@ def validate_dataset(config):
     face_found = 0
     missing = []
 
-    for student_dir in sorted(dataset_dir.iterdir()):
-        if not student_dir.is_dir():
-            continue
+    for student_dir in iter_student_dataset_dirs(dataset_dir):
         for img_path in list(student_dir.glob("*.jpg")) + list(student_dir.glob("*.jpeg")) + list(student_dir.glob("*.png")):
             total_images += 1
             image = cv2.imread(str(img_path))

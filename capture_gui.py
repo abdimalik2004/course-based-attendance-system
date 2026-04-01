@@ -9,6 +9,13 @@ import cv2
 
 from face_recognition.detector import FaceDetector
 from utils.config import load_config
+from utils.dataset_paths import (
+    is_full_student_id,
+    normalize_student_id,
+    student_dataset_dir,
+    student_id_example,
+    student_id_matches_bucket,
+)
 from utils.logging import get_logger, setup_logging
 
 
@@ -19,7 +26,7 @@ class CaptureGUI:
     def __init__(self, root):
         self.root = root
         self.root.title("Student Photo Capture")
-        self.root.geometry("520x260")
+        self.root.geometry("560x310")
 
         self.config = load_config()
         setup_logging(self.config.log_file)
@@ -28,11 +35,14 @@ class CaptureGUI:
         self.capture_thread = None
         self.stop_event = threading.Event()
 
+        self.faculty_var = tk.StringVar()
         self.student_id_var = tk.StringVar()
         self.count_var = tk.StringVar(value="30")
         self.camera_var = tk.StringVar(value=str(self.config.camera_index))
         self.status_var = tk.StringVar(value="Ready")
         self.progress_var = tk.StringVar(value="0")
+        self.hint_var = tk.StringVar(value="Select Faculty/Program, then enter full student id like 26CIS001")
+        self.faculty_options = self._load_faculty_options()
 
         self._build_ui()
         self.root.protocol("WM_DELETE_WINDOW", self._on_close)
@@ -44,23 +54,92 @@ class CaptureGUI:
         form = ttk.Frame(self.root)
         form.pack(fill=tk.BOTH, expand=True, padx=12, pady=12)
 
-        self._row(form, 0, "Student ID", self.student_id_var)
-        self._row(form, 1, "Photo Count", self.count_var)
-        self._row(form, 2, "Camera Index", self.camera_var)
+        self._combo_row(form, 0, "Faculty/Program", self.faculty_var, self.faculty_options)
+        self._row(form, 1, "Student ID", self.student_id_var)
+        self._row(form, 2, "Photo Count", self.count_var)
+        self._row(form, 3, "Camera Index", self.camera_var)
 
         btns = ttk.Frame(form)
-        btns.grid(row=3, column=1, sticky=tk.W, pady=6)
+        btns.grid(row=4, column=1, sticky=tk.W, pady=6)
         ttk.Button(btns, text="Start Capture", command=self._start_capture).pack(side=tk.LEFT, padx=4)
         ttk.Button(btns, text="Stop", command=self._stop_capture).pack(side=tk.LEFT, padx=4)
 
-        ttk.Label(form, text="Captured").grid(row=4, column=0, sticky=tk.W, padx=6, pady=6)
-        ttk.Label(form, textvariable=self.progress_var).grid(row=4, column=1, sticky=tk.W, padx=6, pady=6)
+        ttk.Label(form, text="Captured").grid(row=5, column=0, sticky=tk.W, padx=6, pady=6)
+        ttk.Label(form, textvariable=self.progress_var).grid(row=5, column=1, sticky=tk.W, padx=6, pady=6)
 
-        ttk.Label(form, textvariable=self.status_var).grid(row=5, column=0, columnspan=2, sticky=tk.W, padx=6)
+        ttk.Label(form, textvariable=self.hint_var, wraplength=420, foreground="#555").grid(
+            row=6,
+            column=0,
+            columnspan=2,
+            sticky=tk.W,
+            padx=6,
+            pady=(2, 6),
+        )
+        ttk.Label(form, textvariable=self.status_var).grid(row=7, column=0, columnspan=2, sticky=tk.W, padx=6)
 
     def _row(self, parent, row_idx, label, var):
         ttk.Label(parent, text=label).grid(row=row_idx, column=0, sticky=tk.W, padx=6, pady=4)
         ttk.Entry(parent, textvariable=var, width=30).grid(row=row_idx, column=1, sticky=tk.W, padx=6, pady=4)
+
+    def _combo_row(self, parent, row_idx, label, var, values):
+        ttk.Label(parent, text=label).grid(row=row_idx, column=0, sticky=tk.W, padx=6, pady=4)
+        combo = ttk.Combobox(parent, textvariable=var, values=values, width=27, state="normal")
+        combo.grid(row=row_idx, column=1, sticky=tk.W, padx=6, pady=4)
+        combo.bind("<<ComboboxSelected>>", lambda _event: self._on_faculty_selected())
+
+    def _load_faculty_options(self):
+        options: set[str] = set()
+
+        # Prefer program prefixes from backend class batches, e.g. CIS from CIS2201.
+        try:
+            backend_dir = Path(__file__).resolve().parent / "backend"
+            if str(backend_dir) not in sys.path:
+                sys.path.insert(0, str(backend_dir))
+
+            from app.db.models import ClassBatch, Faculty  # noqa: WPS433
+            from app.db.session import SessionLocal  # noqa: WPS433
+            from app.utils.student_numbering import _program_prefix  # noqa: WPS433
+
+            db = SessionLocal()
+            try:
+                for faculty in db.query(Faculty).all():
+                    code = normalize_student_id(faculty.code)
+                    if code:
+                        options.add(code)
+
+                for class_batch in db.query(ClassBatch).all():
+                    try:
+                        prefix = _program_prefix("", class_batch.name)
+                    except ValueError:
+                        continue
+                    if prefix:
+                        options.add(prefix)
+            finally:
+                db.close()
+        except Exception as exc:  # noqa: BLE001
+            logger.info("Could not load faculty/program options from backend DB: %s", exc)
+
+        dataset_root = Path(self.config.dataset_dir)
+        if dataset_root.exists():
+            for item in dataset_root.iterdir():
+                if item.is_dir() and item.name.isalpha():
+                    options.add(item.name.upper())
+
+        ordered = sorted(options)
+        if ordered:
+            self.faculty_var.set(ordered[0])
+            self._update_hint_for_faculty(ordered[0])
+        return ordered
+
+    def _on_faculty_selected(self):
+        self._update_hint_for_faculty(self.faculty_var.get())
+
+    def _update_hint_for_faculty(self, bucket):
+        normalized = normalize_student_id(bucket)
+        if normalized:
+            self.hint_var.set(
+                f"Enter full student id only, e.g. {student_id_example(normalized)}. Do not type {normalized}/{student_id_example(normalized)}."
+            )
 
     def _set_status(self, text):
         self.root.after(0, lambda: self.status_var.set(text))
@@ -73,9 +152,26 @@ class CaptureGUI:
             self._set_status("Capture already running.")
             return
 
-        student_id = self.student_id_var.get().strip()
+        selected_bucket = normalize_student_id(self.faculty_var.get())
+        if not selected_bucket:
+            messagebox.showwarning("Missing Data", "Faculty/Program is required.")
+            return
+
+        student_id = normalize_student_id(self.student_id_var.get())
         if not student_id:
             messagebox.showwarning("Missing Data", "Student ID is required.")
+            return
+        if "/" in student_id or "\\" in student_id:
+            messagebox.showwarning("Invalid Data", "Enter only the full student id like 26CIS001, not a folder path.")
+            return
+        if not is_full_student_id(student_id):
+            messagebox.showwarning("Invalid Data", f"Student ID must look like {student_id_example(selected_bucket)}.")
+            return
+        if not student_id_matches_bucket(student_id, selected_bucket):
+            messagebox.showwarning(
+                "Invalid Data",
+                f"Selected Faculty/Program is {selected_bucket}, so student id must match it, e.g. {student_id_example(selected_bucket)}.",
+            )
             return
 
         try:
@@ -89,7 +185,7 @@ class CaptureGUI:
             return
 
         camera_index = self._safe_int(self.camera_var.get(), self.config.camera_index)
-        dataset_dir = Path(self.config.dataset_dir) / student_id
+        dataset_dir = student_dataset_dir(self.config.dataset_dir, student_id)
         dataset_dir.mkdir(parents=True, exist_ok=True)
 
         self.stop_event.clear()

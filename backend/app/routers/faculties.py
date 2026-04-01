@@ -4,11 +4,13 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 from sqlalchemy import or_
 from sqlalchemy.exc import IntegrityError
+from datetime import datetime, timezone
 
 from app.core.security import require_roles
 from app.db.models import Faculty
 from app.db.session import get_db
 from app.schemas.faculty import FacultyCreate, FacultyRead, FacultyUpdate, PaginatedFacultyRead
+from app.services.tenant_provisioning import build_tenant_db_name, provision_faculty_tenant_database
 
 
 router = APIRouter(prefix="/faculties", tags=["faculties"])
@@ -16,13 +18,33 @@ router = APIRouter(prefix="/faculties", tags=["faculties"])
 
 @router.post("", response_model=FacultyRead, dependencies=[Depends(require_roles("ACADEMIA"))])
 def create_faculty(payload: FacultyCreate, db: Session = Depends(get_db)):
-    faculty = Faculty(name=payload.name, code=payload.code)
+    try:
+        tenant_db_name = build_tenant_db_name(payload.code)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    faculty = Faculty(name=payload.name, code=payload.code, tenant_db_name=tenant_db_name)
     db.add(faculty)
     try:
+        db.flush()
+
+        provision = provision_faculty_tenant_database(tenant_db_name)
+        if not (provision.provisioned or provision.skipped):
+            raise HTTPException(
+                status_code=500,
+                detail=f"Faculty tenant database provisioning failed: {provision.reason}",
+            )
+
+        if provision.provisioned:
+            faculty.tenant_db_provisioned_at = datetime.now(timezone.utc)
+
         db.commit()
     except IntegrityError as exc:
         db.rollback()
-        raise HTTPException(status_code=409, detail="Faculty with same name/code already exists") from exc
+        raise HTTPException(status_code=409, detail="Faculty with same name/code/tenant DB already exists") from exc
+    except HTTPException:
+        db.rollback()
+        raise
     db.refresh(faculty)
     return faculty
 

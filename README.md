@@ -17,8 +17,11 @@ The recognition flow uses SCRFD for face detection and alignment, MiniFASNet ant
 - JWT-based authentication with access and refresh tokens
 - Role-based authorization for `ACADEMIA`, `FACULTY_ADMIN`, and `TEACHER`
 - Automatic session scheduling from course schedules
+- Course schedule guard: same course cannot be scheduled twice on the same day inside the same department
+- Smart schedule conflict messaging for duplicate selected days and all-days-already-scheduled cases
 - Attendance session lifecycle with `present`, `late`, and `absent` handling
 - Duplicate-attendance prevention in API attendance processing
+- Course-title uniqueness per faculty using normalized titles (`trim + lowercase`) at API and DB levels
 - Course reports by totals, date range, student breakdown, and session breakdown
 - Health, liveness, and readiness endpoints for service monitoring
 - Startup checks for database access, model files, and secret-key strength
@@ -193,11 +196,71 @@ Run attendance recognition with manual course and session:
 python main.py recognize --course-id CSC101 --session-label lecture-1 --camera-index 0
 ```
 
-Launch GUIs:
+## Backend Quick Start
+
+Use this section if you only want to start the API quickly.
+
+### 1) Open backend folder
+
+```powershell
+cd D:\zust\attendance_system\backend
+```
+
+or
 
 ```bash
-python gui.py
-python capture_gui.py
+cd /path/to/course-based-attendance-system/attendance_system/backend
+```
+
+### 2) Activate virtual environment and set app profile
+
+Windows PowerShell:
+
+```powershell
+..\.venv\Scripts\Activate.ps1
+$env:APP_ENV = "production"
+```
+
+Linux/macOS:
+
+```bash
+source ../.venv/bin/activate
+export APP_ENV=production
+```
+
+### 3) Start backend
+
+Production-style run (no auto reload):
+
+```powershell
+python -m uvicorn app.main:app --host 127.0.0.1 --port 8000
+```
+
+Development run (auto reload):
+
+```powershell
+python -m uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
+```
+
+### First-time setup (or after DB/model changes)
+
+```powershell
+python -m alembic upgrade head
+python -m app.db.seed
+```
+
+### Verify backend is running
+
+- Docs: `http://127.0.0.1:8000/docs`
+- Ready check: `http://127.0.0.1:8000/health/ready`
+- Liveness: `http://127.0.0.1:8000/health/live`
+
+### Common startup issue
+
+If you see a generic 500 error after recent updates, run migrations again:
+
+```powershell
+python -m alembic upgrade head
 ```
 
 ## Backend Usage

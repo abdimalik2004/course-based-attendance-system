@@ -7,6 +7,7 @@ import torch
 from facenet_pytorch import InceptionResnetV1
 
 from face_recognition.detector import FaceDetector
+from utils.dataset_paths import iter_student_dataset_dirs, normalize_student_id
 from utils.logging import get_logger
 
 
@@ -30,10 +31,8 @@ def train_from_dataset(config):
         raise RuntimeError(f"Dataset folder not found: {dataset_dir}")
 
     next_label = 0
-    for student_dir in sorted(dataset_dir.iterdir()):
-        if not student_dir.is_dir():
-            continue
-        student_id = student_dir.name
+    for student_dir in iter_student_dataset_dirs(dataset_dir):
+        student_id = normalize_student_id(student_dir.name)
         if student_id not in label_map["students"]:
             label_map["students"][student_id] = next_label
             label_map["labels"][str(next_label)] = student_id
@@ -81,10 +80,8 @@ def train_embeddings_from_dataset(config):
     embeddings = []
     student_ids = []
 
-    for student_dir in sorted(dataset_dir.iterdir()):
-        if not student_dir.is_dir():
-            continue
-        student_id = student_dir.name
+    for student_dir in iter_student_dataset_dirs(dataset_dir):
+        student_id = normalize_student_id(student_dir.name)
         for img_path in list(student_dir.glob("*.jpg")) + list(student_dir.glob("*.jpeg")) + list(student_dir.glob("*.png")):
             image = cv2.imread(str(img_path))
             if image is None:
