@@ -7,8 +7,6 @@
 /mnt/d/zust/.venv/Scripts/python.exe -m pip install -r requirements.txt
 /mnt/d/zust/.venv/Scripts/python.exe -m pip install -r requirements-dev.txt
 /mnt/d/zust/.venv/Scripts/python.exe -m alembic upgrade head
-/mnt/d/zust/.venv/Scripts/python.exe -m app.db.provision_tenants
-/mnt/d/zust/.venv/Scripts/python.exe -m app.db.sync_tenants
 /mnt/d/zust/.venv/Scripts/python.exe -m app.db.seed
 /mnt/d/zust/.venv/Scripts/python.exe -m uvicorn app.main:app --reload
 ```
@@ -32,35 +30,16 @@ export APP_ENV=development
 /mnt/d/zust/.venv/Scripts/python.exe -m uvicorn app.main:app --reload
 ```
 
-Tenant provisioning settings:
-
-- `TENANT_DB_AUTO_PROVISION_ENABLED=true|false`
-- `TENANT_DB_RUNTIME_ROUTING_ENABLED=true|false` (default `false` for safe rollout)
-- `TENANT_DB_SCHEDULER_ENABLED=true|false` (default `false`; only used when runtime routing is enabled)
-- `TENANT_DB_ALLOW_LEGACY_OPERATIONAL_SYNC=true|false` (default `false`; emergency-only override for full tenant backfill)
-- `TENANT_DB_PREFIX=tenant_`
-- `TENANT_DB_CHARSET=utf8mb4`
-- `TENANT_DB_COLLATION=utf8mb4_unicode_ci`
-- `MYSQL_ADMIN_DB=mysql`
-- `SCHEDULER_TENANT_FAILURE_THRESHOLD=3` (tenant marked unhealthy after this many consecutive failures)
-- `SCHEDULER_TENANT_STALE_SECONDS=180` (tenant marked unhealthy if no completed tick within this window while scheduler is running)
-
-Runtime routing behavior:
-
-- `TENANT_DB_RUNTIME_ROUTING_ENABLED=false`: all operational routes still use central DB.
-- `TENANT_DB_RUNTIME_ROUTING_ENABLED=true`: faculty-admin/teacher operational routes resolve DB sessions through faculty tenant metadata.
-- `TENANT_DB_SCHEDULER_ENABLED=true`: scheduler tick runs per provisioned tenant DB instead of central DB.
-
 ## Data Ownership
 
-Central DB remains the source of truth for global/auth/platform tables:
+The central database is the source of truth for all application data:
 
 - `faculties`
 - `roles`
 - `users`
 - `user_role_links`
 
-Tenant DBs own faculty-scoped operational tables:
+The same database also owns faculty-scoped operational tables:
 
 - `departments`
 - `class_batches`
@@ -73,54 +52,11 @@ Tenant DBs own faculty-scoped operational tables:
 - `attendance_sessions`
 - `attendance_records`
 
-Enforcement behavior:
+Faculty delete and cleanup behavior:
 
-- `ACADEMIA` continues to use central DB for platform-wide operations.
-- Faculty-scoped operational routes use tenant DBs when `TENANT_DB_RUNTIME_ROUTING_ENABLED=true`.
-- Faculty-scoped users do not fall back to central DB if tenant metadata is missing or unprovisioned; requests fail with `503` until tenant state is fixed.
-
-Backfill tenants for existing faculties:
-
-```bash
-/mnt/d/zust/.venv/Scripts/python.exe -m app.db.provision_tenants
-```
-
-Re-check all faculties including already provisioned rows:
-
-```bash
-/mnt/d/zust/.venv/Scripts/python.exe -m app.db.provision_tenants --include-provisioned
-```
-
-Sync central faculty data into tenant DBs:
-
-```bash
-/mnt/d/zust/.venv/Scripts/python.exe -m app.db.sync_tenants
-```
-
-Sync behavior note:
-
-- Default mode is now `metadata-only` (faculties/users/roles links).
-- Operational table replacement is hard-disabled by default in tenant-first mode.
-
-Legacy full replacement mode (temporary/emergency only):
-
-```bash
-export TENANT_DB_ALLOW_LEGACY_OPERATIONAL_SYNC=true
-/mnt/d/zust/.venv/Scripts/python.exe -m app.db.sync_tenants --include-operational-tables
-```
-
-Sync only one faculty:
-
-```bash
-/mnt/d/zust/.venv/Scripts/python.exe -m app.db.sync_tenants --faculty-code ENG
-```
-
-Recommended rollout order for tenant mode:
-
-1. Run migrations on central DB.
-2. Provision tenant DBs.
-3. Sync central faculty data into tenant DBs.
-4. Enable `TENANT_DB_RUNTIME_ROUTING_ENABLED=true`.
+- `DELETE /faculties/{faculty_id}` is strict and fails when related rows still exist.
+- `DELETE /faculties/{faculty_id}?force=true` removes the faculty and its related academic rows in the central database.
+- `GET /faculties/{faculty_id}/delete-preview` shows the rows that would be removed before forcing deletion.
 
 ## Operational Readiness
 
@@ -138,37 +74,7 @@ Health endpoints:
 
 - `GET /health` (basic process check)
 - `GET /health/live` (liveness probe)
-- `GET /health/ready` (readiness probe: DB, model files, scheduler; returns `503` if tenant scheduler alert thresholds are breached)
-- `GET /health/scheduler-tenants` (scheduler mode, per-tenant tick status, recent failures, unhealthy tenant summary)
-
-## Tenant Scheduler Staging Soak
-
-Enable tenant runtime routing and tenant scheduler in staging:
-
-```bash
-export APP_ENV=staging
-export TENANT_DB_RUNTIME_ROUTING_ENABLED=true
-export TENANT_DB_SCHEDULER_ENABLED=true
-/mnt/d/zust/.venv/Scripts/python.exe -m uvicorn app.main:app --host 0.0.0.0 --port 8000
-```
-
-Monitor scheduler status during soak:
-
-```bash
-curl -s http://localhost:8000/health/scheduler-tenants
-```
-
-Readiness now fails fast if the tenant scheduler is unhealthy. This is suitable for uptime monitoring and deployment gates:
-
-```bash
-curl -i http://localhost:8000/health/ready
-```
-
-Recommended soak validation suite:
-
-```bash
-/mnt/d/zust/.venv/Scripts/python.exe -m pytest tests/test_tenant_scheduler_execution.py tests/test_tenant_first_attendance_report_scope.py tests/test_tenant_first_schedule_writes.py tests/test_tenant_first_course_writes.py tests/test_tenant_first_student_writes.py tests/test_tenant_first_teacher_writes.py tests/test_tenant_first_structure_writes.py tests/test_tenant_provisioning.py tests/test_tenant_sync.py
-```
+- `GET /health/ready` (readiness probe: DB, model files, scheduler)
 
 OpenAPI docs:
 

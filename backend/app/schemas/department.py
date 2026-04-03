@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import re
 
-from pydantic import BaseModel, ConfigDict, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 _WS_RE = re.compile(r"\s+")
@@ -16,7 +16,7 @@ def _normalize_text(value: str) -> str:
 
 
 class DepartmentBase(BaseModel):
-    faculty_id: int
+    faculty_id: int = Field(gt=0)
     name: str
     code: str
 
@@ -32,7 +32,7 @@ class DepartmentBase(BaseModel):
 
 
 class DepartmentCreate(DepartmentBase):
-    faculty_id: int | None = None
+    faculty_id: int | None = Field(default=None, gt=0)
 
 
 class DepartmentUpdate(BaseModel):
@@ -42,7 +42,7 @@ class DepartmentUpdate(BaseModel):
         }
     )
 
-    faculty_id: int | None = None
+    faculty_id: int | None = Field(default=None, gt=0)
     name: str | None = None
     code: str | None = None
 

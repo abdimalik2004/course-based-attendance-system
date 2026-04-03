@@ -85,20 +85,3 @@ def assert_department_schema_is_ready() -> None:
                 )
 
 
-def assert_tenant_metadata_schema_is_ready() -> None:
-    with engine.connect() as conn:
-        inspector = inspect(conn)
-        table_names = set(inspector.get_table_names())
-
-        if "faculties" not in table_names:
-            raise RuntimeError("Outdated schema detected: faculties table not found. Run: python -m alembic upgrade head")
-
-        columns = {column.get("name") for column in inspector.get_columns("faculties")}
-
-    required = {"tenant_db_name", "tenant_db_provisioned_at"}
-    missing = sorted(required - columns)
-    if missing:
-        raise RuntimeError(
-            "Outdated schema detected: faculties missing tenant metadata columns "
-            f"{missing}. Run: python -m alembic upgrade head"
-        )

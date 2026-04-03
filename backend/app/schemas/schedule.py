@@ -18,7 +18,7 @@ class CourseScheduleCreate(BaseModel):
         }
     )
 
-    course_id: int
+    course_id: int = Field(gt=0)
     weekday: int | str | list[int | str] = Field(
         default_factory=lambda: ["sat", "sun", "mon", "tue", "wed", "thu", "fri"],
         description="Weekday as 1..7 (1=Saturday) or day code(s) like 'sat' or 'sat,sun'",
@@ -31,7 +31,7 @@ class CourseScheduleCreate(BaseModel):
 
 class CourseScheduleRead(BaseModel):
     id: int
-    course_id: int
+    course_id: int = Field(gt=0)
     weekday: list[str]
     weekday_count: int
     weekday_summary: str
@@ -52,7 +52,7 @@ class CourseScheduleUpdate(BaseModel):
         }
     )
 
-    course_id: int | None = None
+    course_id: int | None = Field(default=None, gt=0)
     weekday: int | str | list[int | str] | None = Field(default=None)
     start_time: time | None = None
     end_time: time | None = None

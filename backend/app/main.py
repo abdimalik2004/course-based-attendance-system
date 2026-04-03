@@ -16,7 +16,6 @@ from app.core.startup_checks import (
     assert_department_schema_is_ready,
     assert_required_model_files_exist,
     assert_secret_key_is_strong,
-    assert_tenant_metadata_schema_is_ready,
     assert_weekday_storage_schema_is_ready,
 )
 from app.db.models import Role
@@ -45,7 +44,7 @@ logger = logging.getLogger(__name__)
 def seed_roles() -> None:
     db = SessionLocal()
     try:
-        role_names = ["ACADEMIA", "FACULTY_ADMIN", "TEACHER"]
+        role_names = ["ACADEMIA", "FACULTY", "FACULTY_ADMIN", "HR", "ADMISSIONS", "TEACHER"]
         existing = {r.name for r in db.query(Role).all()}
         for name in role_names:
             if name not in existing:
@@ -61,8 +60,6 @@ async def lifespan(_: FastAPI):
     assert_db_reachable()
     assert_weekday_storage_schema_is_ready()
     assert_department_schema_is_ready()
-    if settings.tenant_db_runtime_routing_enabled or settings.tenant_db_scheduler_enabled:
-        assert_tenant_metadata_schema_is_ready()
     assert_required_model_files_exist()
 
     seed_roles()
@@ -192,6 +189,6 @@ def health_ready():
     return {"status": "ready", "checks": checks}
 
 
-@app.get("/health/scheduler-tenants")
-def health_scheduler_tenants():
-    return schedule_service.tenant_tick_report()
+@app.get("/health/scheduler")
+def health_scheduler():
+    return schedule_service.scheduler_report()

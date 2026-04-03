@@ -1,104 +1,160 @@
 # Course-Based Attendance System
 
-An AI-powered attendance platform that now includes both the original desktop recognition workflow and a FastAPI backend for production-style API access, scheduling, reporting, and role-based administration.
+A web-based, role-based attendance platform with AI face recognition. The repository combines a FastAPI backend for academic operations and attendance APIs with desktop/CLI tools for dataset management, training, and live recognition.
 
-## Overview
+## Project Overview
 
-This repository currently contains two working surfaces:
+This project manages attendance by course, schedule, and session.
 
-1. A desktop and CLI recognition pipeline for training, validating, and running face-based attendance.
-2. A backend API that manages authentication, faculties, classes, teachers, students, courses, schedules, attendance sessions, frame submission, and attendance reports.
+- Backend (`backend/`) provides authentication, RBAC, academic CRUD, scheduling, session lifecycle, face-frame attendance processing, and reporting.
+- Desktop/CLI (`main.py`, `gui.py`, `capture_gui.py`) supports training, validation, recognition, and dataset tooling.
+- AI modules (`face_recognition/`) handle detection, anti-spoofing, occlusion checks, and embedding-based recognition.
 
-The recognition flow uses SCRFD for face detection and alignment, MiniFASNet anti-spoof checks, occlusion validation, and FaceNet embeddings for the primary recognition path. LBPH remains available as a lightweight fallback mode.
+The current architecture uses a central scheduler service in the backend, faculty-aware data scoping, and automatic absent marking when sessions close.
 
-## Latest Additions
+## Features
 
-- FastAPI backend under `backend/` with modular routers and SQLAlchemy models
-- JWT-based authentication with access and refresh tokens
-- Role-based authorization for `ACADEMIA`, `FACULTY_ADMIN`, and `TEACHER`
-- Automatic session scheduling from course schedules
-- Course schedule guard: same course cannot be scheduled twice on the same day inside the same department
-- Smart schedule conflict messaging for duplicate selected days and all-days-already-scheduled cases
-- Attendance session lifecycle with `present`, `late`, and `absent` handling
-- Duplicate-attendance prevention in API attendance processing
-- Course-title uniqueness per faculty using normalized titles (`trim + lowercase`) at API and DB levels
-- Course reports by totals, date range, student breakdown, and session breakdown
-- Health, liveness, and readiness endpoints for service monitoring
-- Startup checks for database access, model files, and secret-key strength
-- Structured logging, CORS configuration, and rate limiting
-- Alembic migrations and seed data for backend setup
-- Dockerfile and `docker-compose.yml` for backend container runs
-- Backend tests covering permissions, scheduling, attendance logic, and timeout behavior
+### Core Attendance Features
 
-## System Architecture
+- Course-based attendance using face recognition
+- Session-bound attendance validation (only active sessions can accept frames)
+- Status handling for `PRESENT`, `LATE`, and `ABSENT`
+- Duplicate-attendance prevention per student/course/session
+- Automatic absence generation when sessions end
 
-```text
-Camera Frame
-  ↓
-SCRFD Face Detection
-  ↓
-Face Alignment (5 keypoints)
-  ↓
-MiniFASNet Anti-Spoof
-  ↓
-Occlusion Check
-  ↓
-FaceNet / LBPH Recognition
-  ↓
-Attendance Validation
-  ↓
-Database Storage
-```
+### Scheduling and Session Logic
 
-The same recognition stack supports both the desktop flow and the backend attendance frame endpoint. In the backend path, recognized students are validated against active sessions, enrollments, and grace-period rules before records are stored.
+- Auto-creation of daily attendance sessions from course schedules
+- One active session per course per day protection
+- Backfill behavior for missed windows (creates and closes session, then marks absences)
+- Overlap protection for class-level schedules
+- Guard against scheduling the same course twice on the same day in the same department
 
-## Key Features
+### Role-Based Academic Management
 
-- Course-aware face recognition attendance
-- Multi-face detection and aligned face processing
-- FaceNet embedding recognition with LBPH fallback
-- MiniFASNet anti-spoof protection
-- Occlusion and quality gating before recognition
-- Auto-schedule support from timetable data
-- Desktop CLI and GUI workflows
-- FastAPI backend with OpenAPI docs
-- JWT auth with refresh-token flow
-- Role-based CRUD APIs for core academic entities
-- Active-session discovery for teachers and admins
-- Attendance reports for courses, students, sessions, and date ranges
-- Dockerized backend deployment path
+- JWT authentication with access/refresh token flow
+- Faculty-aware scoping for faculty users
+- Role-protected APIs for faculties, departments, classes, courses, schedules, teachers, students, sessions, attendance, and reports
+- Auto enrollment helpers for new students and new courses (matching class context)
+
+### Face Recognition and AI Pipeline
+
+- SCRFD-based face detection and alignment
+- MiniFASNet anti-spoof support
+- Occlusion checks before identity matching
+- Face embedding recognizer as primary path
+- Optional LBPH training/recognition path for desktop flow
+- Processing timeout and confidence threshold controls in backend attendance processing
+
+### Ops and Reliability
+
+- Startup checks for DB readiness, schema compatibility, model files, and secret strength
+- Health endpoints (`/health`, `/health/live`, `/health/ready`, `/health/scheduler`)
+- Rate limiting for auth and frame submission endpoints
+- Structured logging and CORS configuration
+- Alembic migrations and seed tooling
+- Dockerized backend runtime with readiness healthcheck
+
+## System Roles
+
+The platform currently models these roles in the system and workflows:
+
+- **Academia**
+  - Global academic governance.
+  - Can register users and manage faculties.
+  - Can manage course definitions and view reports/sessions.
+
+- **HR**
+  - Manages teacher records and teacher-user linking.
+  - Read access where permitted by router guards.
+
+- **Admission**
+  - Manages student records.
+  - Student creation supports automatic enrollment in matching courses.
+
+- **Teacher**
+  - Views active sessions and reports.
+  - Submits attendance frames for active sessions.
+
+- **Student**
+  - Domain participant of attendance records and reports.
+  - Student-facing self-service APIs/UI are not yet included in this repository.
+
+Notes:
+
+- Backend RBAC currently enforces `ACADEMIA`, `FACULTY`/`FACULTY_ADMIN` equivalence, `HR`, `ADMISSIONS`, and `TEACHER` roles.
+- `FACULTY_ADMIN` is maintained as a compatibility alias through role-equivalence logic.
+
+## Attendance Workflow (Auto-Scheduled Sessions)
+
+The backend scheduler runs in a central polling loop and applies this workflow:
+
+1. Load all course schedules for the current weekday.
+2. For each schedule, calculate today start/end times.
+3. If current time is inside the window and no session exists for that course/day, create an `ACTIVE` session.
+4. If backend was offline and the window already passed, backfill a missed session, close it, and mark absences.
+5. For active sessions that pass end time, close the session and mark absent records for enrolled students with no attendance record.
+
+Frame submission flow (`POST /attendance/frame`):
+
+1. Validate session existence, active status, and time window.
+2. Decode base64 image and run recognition pipeline.
+3. Enforce confidence and timeout thresholds.
+4. Validate recognized student class and course enrollment.
+5. Store attendance as `PRESENT` or `LATE` (based on grace period), or return duplicate/no-match responses.
+
+## Tech Stack
+
+- **Backend**: FastAPI, Uvicorn, SQLAlchemy 2.x, Alembic, Pydantic v2
+- **Auth/Security**: JWT (`python-jose`), password hashing (`passlib` + `bcrypt`), router-level RBAC
+- **Database**: SQLite (dev) and MySQL (configurable production target)
+- **AI/ML & CV**: OpenCV, InsightFace/SCRFD, FaceNet embeddings (`facenet-pytorch`, `torch`), ONNX Runtime (MiniFASNet)
+- **Desktop/Tooling**: Python CLI + GUI scripts, dataset validators and organizers
+- **Testing**: Pytest-based backend tests
+- **Containers**: Docker + Docker Compose
+
+Frontend note:
+
+- No dedicated web frontend application is currently committed in this repository; backend APIs are ready to be consumed by a separate web client.
 
 ## Project Structure
 
 ```text
 attendance_system/
-├── api/                          # Legacy/future integration area
-├── attendance/                   # Desktop attendance rules and marking logic
-├── backend/                      # FastAPI backend, Alembic, tests, schemas
+├── api/                            # Placeholder integration area (not active backend runtime)
+├── attendance/                     # Attendance rule helpers for desktop flow
+├── backend/
 │   ├── app/
-│   │   ├── core/                 # Config, security, rate limiting, startup checks
-│   │   ├── db/                   # SQLAlchemy models, session, seed helpers
-│   │   ├── routers/              # Auth, attendance, reports, academic CRUD APIs
-│   │   ├── schemas/              # Pydantic request/response models
-│   │   ├── services/             # Face service, attendance service, scheduler
+│   │   ├── core/                   # Config, security, logging, rate limit, startup checks
+│   │   ├── db/                     # Models, session management, seed and reset utilities
+│   │   ├── routers/                # Auth, faculties, departments, classes, courses, schedules,
+│   │   │                           # teachers, students, sessions, attendance, reports
+│   │   ├── schemas/                # Pydantic API schemas
+│   │   ├── services/               # Face service, attendance service, scheduler
 │   │   └── utils/
-│   ├── alembic/
-│   └── tests/
-├── database/                     # Desktop DB access layer + SQL schemas
-├── dataset/                      # Student face image dataset
-├── face_recognition/             # Detection, recognition, anti-spoof, occlusion
-├── models/                       # Trained and inference models
-├── utils/                        # Desktop config, logging, TTS helpers
-├── capture_gui.py                # Student image enrollment GUI
-├── gui.py                        # Desktop admin GUI
-├── main.py                       # Desktop CLI entry point
-├── Dockerfile                    # Backend container image
-├── docker-compose.yml            # Backend container orchestration
-├── requirements.txt              # Desktop/CLI dependencies
+│   ├── alembic/                    # DB migrations
+│   ├── tests/                      # Backend tests
+│   ├── requirements.txt
+│   ├── requirements-dev.txt
+│   └── alembic.ini
+├── database/                       # SQL schema files and desktop DB helper
+├── dataset/                        # Face image dataset organized by faculty/student
+├── face_recognition/               # Detector, anti-spoof, recognizer, trainer, validators
+├── logs/
+├── models/                         # Trained models and mapping assets
+├── utils/                          # Shared config/logging/TTS helpers
+├── capture_gui.py
+├── gui.py
+├── main.py                         # Desktop CLI entry point
+├── Dockerfile
+├── docker-compose.yml
+├── requirements.txt                # Desktop/AI dependencies
 └── README.md
 ```
 
-## Installation
+## Setup Instructions
+
+### 1) Clone and create environment
 
 ```bash
 git clone https://github.com/abdimalik2004/course-based-attendance-system.git
@@ -106,7 +162,9 @@ cd course-based-attendance-system/attendance_system
 python -m venv .venv
 ```
 
-Windows:
+### 2) Install dependencies
+
+Windows PowerShell:
 
 ```powershell
 .venv\Scripts\Activate.ps1
@@ -124,278 +182,120 @@ pip install -r backend/requirements.txt
 pip install -r backend/requirements-dev.txt
 ```
 
-## Desktop Configuration
+### 3) Configure backend environment
 
-The desktop recognition flow uses environment variables prefixed with `ATTENDANCE_`.
-
-Common groups:
-
-- Database: `ATTENDANCE_DB_TYPE`, `ATTENDANCE_DB_HOST`, `ATTENDANCE_DB_PORT`, `ATTENDANCE_DB_NAME`, `ATTENDANCE_DB_USER`, `ATTENDANCE_DB_PASSWORD`
-- Recognition: `ATTENDANCE_RECOGNIZER`, `ATTENDANCE_EMBEDDING_MIN_SIMILARITY`, `ATTENDANCE_CONFIDENCE_THRESHOLD`, `ATTENDANCE_MIN_FACE_SIZE`
-- Anti-spoof: `ATTENDANCE_ANTI_SPOOF_ENABLED`, `ATTENDANCE_ANTI_SPOOF_MODEL_PATH`, `ATTENDANCE_ANTI_SPOOF_THRESHOLD`
-- Occlusion: `ATTENDANCE_OCCLUSION_CHECK_ENABLED`, `ATTENDANCE_OCCLUSION_BACKEND`, `ATTENDANCE_OCCLUSION_MIN_EYES_VISIBLE`
-- Quality: `ATTENDANCE_QUALITY_CHECK_ENABLED`, `ATTENDANCE_QUALITY_MIN_BLUR_VARIANCE`, `ATTENDANCE_QUALITY_MIN_BRIGHTNESS`, `ATTENDANCE_QUALITY_MAX_BRIGHTNESS`
-- Detector: `ATTENDANCE_SCRFD_DET_SIZE`, `ATTENDANCE_SCRFD_THRESHOLD`, `ATTENDANCE_SCRFD_MAX_FACES`
-- Scheduling and camera: `ATTENDANCE_AUTO_SCHEDULE`, `ATTENDANCE_CAMERA_WIDTH`, `ATTENDANCE_CAMERA_HEIGHT`, `ATTENDANCE_PREVIEW_WIDTH`, `ATTENDANCE_PREVIEW_HEIGHT`
-
-Recommended tuning order:
-
-1. Tune detector quality first.
-2. Tune recognition strictness second.
-3. Tune anti-spoof and occlusion thresholds last.
-
-## Backend Configuration
-
-The backend loads configuration in this order:
+Backend loads environment in this order:
 
 1. `backend/.env`
 2. `backend/.env.<APP_ENV>`
 
-Example profiles:
+Common values to configure:
 
-- `backend/.env.development`
-- `backend/.env.production`
+- `APP_ENV`, `SECRET_KEY`, `JWT_ALGORITHM`
+- `DB_TYPE`, `SQLITE_PATH` or MySQL connection variables
+- `SCHEDULER_POLL_SECONDS`, `DEFAULT_GRACE_PERIOD_MINUTES`
+- `FACE_CONFIDENCE_THRESHOLD`, `FACE_TIMEOUT_SECONDS`
+- `CORS_*`, `LOG_LEVEL`, and rate-limit settings
 
-Important backend settings:
+### 4) Run migrations and seed data
 
-- App and auth: `APP_ENV`, `APP_NAME`, `SECRET_KEY`, `JWT_ALGORITHM`, `ACCESS_TOKEN_EXPIRE_MINUTES`, `REFRESH_TOKEN_EXPIRE_MINUTES`
-- Database: `DB_TYPE`, `MYSQL_HOST`, `MYSQL_PORT`, `MYSQL_USER`, `MYSQL_PASSWORD`, `MYSQL_DB`, `SQLITE_PATH`
-- Scheduler: `SCHEDULER_POLL_SECONDS`, `DEFAULT_GRACE_PERIOD_MINUTES`
-- Attendance service: `FACE_CONFIDENCE_THRESHOLD`, `FACE_TIMEOUT_SECONDS`
-- API runtime: `CORS_ALLOW_ORIGINS`, `CORS_ALLOW_METHODS`, `CORS_ALLOW_HEADERS`, `CORS_ALLOW_CREDENTIALS`, `LOG_LEVEL`
-- Rate limits: `AUTH_RATE_LIMIT_REQUESTS`, `AUTH_RATE_LIMIT_WINDOW_SECONDS`, `FRAME_RATE_LIMIT_REQUESTS`, `FRAME_RATE_LIMIT_WINDOW_SECONDS`
-
-## Desktop Usage
-
-Train model data:
+From `attendance_system/backend`:
 
 ```bash
-python main.py train
+python -m alembic upgrade head
+python -m app.db.seed
 ```
 
-Training output by mode:
+### 5) Start backend API
 
-- `facenet` builds `models/face_embeddings.npz`
-- `lbph` builds `models/lbph_trainer.yml` and `models/label_map.json`
-
-Validate dataset images:
+From `attendance_system/backend`:
 
 ```bash
-python main.py validate-dataset
-```
-
-Run attendance recognition with auto-schedule:
-
-```bash
-python main.py recognize --auto-schedule --camera-index 0
-```
-
-Run attendance recognition with manual course and session:
-
-```bash
-python main.py recognize --course-id CSC101 --session-label lecture-1 --camera-index 0
-```
-
-## Backend Quick Start
-
-Use this section if you only want to start the API quickly.
-
-### 1) Open backend folder
-
-```powershell
-cd D:\zust\attendance_system\backend
-```
-
-or
-
-```bash
-cd /path/to/course-based-attendance-system/attendance_system/backend
-```
-
-### 2) Activate virtual environment and set app profile
-
-Windows PowerShell:
-
-```powershell
-..\.venv\Scripts\Activate.ps1
-$env:APP_ENV = "production"
-```
-
-Linux/macOS:
-
-```bash
-source ../.venv/bin/activate
-export APP_ENV=production
-```
-
-### 3) Start backend
-
-Production-style run (no auto reload):
-
-```powershell
-python -m uvicorn app.main:app --host 127.0.0.1 --port 8000
-```
-
-Development run (auto reload):
-
-```powershell
 python -m uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
 ```
 
-### First-time setup (or after DB/model changes)
+Verify:
 
-```powershell
-python -m alembic upgrade head
-python -m app.db.seed
-```
+- Swagger: `http://127.0.0.1:8000/docs`
+- Ready: `http://127.0.0.1:8000/health/ready`
+- Scheduler health: `http://127.0.0.1:8000/health/scheduler`
 
-### Verify backend is running
+### 6) Optional desktop workflows
 
-- Docs: `http://127.0.0.1:8000/docs`
-- Ready check: `http://127.0.0.1:8000/health/ready`
-- Liveness: `http://127.0.0.1:8000/health/live`
-
-### Common startup issue
-
-If you see a generic 500 error after recent updates, run migrations again:
-
-```powershell
-python -m alembic upgrade head
-```
-
-## Backend Usage
-
-From `attendance_system/backend/`:
-
-Apply migrations:
+From `attendance_system` root:
 
 ```bash
-python -m alembic upgrade head
+python main.py validate-dataset
+python main.py train
+python main.py recognize --auto-schedule --camera-index 0
 ```
 
-Seed initial data and accounts:
+Additional CLI utilities:
 
-```bash
-python -m app.db.seed
-```
+- `python main.py organize-dataset`
+- `python main.py normalize-student-ids`
 
-Optional password-hash refresh for older seeded users:
+## API / Backend Notes
 
-```bash
-python -m app.db.migrate_hashes
-```
+### Authentication
 
-Run the API locally:
+- `POST /auth/token` obtains access/refresh tokens
+- `POST /auth/refresh` rotates token pair
+- `GET /auth/me` returns current user
+- `POST /auth/register` is restricted to Academia role
 
-```bash
-python -m uvicorn app.main:app --reload
-```
+### Main Functional Endpoints
 
-OpenAPI docs:
+- Academic entities: `/faculties`, `/departments`, `/classes`, `/courses`, `/students`, `/teachers`
+- Scheduling: `/schedules`
+- Sessions: `/sessions`, `/sessions/active`
+- Attendance ingestion: `POST /attendance/frame`
+- Reports: `/reports/course/{course_id}` and breakdown endpoints
 
-- `http://localhost:8000/docs`
+### Seeded Accounts
 
-Health endpoints:
-
-- `GET /health`
-- `GET /health/live`
-- `GET /health/ready`
-
-## API Highlights
-
-Authentication:
-
-- `POST /auth/token`
-- `POST /auth/refresh`
-- `POST /auth/register`
-- `GET /auth/me`
-
-Academic management:
-
-- `GET/POST/PUT/DELETE /faculties`
-- `GET/POST/PUT/DELETE /classes`
-- `GET/POST/PUT/DELETE /students`
-- `GET/POST/PUT/DELETE /teachers`
-- `GET/POST/PUT/DELETE /courses`
-- `POST /courses/assign-teacher`
-- `POST /courses/{course_id}/enroll/{student_id}`
-- `GET/POST/PUT/DELETE /schedules`
-
-Attendance and sessions:
-
-- `GET /sessions`
-- `GET /sessions/active`
-- `POST /attendance/frame`
-
-Reports:
-
-- `GET /reports/course/{course_id}`
-- `GET /reports/course/{course_id}/range`
-- `GET /reports/course/{course_id}/students`
-- `GET /reports/course/{course_id}/sessions`
-
-## Seeded Accounts
-
-The backend seed currently provides these users:
+Current seed script creates:
 
 - `academia / academia123`
 - `facultyadmin / faculty123`
 - `teacher1 / teacher123`
+- `hr / hr123`
+- `admission / admission123`
 
-## Testing
+### Testing
 
-Run backend tests from `attendance_system/backend/`:
+From `attendance_system/backend`:
 
 ```bash
-pytest -q tests/test_attendance_logic.py tests/test_attendance_performance.py tests/test_api_permissions_and_scheduler.py
+pytest -q
 ```
 
-These tests cover:
+Or run focused suites:
 
-- Permission enforcement for role-protected endpoints
-- Schedule overlap and teacher/faculty consistency rules
-- Attendance duplicate prevention
-- Present, late, and absent status behavior
-- Scheduler idempotency and date rollover handling
-- Frame processing timeout behavior
+```bash
+pytest -q tests/test_attendance_logic.py tests/test_attendance_performance.py tests/test_api_permissions_and_scheduler.py tests/test_rbac_responsibilities.py
+```
 
-## Docker
+### Docker
 
-From the project root:
+From `attendance_system` root:
 
 ```bash
 docker compose up --build
 ```
 
-This starts the backend container and exposes the API on port `8000` with a readiness health check against `GET /health/ready`.
+## Removed / Deprecated References Cleaned Up
 
-## Models Used
+The README now reflects current code and intentionally removes outdated references:
 
-- `models/anti_spoof_minifasnet.onnx` for anti-spoof inference
-- `models/anti_spoof.json` for heuristic fallback coefficients
-- `models/face_embeddings.npz` for FaceNet identity embeddings
-- `models/lbph_trainer.yml` for LBPH recognizer fallback path
-- `models/label_map.json` for label-to-student mapping
+- Removed references to non-existent screenshot files under `screenshots/`
+- Removed old role summary that omitted active `HR` and `ADMISSIONS` role usage
+- Removed future-state statements that are already implemented (FastAPI backend, scheduler, reporting)
+- Clarified that `api/` is currently a placeholder and active API runtime is `backend/`
 
-## Notes
+## Known Issues / Future Improvements
 
-- The backend expects required model files to exist at startup.
-- SQLite is supported for development, and MySQL is supported through backend configuration.
-- The desktop and backend layers currently coexist in the same repository and share the model assets under `models/`.
-
-Then render them directly:
-
-![Attendance System](screenshots/attendance_preview.png)
-![Recognition View](screenshots/recognition_view.png)
-
-## Future Development
-
-- FastAPI backend for centralized attendance APIs
-- Web dashboard (React) for reports/analytics
-- Cloud deployment and centralized monitoring
-- Mobile portal for students and instructors
-- Notification integration (SMS/email)
-
-## License
-
-Academic Research Project - Zamzam University
+- No in-repo web frontend currently; backend is API-first.
+- Student-facing self-service portal and auth flow are not implemented yet.
+- Scheduler runs by polling; event-driven scheduling could reduce latency and DB polling load.
+- Expanded observability (metrics/tracing) and CI automation would improve production readiness.

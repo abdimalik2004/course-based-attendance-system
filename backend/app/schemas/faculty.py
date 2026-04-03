@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from datetime import datetime
-
 from pydantic import BaseModel, ConfigDict
 
 
@@ -29,8 +27,6 @@ class FacultyRead(FacultyBase):
     model_config = ConfigDict(from_attributes=True)
 
     id: int
-    tenant_db_name: str | None = None
-    tenant_db_provisioned_at: datetime | None = None
 
 
 class PaginatedFacultyRead(BaseModel):

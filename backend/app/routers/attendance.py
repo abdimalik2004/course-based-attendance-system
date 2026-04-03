@@ -29,7 +29,7 @@ def _session_faculty_id(db: Session, session_id: int) -> int:
 @router.post(
     "/frame",
     dependencies=[
-        Depends(require_roles("TEACHER", "FACULTY_ADMIN")),
+        Depends(require_roles("TEACHER", "FACULTY")),
         Depends(rate_limit_dependency(settings.frame_rate_limit_requests, settings.frame_rate_limit_window_seconds)),
     ],
     responses={

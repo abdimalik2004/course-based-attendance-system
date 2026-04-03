@@ -39,36 +39,7 @@ class Settings:
     mysql_admin_db: str = os.getenv("MYSQL_ADMIN_DB", "mysql")
     sqlite_path: str = os.getenv("SQLITE_PATH", "backend/database/attendance.db")
 
-    tenant_db_prefix: str = os.getenv("TENANT_DB_PREFIX", "tenant_")
-    tenant_db_charset: str = os.getenv("TENANT_DB_CHARSET", "utf8mb4")
-    tenant_db_collation: str = os.getenv("TENANT_DB_COLLATION", "utf8mb4_unicode_ci")
-    tenant_db_auto_provision_enabled: bool = os.getenv("TENANT_DB_AUTO_PROVISION_ENABLED", "true").strip().lower() in {
-        "1",
-        "true",
-        "yes",
-    }
-    tenant_db_runtime_routing_enabled: bool = os.getenv("TENANT_DB_RUNTIME_ROUTING_ENABLED", "false").strip().lower() in {
-        "1",
-        "true",
-        "yes",
-    }
-    tenant_db_scheduler_enabled: bool = os.getenv("TENANT_DB_SCHEDULER_ENABLED", "false").strip().lower() in {
-        "1",
-        "true",
-        "yes",
-    }
-    tenant_db_allow_legacy_operational_sync: bool = os.getenv(
-        "TENANT_DB_ALLOW_LEGACY_OPERATIONAL_SYNC",
-        "false",
-    ).strip().lower() in {
-        "1",
-        "true",
-        "yes",
-    }
-
     scheduler_poll_seconds: int = int(os.getenv("SCHEDULER_POLL_SECONDS", "60"))
-    scheduler_tenant_failure_threshold: int = int(os.getenv("SCHEDULER_TENANT_FAILURE_THRESHOLD", "3"))
-    scheduler_tenant_stale_seconds: int = int(os.getenv("SCHEDULER_TENANT_STALE_SECONDS", "180"))
     default_grace_period_minutes: int = int(os.getenv("DEFAULT_GRACE_PERIOD_MINUTES", "10"))
 
     face_confidence_threshold: float = float(os.getenv("FACE_CONFIDENCE_THRESHOLD", "0.60"))

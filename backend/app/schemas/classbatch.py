@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import re
 
-from pydantic import BaseModel, ConfigDict, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 _WS_RE = re.compile(r"\s+")
@@ -16,8 +16,8 @@ def _normalize_text(value: str) -> str:
 
 
 class ClassBatchBase(BaseModel):
-    faculty_id: int
-    department_id: int
+    faculty_id: int = Field(gt=0)
+    department_id: int = Field(gt=0)
     name: str
     year: int | None = None
 
@@ -27,16 +27,16 @@ class ClassBatchBase(BaseModel):
         return _normalize_text(value).upper()
 
 
-class ClassBatchCreate(ClassBatchBase):
-    name: str | None = None
-    faculty_id: int | None = None
+class ClassBatchCreate(BaseModel):
+    model_config = ConfigDict(
+        json_schema_extra={
+            "example": {"faculty_id": 1, "department_id": 1, "year": 2026}
+        }
+    )
 
-    @field_validator("name")
-    @classmethod
-    def normalize_optional_name_for_create(cls, value: str | None) -> str | None:
-        if value is None:
-            return None
-        return _normalize_text(value).upper()
+    faculty_id: int | None = Field(default=None, gt=0)
+    department_id: int = Field(gt=0)
+    year: int | None = None
 
 
 class ClassBatchUpdate(BaseModel):
@@ -46,8 +46,8 @@ class ClassBatchUpdate(BaseModel):
         }
     )
 
-    faculty_id: int | None = None
-    department_id: int | None = None
+    faculty_id: int | None = Field(default=None, gt=0)
+    department_id: int | None = Field(default=None, gt=0)
     name: str | None = None
     year: int | None = None
 

@@ -1,33 +1,17 @@
 from __future__ import annotations
 
 import asyncio
-from dataclasses import dataclass
 from datetime import date, datetime, timezone
 import logging
-from threading import Lock
 
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
-from app.db.models import AttendanceSession, CourseSchedule, Faculty, SessionStatus
-from app.db.session import SessionLocal, get_tenant_sessionmaker
+from app.db.models import AttendanceSession, CourseSchedule, SessionStatus
+from app.db.session import SessionLocal
 from app.services.attendance_service import attendance_service
 from app.utils.datetime_utils import combine_today, current_local_datetime, schedule_weekday_from_datetime
 from app.utils.weekday_utils import storage_contains_weekday
-
-
-@dataclass
-class TenantTickStatus:
-    faculty_id: int
-    faculty_code: str
-    tenant_db_name: str
-    last_tick_started_at: str | None = None
-    last_tick_completed_at: str | None = None
-    last_success_at: str | None = None
-    last_error: str | None = None
-    total_success: int = 0
-    total_failures: int = 0
-    consecutive_failures: int = 0
 
 
 class ScheduleService:
@@ -35,8 +19,6 @@ class ScheduleService:
         self._task: asyncio.Task | None = None
         self._stop_event: asyncio.Event | None = None
         self._logger = logging.getLogger(__name__)
-        self._tenant_tick_status: dict[str, TenantTickStatus] = {}
-        self._status_lock = Lock()
         self._last_loop_started_at: str | None = None
         self._last_loop_completed_at: str | None = None
         self._last_loop_error: str | None = None
@@ -51,25 +33,8 @@ class ScheduleService:
             return None
         return datetime.fromisoformat(value)
 
-    def _tenant_alert_reasons(self, status: TenantTickStatus, now: datetime | None = None) -> list[str]:
-        alert_reasons: list[str] = []
-        threshold = max(1, settings.scheduler_tenant_failure_threshold)
-        stale_seconds = max(1, settings.scheduler_tenant_stale_seconds)
-        reference_now = now or self._utc_now()
-
-        if status.consecutive_failures >= threshold:
-            alert_reasons.append(f"consecutive_failures>={threshold}")
-
-        last_completed = self._parse_iso8601(status.last_tick_completed_at)
-        if self.is_running() and last_completed is not None:
-            age_seconds = (reference_now - last_completed).total_seconds()
-            if age_seconds > stale_seconds:
-                alert_reasons.append(f"last_tick_stale>{stale_seconds}s")
-
-        return alert_reasons
-
     def readiness_status(self) -> dict[str, object]:
-        report = self.tenant_tick_report()
+        report = self.scheduler_report()
         healthy = report["scheduler_running"] and report["last_loop_error"] is None
         reason = None
 
@@ -77,13 +42,6 @@ class ScheduleService:
             reason = "Scheduler service is not running"
         elif report["last_loop_error"] is not None:
             reason = f"Scheduler loop error: {report['last_loop_error']}"
-        elif report["tenant_mode_enabled"] and report["tenant_count"] == 0:
-            healthy = False
-            reason = "Tenant scheduler is enabled but no eligible tenants were discovered"
-        elif report["unhealthy_tenant_count"] > 0:
-            healthy = False
-            tenant_codes = ", ".join(item["faculty_code"] for item in report["unhealthy_tenants"])
-            reason = f"Tenant scheduler unhealthy for: {tenant_codes}"
 
         return {
             "healthy": healthy,
@@ -122,11 +80,6 @@ class ScheduleService:
         self._last_loop_started_at = now_iso
         self._last_loop_error = None
 
-        if settings.tenant_db_runtime_routing_enabled and settings.tenant_db_scheduler_enabled:
-            self._tick_all_tenants()
-            self._last_loop_completed_at = self._utc_now().isoformat()
-            return
-
         db = SessionLocal()
         try:
             self._tick(db)
@@ -136,69 +89,6 @@ class ScheduleService:
             self._logger.exception("Central scheduler tick failed", exc_info=exc)
         finally:
             db.close()
-
-    def _tick_all_tenants(self) -> None:
-        central_db = SessionLocal()
-        try:
-            faculties = (
-                central_db.query(Faculty)
-                .filter(
-                    Faculty.tenant_db_name.is_not(None),
-                    Faculty.tenant_db_provisioned_at.is_not(None),
-                )
-                .order_by(Faculty.id)
-                .all()
-            )
-        finally:
-            central_db.close()
-
-        for faculty in faculties:
-            if not faculty.tenant_db_name:
-                continue
-
-            started_at = self._utc_now().isoformat()
-            with self._status_lock:
-                status = self._tenant_tick_status.get(faculty.tenant_db_name)
-                if status is None:
-                    status = TenantTickStatus(
-                        faculty_id=faculty.id,
-                        faculty_code=faculty.code,
-                        tenant_db_name=faculty.tenant_db_name,
-                    )
-                    self._tenant_tick_status[faculty.tenant_db_name] = status
-                else:
-                    status.faculty_id = faculty.id
-                    status.faculty_code = faculty.code
-                status.last_tick_started_at = started_at
-
-            tenant_db = get_tenant_sessionmaker(faculty.tenant_db_name)()
-            try:
-                self._tick(tenant_db)
-                finished_at = self._utc_now().isoformat()
-                with self._status_lock:
-                    status = self._tenant_tick_status[faculty.tenant_db_name]
-                    status.last_tick_completed_at = finished_at
-                    status.last_success_at = finished_at
-                    status.last_error = None
-                    status.total_success += 1
-                    status.consecutive_failures = 0
-            except Exception as exc:  # noqa: BLE001
-                tenant_db.rollback()
-                finished_at = self._utc_now().isoformat()
-                with self._status_lock:
-                    status = self._tenant_tick_status[faculty.tenant_db_name]
-                    status.last_tick_completed_at = finished_at
-                    status.last_error = str(exc)
-                    status.total_failures += 1
-                    status.consecutive_failures += 1
-                self._logger.exception(
-                    "Scheduler tick failed for faculty_id=%s tenant_db=%s",
-                    faculty.id,
-                    faculty.tenant_db_name,
-                    exc_info=exc,
-                )
-            finally:
-                tenant_db.close()
 
     def _tick(self, db: Session) -> None:
         now = current_local_datetime()
@@ -330,52 +220,13 @@ class ScheduleService:
     def is_running(self) -> bool:
         return self._task is not None and not self._task.done()
 
-    def tenant_tick_report(self) -> dict:
-        generated_at = self._utc_now()
-        with self._status_lock:
-            tenant_items = [
-                {
-                    "faculty_id": status.faculty_id,
-                    "faculty_code": status.faculty_code,
-                    "tenant_db_name": status.tenant_db_name,
-                    "last_tick_started_at": status.last_tick_started_at,
-                    "last_tick_completed_at": status.last_tick_completed_at,
-                    "last_success_at": status.last_success_at,
-                    "last_error": status.last_error,
-                    "total_success": status.total_success,
-                    "total_failures": status.total_failures,
-                    "consecutive_failures": status.consecutive_failures,
-                    "alert_reasons": self._tenant_alert_reasons(status, generated_at),
-                }
-                for status in sorted(self._tenant_tick_status.values(), key=lambda row: row.faculty_id)
-            ]
-
-        unhealthy_tenants = [
-            {**item, "is_healthy": False}
-            for item in tenant_items
-            if item["alert_reasons"]
-        ]
-        tenant_items = [
-            {**item, "is_healthy": not item["alert_reasons"]}
-            for item in tenant_items
-        ]
-
-        mode = "tenant" if settings.tenant_db_runtime_routing_enabled and settings.tenant_db_scheduler_enabled else "central"
+    def scheduler_report(self) -> dict:
         return {
             "scheduler_running": self.is_running(),
-            "mode": mode,
-            "tenant_mode_enabled": settings.tenant_db_runtime_routing_enabled and settings.tenant_db_scheduler_enabled,
+            "mode": "central",
             "last_loop_started_at": self._last_loop_started_at,
             "last_loop_completed_at": self._last_loop_completed_at,
             "last_loop_error": self._last_loop_error,
-            "alert_thresholds": {
-                "consecutive_failures": max(1, settings.scheduler_tenant_failure_threshold),
-                "stale_seconds": max(1, settings.scheduler_tenant_stale_seconds),
-            },
-            "tenant_count": len(tenant_items),
-            "unhealthy_tenant_count": len(unhealthy_tenants),
-            "unhealthy_tenants": unhealthy_tenants,
-            "tenants": tenant_items,
         }
 
 

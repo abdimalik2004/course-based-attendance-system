@@ -58,7 +58,7 @@ def _department_duplicate_exists(
     return db.query(query.exists()).scalar()
 
 
-@router.post("", response_model=DepartmentRead, dependencies=[Depends(require_roles("ACADEMIA", "FACULTY_ADMIN"))])
+@router.post("", response_model=DepartmentRead, dependencies=[Depends(require_roles("ACADEMIA"))])
 def create_department(
     payload: DepartmentCreate,
     db: Session = Depends(get_role_scoped_db),
@@ -130,7 +130,7 @@ def create_department(
     return obj
 
 
-@router.get("", response_model=PaginatedDepartmentRead, dependencies=[Depends(require_roles("ACADEMIA", "FACULTY_ADMIN", "TEACHER"))])
+@router.get("", response_model=PaginatedDepartmentRead, dependencies=[Depends(require_roles("ACADEMIA", "FACULTY", "TEACHER"))])
 def list_departments(
     db: Session = Depends(get_role_scoped_db),
     skip: int = Query(default=0, ge=0, description="Number of rows to skip", examples=[0]),
@@ -149,7 +149,7 @@ def list_departments(
     return {"items": items, "total": total, "skip": skip, "limit": limit}
 
 
-@router.put("/{department_id}", response_model=DepartmentRead, dependencies=[Depends(require_roles("ACADEMIA", "FACULTY_ADMIN"))])
+@router.put("/{department_id}", response_model=DepartmentRead, dependencies=[Depends(require_roles("ACADEMIA"))])
 def update_department(
     department_id: int,
     payload: DepartmentUpdate,
@@ -199,7 +199,7 @@ def update_department(
     return obj
 
 
-@router.delete("/{department_id}", dependencies=[Depends(require_roles("ACADEMIA", "FACULTY_ADMIN"))])
+@router.delete("/{department_id}", dependencies=[Depends(require_roles("ACADEMIA"))])
 def delete_department(department_id: int, db: Session = Depends(get_role_scoped_db)):
     obj = db.query(Department).filter(Department.id == department_id).first()
     if not obj:

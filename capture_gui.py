@@ -42,13 +42,16 @@ class CaptureGUI:
         self.status_var = tk.StringVar(value="Ready")
         self.progress_var = tk.StringVar(value="0")
         self.hint_var = tk.StringVar(value="Select Faculty/Program, then enter full student id like 26CIS001")
-        self.faculty_options = self._load_faculty_options()
+        self.faculty_options = []
+        self.faculty_combo = None
 
         self._build_ui()
         self.root.protocol("WM_DELETE_WINDOW", self._on_close)
 
         self._last_hint_text = ""
         self._last_hint_time = 0.0
+        self._refresh_faculty_options()
+        self._schedule_faculty_refresh()
 
     def _build_ui(self):
         form = ttk.Frame(self.root)
@@ -83,9 +86,10 @@ class CaptureGUI:
 
     def _combo_row(self, parent, row_idx, label, var, values):
         ttk.Label(parent, text=label).grid(row=row_idx, column=0, sticky=tk.W, padx=6, pady=4)
-        combo = ttk.Combobox(parent, textvariable=var, values=values, width=27, state="normal")
+        combo = ttk.Combobox(parent, textvariable=var, values=values, width=27, state="readonly")
         combo.grid(row=row_idx, column=1, sticky=tk.W, padx=6, pady=4)
         combo.bind("<<ComboboxSelected>>", lambda _event: self._on_faculty_selected())
+        self.faculty_combo = combo
 
     def _load_faculty_options(self):
         options: set[str] = set()
@@ -126,10 +130,30 @@ class CaptureGUI:
                     options.add(item.name.upper())
 
         ordered = sorted(options)
-        if ordered:
-            self.faculty_var.set(ordered[0])
-            self._update_hint_for_faculty(ordered[0])
         return ordered
+
+    def _refresh_faculty_options(self):
+        previous_selection = self.faculty_var.get().strip()
+        options = self._load_faculty_options()
+        self.faculty_options = options
+
+        if self.faculty_combo is not None:
+            self.faculty_combo.configure(values=options)
+
+        if previous_selection and previous_selection in options:
+            self.faculty_var.set(previous_selection)
+            self._update_hint_for_faculty(previous_selection)
+        elif options:
+            self.faculty_var.set(options[0])
+            self._update_hint_for_faculty(options[0])
+        else:
+            self.faculty_var.set("")
+
+    def _schedule_faculty_refresh(self):
+        if not getattr(self.root, "winfo_exists", lambda: False)():
+            return
+        self._refresh_faculty_options()
+        self.root.after(5000, self._schedule_faculty_refresh)
 
     def _on_faculty_selected(self):
         self._update_hint_for_faculty(self.faculty_var.get())

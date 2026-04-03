@@ -9,6 +9,7 @@ from app.core.security import require_roles
 from app.db.faculty_scope import enforce_faculty_scope, get_optional_faculty_scope_context
 from app.db.models import Student
 from app.db.role_scoped import get_role_scoped_db
+from app.services.enrollment_service import auto_enroll_student_in_matching_courses
 from app.schemas.student import StudentCreate, StudentRead, StudentUpdate, PaginatedStudentRead
 from app.utils.organization import (
     ensure_class_batch_matches_faculty_and_department,
@@ -23,7 +24,7 @@ from app.utils.student_numbering import next_available_student_number
 router = APIRouter(prefix="/students", tags=["students"])
 
 
-@router.post("", response_model=StudentRead, dependencies=[Depends(require_roles("FACULTY_ADMIN"))])
+@router.post("", response_model=StudentRead, dependencies=[Depends(require_roles("ADMISSIONS"))])
 def create_student(
     payload: StudentCreate,
     db: Session = Depends(get_role_scoped_db),
@@ -59,6 +60,8 @@ def create_student(
     )
     db.add(obj)
     try:
+        db.flush()
+        auto_enroll_student_in_matching_courses(db, obj)
         db.commit()
     except IntegrityError as exc:
         db.rollback()
@@ -67,7 +70,7 @@ def create_student(
     return obj
 
 
-@router.get("", response_model=PaginatedStudentRead, dependencies=[Depends(require_roles("FACULTY_ADMIN", "TEACHER"))])
+@router.get("", response_model=PaginatedStudentRead, dependencies=[Depends(require_roles("ADMISSIONS", "FACULTY", "TEACHER", "ACADEMIA"))])
 def list_students(
     db: Session = Depends(get_role_scoped_db),
     skip: int = Query(default=0, ge=0, description="Number of rows to skip", examples=[0]),
@@ -92,7 +95,7 @@ def list_students(
     return {"items": items, "total": total, "skip": skip, "limit": limit}
 
 
-@router.put("/{student_id}", response_model=StudentRead, dependencies=[Depends(require_roles("FACULTY_ADMIN"))])
+@router.put("/{student_id}", response_model=StudentRead, dependencies=[Depends(require_roles("ADMISSIONS"))])
 def update_student(
     student_id: int,
     payload: StudentUpdate,
@@ -141,7 +144,7 @@ def update_student(
     return obj
 
 
-@router.delete("/{student_id}", dependencies=[Depends(require_roles("FACULTY_ADMIN"))])
+@router.delete("/{student_id}", dependencies=[Depends(require_roles("ADMISSIONS"))])
 def delete_student(student_id: int, db: Session = Depends(get_role_scoped_db)):
     obj = db.query(Student).filter(Student.id == student_id).first()
     if not obj:

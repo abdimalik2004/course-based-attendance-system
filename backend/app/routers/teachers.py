@@ -45,7 +45,7 @@ def _generate_teacher_number(db: Session, faculty_code: str) -> str:
     return f"{prefix}{max_seq + 1:03d}"
 
 
-@router.post("", response_model=TeacherRead, dependencies=[Depends(require_roles("FACULTY_ADMIN"))])
+@router.post("", response_model=TeacherRead, dependencies=[Depends(require_roles("HR"))])
 def create_teacher(
     payload: TeacherCreate,
     db: Session = Depends(get_role_scoped_db),
@@ -82,7 +82,7 @@ def create_teacher(
     return obj
 
 
-@router.get("", response_model=PaginatedTeacherRead, dependencies=[Depends(require_roles("FACULTY_ADMIN", "ACADEMIA"))])
+@router.get("", response_model=PaginatedTeacherRead, dependencies=[Depends(require_roles("HR", "FACULTY", "ACADEMIA"))])
 def list_teachers(
     db: Session = Depends(get_role_scoped_db),
     skip: int = Query(default=0, ge=0, description="Number of rows to skip", examples=[0]),
@@ -104,7 +104,7 @@ def list_teachers(
     return {"items": items, "total": total, "skip": skip, "limit": limit}
 
 
-@router.put("/{teacher_id}", response_model=TeacherRead, dependencies=[Depends(require_roles("FACULTY_ADMIN"))])
+@router.put("/{teacher_id}", response_model=TeacherRead, dependencies=[Depends(require_roles("HR"))])
 def update_teacher(
     teacher_id: int,
     payload: TeacherUpdate,
@@ -140,7 +140,7 @@ def update_teacher(
     return obj
 
 
-@router.delete("/{teacher_id}", dependencies=[Depends(require_roles("FACULTY_ADMIN"))])
+@router.delete("/{teacher_id}", dependencies=[Depends(require_roles("HR"))])
 def delete_teacher(teacher_id: int, db: Session = Depends(get_role_scoped_db)):
     obj = db.query(Teacher).filter(Teacher.id == teacher_id).first()
     if not obj:

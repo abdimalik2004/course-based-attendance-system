@@ -20,6 +20,7 @@ from app.db.models import (
     normalize_course_title,
 )
 from app.db.role_scoped import get_role_scoped_db
+from app.services.enrollment_service import auto_enroll_existing_students_for_course
 from app.schemas.course import (
     CourseAssignmentCreate,
     CourseCreate,
@@ -122,7 +123,7 @@ def _ensure_student_schedule_has_no_conflict(db: Session, *, student_id: int, co
             )
 
 
-@router.post("", response_model=CourseRead, dependencies=[Depends(require_roles("FACULTY_ADMIN"))])
+@router.post("", response_model=CourseRead, dependencies=[Depends(require_roles("ACADEMIA"))])
 def create_course(
     payload: CourseCreate,
     db: Session = Depends(get_role_scoped_db),
@@ -160,6 +161,8 @@ def create_course(
     )
     db.add(obj)
     try:
+        db.flush()
+        auto_enroll_existing_students_for_course(db, obj)
         db.commit()
     except IntegrityError as exc:
         db.rollback()
@@ -168,7 +171,7 @@ def create_course(
     return obj
 
 
-@router.get("", response_model=PaginatedCourseRead, dependencies=[Depends(require_roles("FACULTY_ADMIN", "TEACHER", "ACADEMIA"))])
+@router.get("", response_model=PaginatedCourseRead, dependencies=[Depends(require_roles("FACULTY", "TEACHER", "ACADEMIA"))])
 def list_courses(
     db: Session = Depends(get_role_scoped_db),
     skip: int = Query(default=0, ge=0, description="Number of rows to skip", examples=[0]),
@@ -195,7 +198,7 @@ def list_courses(
     return {"items": items, "total": total, "skip": skip, "limit": limit}
 
 
-@router.put("/{course_id}", response_model=CourseRead, dependencies=[Depends(require_roles("FACULTY_ADMIN"))])
+@router.put("/{course_id}", response_model=CourseRead, dependencies=[Depends(require_roles("ACADEMIA"))])
 def update_course(
     course_id: int,
     payload: CourseUpdate,
@@ -237,7 +240,7 @@ def update_course(
     return obj
 
 
-@router.delete("/{course_id}", dependencies=[Depends(require_roles("FACULTY_ADMIN"))])
+@router.delete("/{course_id}", dependencies=[Depends(require_roles("ACADEMIA"))])
 def delete_course(course_id: int, db: Session = Depends(get_role_scoped_db)):
     obj = db.query(Course).filter(Course.id == course_id).first()
     if not obj:
@@ -251,7 +254,7 @@ def delete_course(course_id: int, db: Session = Depends(get_role_scoped_db)):
     return {"deleted": True, "course_id": course_id}
 
 
-@router.post("/assign-teacher", dependencies=[Depends(require_roles("FACULTY_ADMIN"))])
+@router.post("/assign-teacher", dependencies=[Depends(require_roles("FACULTY"))])
 def assign_teacher(
     payload: CourseAssignmentCreate,
     db: Session = Depends(get_role_scoped_db),
@@ -293,7 +296,7 @@ def assign_teacher(
     return {"id": assignment.id}
 
 
-@router.post("/{course_id}/enroll/{student_id}", dependencies=[Depends(require_roles("FACULTY_ADMIN"))])
+@router.post("/{course_id}/enroll/{student_id}", dependencies=[Depends(require_roles("FACULTY"))])
 def enroll_student(
     course_id: int,
     student_id: int,
@@ -332,7 +335,7 @@ def enroll_student(
 @router.get(
     "/{course_id}/students",
     response_model=list[StudentRead],
-    dependencies=[Depends(require_roles("FACULTY_ADMIN", "TEACHER", "ACADEMIA"))],
+    dependencies=[Depends(require_roles("FACULTY", "TEACHER", "ACADEMIA"))],
 )
 def list_enrolled_students(course_id: int, db: Session = Depends(get_role_scoped_db)):
     course = db.query(Course).filter(Course.id == course_id).first()

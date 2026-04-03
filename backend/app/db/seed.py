@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
 from datetime import time
 
 from app.core.security import get_password_hash
@@ -12,13 +11,13 @@ from app.db.models import (
     Department,
     Enrollment,
     Faculty,
+    OrganizationalUnit,
     Role,
     Student,
     Teacher,
     User,
 )
 from app.db.session import SessionLocal
-from app.services.tenant_provisioning import build_tenant_db_name, provision_faculty_tenant_database
 
 
 def _get_or_create_role(db, name: str) -> Role:
@@ -29,6 +28,20 @@ def _get_or_create_role(db, name: str) -> Role:
     db.add(role)
     db.flush()
     return role
+
+
+def _get_or_create_org_unit(db, code: str, name: str) -> OrganizationalUnit:
+    unit = db.query(OrganizationalUnit).filter(OrganizationalUnit.code == code).first()
+    if unit:
+        unit.name = name
+        db.add(unit)
+        db.flush()
+        return unit
+
+    unit = OrganizationalUnit(code=code, name=name)
+    db.add(unit)
+    db.flush()
+    return unit
 
 
 def _get_or_create_user(db, username: str, password: str, role_names: list[str], faculty_id: int | None = None) -> User:
@@ -74,36 +87,52 @@ def _get_or_create_department(db, faculty_id: int, name: str, code: str) -> Depa
     return department
 
 
+def _get_or_create_faculty(db, name: str, code: str) -> Faculty:
+    by_code = db.query(Faculty).filter(Faculty.code == code).first()
+    if by_code:
+        if by_code.name != name:
+            by_code.name = name
+            db.add(by_code)
+            db.flush()
+        return by_code
+
+    by_name = db.query(Faculty).filter(Faculty.name == name).first()
+    if by_name:
+        if by_name.code != code:
+            code_taken = db.query(Faculty.id).filter(Faculty.code == code, Faculty.id != by_name.id).first()
+            if code_taken is None:
+                by_name.code = code
+                db.add(by_name)
+                db.flush()
+        return by_name
+
+    faculty = Faculty(name=name, code=code)
+    db.add(faculty)
+    db.flush()
+    return faculty
+
+
 def seed_demo_data() -> None:
     db = SessionLocal()
     try:
-        for role_name in ["ACADEMIA", "FACULTY_ADMIN", "TEACHER"]:
+        for code, name in [
+            ("ACADEMIA", "Academia"),
+            ("FACULTIES", "Faculties"),
+            ("HR", "HR"),
+            ("ADMISSIONS", "Admissions"),
+        ]:
+            _get_or_create_org_unit(db, code, name)
+
+        for role_name in ["ACADEMIA", "FACULTY", "HR", "ADMISSIONS", "TEACHER"]:
             _get_or_create_role(db, role_name)
         db.flush()
 
-        faculty = db.query(Faculty).filter(Faculty.code == "FCS").first()
-        if not faculty:
-            faculty = Faculty(name="Faculty of Computer Science", code="FCS")
-            db.add(faculty)
-            db.flush()
-        if not faculty.tenant_db_name:
-            faculty.tenant_db_name = build_tenant_db_name(faculty.code)
+        faculty = _get_or_create_faculty(db, "Faculty of Computer Science", "FCS")
 
         department = _get_or_create_department(db, faculty.id, "Department of Information Technology", "IT")
 
-        engineering = db.query(Faculty).filter(Faculty.code == "ENG").first()
-        if not engineering:
-            engineering = Faculty(name="Faculty of Engineering", code="ENG")
-            db.add(engineering)
-            db.flush()
-        if not engineering.tenant_db_name:
-            engineering.tenant_db_name = build_tenant_db_name(engineering.code)
+        engineering = _get_or_create_faculty(db, "Faculty of Engineering", "ENG")
         _get_or_create_department(db, engineering.id, "Department of Architecture", "ARCH")
-
-        for row in (faculty, engineering):
-            result = provision_faculty_tenant_database(row.tenant_db_name)
-            if result.provisioned:
-                row.tenant_db_provisioned_at = datetime.now(timezone.utc)
 
         class_batch = (
             db.query(ClassBatch)
@@ -111,7 +140,12 @@ def seed_demo_data() -> None:
             .first()
         )
         if not class_batch:
-            class_batch = ClassBatch(faculty_id=faculty.id, department_id=department.id, name="CIS2201", year=2026)
+            class_batch = ClassBatch(
+                faculty_id=faculty.id,
+                department_id=department.id,
+                name="CIS2201",
+                year=2026,
+            )
             db.add(class_batch)
             db.flush()
 
@@ -120,7 +154,7 @@ def seed_demo_data() -> None:
             db,
             "facultyadmin",
             "faculty123",
-            ["FACULTY_ADMIN"],
+            ["FACULTY"],
             faculty_id=faculty.id,
         )
 
@@ -130,6 +164,20 @@ def seed_demo_data() -> None:
             "teacher123",
             ["TEACHER"],
             faculty_id=faculty.id,
+        )
+
+        hr_user = _get_or_create_user(
+            db,
+            "hr",
+            "hr123",
+            ["HR"],
+        )
+
+        admissions_user = _get_or_create_user(
+            db,
+            "admission",
+            "admission123",
+            ["ADMISSIONS"],
         )
 
         teacher = db.query(Teacher).filter(Teacher.teacher_number == "T-1001").first()
@@ -150,7 +198,11 @@ def seed_demo_data() -> None:
             .first()
         )
         if not course:
-            course = Course(class_batch_id=class_batch.id, code="CSC401", title="Artificial Intelligence")
+            course = Course(
+                class_batch_id=class_batch.id,
+                code="CSC401",
+                title="Artificial Intelligence",
+            )
             db.add(course)
             db.flush()
 
@@ -214,9 +266,12 @@ def seed_demo_data() -> None:
 
         db.commit()
         print("Seed completed.")
-        print("Users: academia/academia123, facultyadmin/faculty123, teacher1/teacher123")
+        print(
+            "Users: academia/academia123, facultyadmin/faculty123, "
+            "teacher1/teacher123, hr/hr123, admission/admission123"
+        )
         print(f"Faculty: {faculty.name} | Class: {class_batch.name} | Course: {course.code}")
-        _ = academia_user, faculty_admin_user
+        _ = academia_user, faculty_admin_user, hr_user, admissions_user
     finally:
         db.close()
 

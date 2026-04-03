@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import date, datetime
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 from app.db.models import AttendanceStatus, SessionStatus
 
@@ -17,7 +17,7 @@ class AttendanceFrameRequest(BaseModel):
         }
     )
 
-    session_id: int
+    session_id: int = Field(gt=0)
     image: str
 
 

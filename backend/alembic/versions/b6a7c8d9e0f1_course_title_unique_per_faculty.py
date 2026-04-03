@@ -29,12 +29,22 @@ def _unique_constraint_names(bind, table_name: str) -> set[str]:
     }
 
 
+def _column_names(bind, table_name: str) -> set[str]:
+    inspector = sa.inspect(bind)
+    return {column.get("name") for column in inspector.get_columns(table_name)}
+
+
 def upgrade() -> None:
     bind = op.get_bind()
+    columns = _column_names(bind, "courses")
+    add_faculty_id = "faculty_id" not in columns
+    add_normalized_title = "normalized_title" not in columns
 
     with op.batch_alter_table("courses") as batch_op:
-        batch_op.add_column(sa.Column("faculty_id", sa.Integer(), nullable=True))
-        batch_op.add_column(sa.Column("normalized_title", sa.String(length=200), nullable=True))
+        if add_faculty_id:
+            batch_op.add_column(sa.Column("faculty_id", sa.Integer(), nullable=True))
+        if add_normalized_title:
+            batch_op.add_column(sa.Column("normalized_title", sa.String(length=200), nullable=True))
 
     op.execute(
         sa.text(
@@ -71,18 +81,27 @@ def upgrade() -> None:
             + details
         )
 
-    with op.batch_alter_table("courses") as batch_op:
-        batch_op.alter_column("faculty_id", nullable=False)
-        batch_op.alter_column("normalized_title", nullable=False)
-        batch_op.create_foreign_key(
-            "fk_courses_faculty_id_faculties",
-            "faculties",
-            ["faculty_id"],
-            ["id"],
-            ondelete="CASCADE",
-        )
-
     unique_constraints = _unique_constraint_names(bind, "courses")
+    foreign_keys = {
+        foreign_key.get("name")
+        for foreign_key in sa.inspect(bind).get_foreign_keys("courses")
+        if foreign_key.get("name")
+    }
+
+    with op.batch_alter_table("courses") as batch_op:
+        if add_faculty_id or "faculty_id" in columns:
+            batch_op.alter_column("faculty_id", existing_type=sa.Integer(), nullable=False)
+        if add_normalized_title or "normalized_title" in columns:
+            batch_op.alter_column("normalized_title", existing_type=sa.String(length=200), nullable=False)
+        if "fk_courses_faculty_id_faculties" not in foreign_keys:
+            batch_op.create_foreign_key(
+                "fk_courses_faculty_id_faculties",
+                "faculties",
+                ["faculty_id"],
+                ["id"],
+                ondelete="CASCADE",
+            )
+
     if "uq_course_faculty_normalized_title" not in unique_constraints:
         with op.batch_alter_table("courses") as batch_op:
             batch_op.create_unique_constraint(

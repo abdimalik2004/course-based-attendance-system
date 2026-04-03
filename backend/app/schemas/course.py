@@ -1,10 +1,10 @@
 from __future__ import annotations
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class CourseBase(BaseModel):
-    class_batch_id: int
+    class_batch_id: int = Field(gt=0)
     code: str
     title: str
 
@@ -19,7 +19,7 @@ class CourseCreate(BaseModel):
         }
     )
 
-    class_batch_id: int
+    class_batch_id: int = Field(gt=0)
     title: str
 
 
@@ -30,7 +30,7 @@ class CourseUpdate(BaseModel):
         }
     )
 
-    class_batch_id: int | None = None
+    class_batch_id: int | None = Field(default=None, gt=0)
     code: str | None = None
     title: str | None = None
 
@@ -49,6 +49,6 @@ class PaginatedCourseRead(BaseModel):
 
 
 class CourseAssignmentCreate(BaseModel):
-    course_id: int
-    teacher_id: int
+    course_id: int = Field(gt=0)
+    teacher_id: int = Field(gt=0)
     is_primary: bool = False

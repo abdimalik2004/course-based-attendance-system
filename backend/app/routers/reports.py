@@ -29,7 +29,7 @@ def _course_faculty_id(db: Session, course_id: int) -> int:
     return class_batch.faculty_id
 
 
-@router.get("/course/{course_id}", dependencies=[Depends(require_roles("TEACHER", "FACULTY_ADMIN", "ACADEMIA"))])
+@router.get("/course/{course_id}", dependencies=[Depends(require_roles("TEACHER", "FACULTY", "ACADEMIA"))])
 def course_report(
     course_id: int,
     db: Session = Depends(get_role_scoped_db),
@@ -80,7 +80,7 @@ def course_report(
     }
 
 
-@router.get("/course/{course_id}/range", dependencies=[Depends(require_roles("TEACHER", "FACULTY_ADMIN", "ACADEMIA"))])
+@router.get("/course/{course_id}/range", dependencies=[Depends(require_roles("TEACHER", "FACULTY", "ACADEMIA"))])
 def course_report_range(
     course_id: int,
     start_date: date,
@@ -123,7 +123,7 @@ def course_report_range(
     }
 
 
-@router.get("/course/{course_id}/students", dependencies=[Depends(require_roles("TEACHER", "FACULTY_ADMIN", "ACADEMIA"))])
+@router.get("/course/{course_id}/students", dependencies=[Depends(require_roles("TEACHER", "FACULTY", "ACADEMIA"))])
 def course_report_by_student(
     course_id: int,
     start_date: date | None = None,
@@ -176,7 +176,7 @@ def course_report_by_student(
     }
 
 
-@router.get("/course/{course_id}/sessions", dependencies=[Depends(require_roles("TEACHER", "FACULTY_ADMIN", "ACADEMIA"))])
+@router.get("/course/{course_id}/sessions", dependencies=[Depends(require_roles("TEACHER", "FACULTY", "ACADEMIA"))])
 def course_report_by_session(
     course_id: int,
     start_date: date | None = None,

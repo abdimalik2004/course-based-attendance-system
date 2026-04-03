@@ -18,7 +18,8 @@ from app.core.security import (
 )
 from app.db.models import Role, User
 from app.db.session import get_db
-from app.schemas.auth import RefreshTokenRequest, TokenPair, UserCreate, UserRead
+from app.db.reset_database import reset_database_to_clean_state
+from app.schemas.auth import RefreshTokenRequest, ResetDatabaseRequest, TokenPair, UserCreate, UserRead
 
 
 router = APIRouter(prefix="/auth", tags=["auth"])
@@ -109,3 +110,20 @@ def refresh_tokens(payload: RefreshTokenRequest, db: Session = Depends(get_db)):
 @router.get("/me", response_model=UserRead)
 def read_current_user(user: User = Depends(get_current_user)):
     return user
+
+
+@router.post(
+    "/reset-database",
+    dependencies=[Depends(require_roles("ACADEMIA"))],
+    responses={
+        400: {"description": "Invalid confirmation value"},
+        401: {"description": "Unauthorized"},
+        403: {"description": "Forbidden"},
+    },
+)
+def reset_database(payload: ResetDatabaseRequest):
+    if payload.confirmation.strip().upper() != "RESET":
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Confirmation must be RESET")
+
+    summary = reset_database_to_clean_state()
+    return {"ok": True, "summary": summary}

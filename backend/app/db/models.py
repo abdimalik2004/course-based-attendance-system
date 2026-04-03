@@ -24,6 +24,35 @@ class Base(DeclarativeBase):
     pass
 
 
+_POSITIVE_ID_FIELDS: dict[str, tuple[str, ...]] = {
+    "user_role_links": ("user_id", "role_id"),
+    "roles": ("id",),
+    "organizational_units": ("id",),
+    "faculties": ("id",),
+    "departments": ("id", "faculty_id"),
+    "class_batches": ("id", "faculty_id", "department_id"),
+    "users": ("id", "faculty_id"),
+    "students": ("id", "faculty_id", "department_id", "class_batch_id"),
+    "teachers": ("id", "faculty_id", "department_id", "user_id"),
+    "courses": ("id", "class_batch_id", "faculty_id"),
+    "course_assignments": ("id", "course_id", "teacher_id"),
+    "enrollments": ("id", "student_id", "course_id"),
+    "course_schedules": ("id", "course_id"),
+    "attendance_sessions": ("id", "course_id", "schedule_id"),
+    "attendance_records": ("id", "student_id", "course_id", "session_id"),
+}
+
+
+def _validate_positive_id_fields(_mapper, _connection, target) -> None:
+    table_name = target.__tablename__
+    for field_name in _POSITIVE_ID_FIELDS.get(table_name, ()):  # pragma: no branch - tiny tuple loop
+        value = getattr(target, field_name, None)
+        if value is None:
+            continue
+        if isinstance(value, bool) or int(value) <= 0:
+            raise ValueError(f"{table_name}.{field_name} must be a positive integer")
+
+
 class AttendanceStatus(str, enum.Enum):
     PRESENT = "PRESENT"
     LATE = "LATE"
@@ -45,7 +74,7 @@ class UserRoleLink(Base):
 class Role(Base):
     __tablename__ = "roles"
 
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True, autoincrement=True)
     name: Mapped[str] = mapped_column(String(64), unique=True, nullable=False)
 
     users: Mapped[list["User"]] = relationship(
@@ -53,14 +82,21 @@ class Role(Base):
     )
 
 
+class OrganizationalUnit(Base):
+    __tablename__ = "organizational_units"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True, autoincrement=True)
+    code: Mapped[str] = mapped_column(String(32), unique=True, nullable=False)
+    name: Mapped[str] = mapped_column(String(120), unique=True, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), nullable=False)
+
+
 class Faculty(Base):
     __tablename__ = "faculties"
 
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True, autoincrement=True)
     name: Mapped[str] = mapped_column(String(150), unique=True, nullable=False)
     code: Mapped[str] = mapped_column(String(30), unique=True, nullable=False)
-    tenant_db_name: Mapped[str | None] = mapped_column(String(120), unique=True, nullable=True)
-    tenant_db_provisioned_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), nullable=False)
 
     departments: Mapped[list["Department"]] = relationship(back_populates="faculty", cascade="all, delete-orphan")
@@ -76,7 +112,7 @@ class Department(Base):
         UniqueConstraint("faculty_id", "code", name="uq_department_faculty_code"),
     )
 
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True, autoincrement=True)
     faculty_id: Mapped[int] = mapped_column(ForeignKey("faculties.id", ondelete="CASCADE"), nullable=False)
     name: Mapped[str] = mapped_column(String(150), nullable=False)
     code: Mapped[str] = mapped_column(String(30), nullable=False)
@@ -92,7 +128,7 @@ class ClassBatch(Base):
     __tablename__ = "class_batches"
     __table_args__ = (UniqueConstraint("department_id", "name", name="uq_class_batch_department_name"),)
 
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True, autoincrement=True)
     faculty_id: Mapped[int] = mapped_column(ForeignKey("faculties.id", ondelete="CASCADE"), nullable=False)
     department_id: Mapped[int] = mapped_column(ForeignKey("departments.id", ondelete="CASCADE"), nullable=False)
     name: Mapped[str] = mapped_column(String(80), nullable=False)
@@ -107,7 +143,7 @@ class ClassBatch(Base):
 class User(Base):
     __tablename__ = "users"
 
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True, autoincrement=True)
     username: Mapped[str] = mapped_column(String(80), unique=True, nullable=False, index=True)
     email: Mapped[str | None] = mapped_column(String(150), unique=True, nullable=True)
     hashed_password: Mapped[str] = mapped_column(String(255), nullable=False)
@@ -121,7 +157,7 @@ class User(Base):
 class Student(Base):
     __tablename__ = "students"
 
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True, autoincrement=True)
     student_number: Mapped[str] = mapped_column(String(64), unique=True, nullable=False)
     full_name: Mapped[str] = mapped_column(String(180), nullable=False)
     faculty_id: Mapped[int] = mapped_column(ForeignKey("faculties.id", ondelete="CASCADE"), nullable=False)
@@ -139,7 +175,7 @@ class Student(Base):
 class Teacher(Base):
     __tablename__ = "teachers"
 
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True, autoincrement=True)
     teacher_number: Mapped[str] = mapped_column(String(64), unique=True, nullable=False)
     full_name: Mapped[str] = mapped_column(String(180), nullable=False)
     faculty_id: Mapped[int] = mapped_column(ForeignKey("faculties.id", ondelete="CASCADE"), nullable=False)
@@ -158,7 +194,7 @@ class Course(Base):
         UniqueConstraint("faculty_id", "normalized_title", name="uq_course_faculty_normalized_title"),
     )
 
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True, autoincrement=True)
     class_batch_id: Mapped[int] = mapped_column(ForeignKey("class_batches.id", ondelete="CASCADE"), nullable=False)
     faculty_id: Mapped[int] = mapped_column(ForeignKey("faculties.id", ondelete="CASCADE"), nullable=False)
     code: Mapped[str] = mapped_column(String(32), nullable=False)
@@ -212,7 +248,7 @@ class CourseAssignment(Base):
     __tablename__ = "course_assignments"
     __table_args__ = (UniqueConstraint("course_id", "teacher_id", name="uq_course_teacher_assignment"),)
 
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True, autoincrement=True)
     course_id: Mapped[int] = mapped_column(ForeignKey("courses.id", ondelete="CASCADE"), nullable=False)
     teacher_id: Mapped[int] = mapped_column(ForeignKey("teachers.id", ondelete="CASCADE"), nullable=False)
     is_primary: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
@@ -225,7 +261,7 @@ class Enrollment(Base):
     __tablename__ = "enrollments"
     __table_args__ = (UniqueConstraint("student_id", "course_id", name="uq_student_course_enrollment"),)
 
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True, autoincrement=True)
     student_id: Mapped[int] = mapped_column(ForeignKey("students.id", ondelete="CASCADE"), nullable=False)
     course_id: Mapped[int] = mapped_column(ForeignKey("courses.id", ondelete="CASCADE"), nullable=False)
 
@@ -239,7 +275,7 @@ class CourseSchedule(Base):
         UniqueConstraint("course_id", "weekday", "start_time", name="uq_course_weekday_time"),
     )
 
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True, autoincrement=True)
     course_id: Mapped[int] = mapped_column(ForeignKey("courses.id", ondelete="CASCADE"), nullable=False)
     weekday: Mapped[str] = mapped_column(String(64), nullable=False)  # e.g. "sat" or "sat,sun,mon"
     start_time: Mapped[time] = mapped_column(Time, nullable=False)
@@ -256,7 +292,7 @@ class AttendanceSession(Base):
         UniqueConstraint("schedule_id", "session_date", "start_time", name="uq_schedule_session_occurrence"),
     )
 
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True, autoincrement=True)
     course_id: Mapped[int] = mapped_column(ForeignKey("courses.id", ondelete="CASCADE"), nullable=False)
     schedule_id: Mapped[int] = mapped_column(ForeignKey("course_schedules.id", ondelete="CASCADE"), nullable=False)
     session_date: Mapped[date] = mapped_column(Date, nullable=False)
@@ -275,7 +311,7 @@ class AttendanceRecord(Base):
         UniqueConstraint("student_id", "course_id", "session_id", name="uq_student_course_session_attendance"),
     )
 
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True, autoincrement=True)
     student_id: Mapped[int] = mapped_column(ForeignKey("students.id", ondelete="CASCADE"), nullable=False)
     course_id: Mapped[int] = mapped_column(ForeignKey("courses.id", ondelete="CASCADE"), nullable=False)
     session_id: Mapped[int] = mapped_column(ForeignKey("attendance_sessions.id", ondelete="CASCADE"), nullable=False)
@@ -286,3 +322,24 @@ class AttendanceRecord(Base):
 
     student: Mapped[Student] = relationship(back_populates="attendance_records")
     session: Mapped[AttendanceSession] = relationship(back_populates="records")
+
+
+for _model in (
+    UserRoleLink,
+    Role,
+    OrganizationalUnit,
+    Faculty,
+    Department,
+    ClassBatch,
+    User,
+    Student,
+    Teacher,
+    Course,
+    CourseAssignment,
+    Enrollment,
+    CourseSchedule,
+    AttendanceSession,
+    AttendanceRecord,
+):
+    event.listen(_model, "before_insert", _validate_positive_id_fields)
+    event.listen(_model, "before_update", _validate_positive_id_fields)

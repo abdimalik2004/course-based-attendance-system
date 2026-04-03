@@ -157,7 +157,7 @@ def _to_read_model(obj: CourseSchedule) -> CourseScheduleRead:
     )
 
 
-@router.post("", response_model=CourseScheduleRead, dependencies=[Depends(require_roles("FACULTY_ADMIN"))])
+@router.post("", response_model=CourseScheduleRead, dependencies=[Depends(require_roles("FACULTY"))])
 def create_schedule(
     payload: CourseScheduleCreate,
     db: Session = Depends(get_role_scoped_db),
@@ -205,7 +205,7 @@ def create_schedule(
     return _to_read_model(obj)
 
 
-@router.get("", response_model=PaginatedCourseScheduleRead, dependencies=[Depends(require_roles("FACULTY_ADMIN", "TEACHER", "ACADEMIA"))])
+@router.get("", response_model=PaginatedCourseScheduleRead, dependencies=[Depends(require_roles("FACULTY", "TEACHER", "ACADEMIA"))])
 def list_schedules(
     db: Session = Depends(get_role_scoped_db),
     skip: int = Query(default=0, ge=0, description="Number of rows to skip", examples=[0]),
@@ -235,7 +235,7 @@ def list_schedules(
     return {"items": items, "total": total, "skip": skip, "limit": limit}
 
 
-@router.put("/{schedule_id}", response_model=CourseScheduleRead, dependencies=[Depends(require_roles("FACULTY_ADMIN"))])
+@router.put("/{schedule_id}", response_model=CourseScheduleRead, dependencies=[Depends(require_roles("FACULTY"))])
 def update_schedule(
     schedule_id: int,
     payload: CourseScheduleUpdate,
@@ -292,7 +292,7 @@ def update_schedule(
     return _to_read_model(obj)
 
 
-@router.delete("/{schedule_id}", dependencies=[Depends(require_roles("FACULTY_ADMIN"))])
+@router.delete("/{schedule_id}", dependencies=[Depends(require_roles("FACULTY"))])
 def delete_schedule(
     schedule_id: int,
     db: Session = Depends(get_role_scoped_db),

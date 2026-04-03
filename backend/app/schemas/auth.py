@@ -52,8 +52,20 @@ class UserCreate(BaseModel):
     username: str
     password: str
     email: str | None = None
-    faculty_id: int | None = None
+    faculty_id: int | None = Field(default=None, gt=0)
     role_names: list[str] = Field(default_factory=list)
+
+
+class ResetDatabaseRequest(BaseModel):
+    model_config = ConfigDict(
+        json_schema_extra={
+            "example": {
+                "confirmation": "RESET",
+            }
+        }
+    )
+
+    confirmation: str
 
 
 class UserRead(BaseModel):

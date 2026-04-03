@@ -31,11 +31,17 @@ def _unique_constraint_names(bind, table_name: str) -> set[str]:
 
 def upgrade() -> None:
     bind = op.get_bind()
+    inspector = sa.inspect(bind)
 
     # Legacy databases created from early migrations may still enforce class name
     # uniqueness at (faculty_id, name), which incorrectly blocks same class names
     # across different departments within one faculty.
     unique_constraints = _unique_constraint_names(bind, "class_batches")
+    index_names = {index.get("name") for index in inspector.get_indexes("class_batches") if index.get("name")}
+
+    if "ix_class_batches_faculty_id" not in index_names:
+        op.create_index("ix_class_batches_faculty_id", "class_batches", ["faculty_id"], unique=False)
+
     if "uq_class_batch_faculty_name" in unique_constraints:
         with op.batch_alter_table("class_batches") as batch_op:
             batch_op.drop_constraint("uq_class_batch_faculty_name", type_="unique")
@@ -55,10 +61,15 @@ def upgrade() -> None:
 
 def downgrade() -> None:
     bind = op.get_bind()
+    inspector = sa.inspect(bind)
     unique_constraints = _unique_constraint_names(bind, "class_batches")
+    index_names = {index.get("name") for index in inspector.get_indexes("class_batches") if index.get("name")}
 
     with op.batch_alter_table("class_batches") as batch_op:
         if "uq_class_batch_department_name" in unique_constraints:
             batch_op.drop_constraint("uq_class_batch_department_name", type_="unique")
         if "uq_class_batch_faculty_name" not in unique_constraints:
             batch_op.create_unique_constraint("uq_class_batch_faculty_name", ["faculty_id", "name"])
+
+    if "ix_class_batches_faculty_id" in index_names:
+        op.drop_index("ix_class_batches_faculty_id", table_name="class_batches")

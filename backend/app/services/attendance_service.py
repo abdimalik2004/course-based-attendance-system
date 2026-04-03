@@ -19,9 +19,14 @@ from app.utils.image_decode import decode_base64_image
 
 class AttendanceService:
     def process_frame(self, db: Session, session_id: int, image_b64: str) -> dict:
+        if session_id <= 0:
+            return {"ok": False, "message": "Invalid session id"}
+
         session = db.query(AttendanceSession).filter(AttendanceSession.id == session_id).first()
         if not session:
             return {"ok": False, "message": "Session not found"}
+        if session.course_id <= 0:
+            return {"ok": False, "message": "Session has invalid course reference"}
         if session.status != SessionStatus.ACTIVE:
             return {"ok": False, "message": "Session is not active"}
 
@@ -51,6 +56,13 @@ class AttendanceService:
         )
         if not student:
             return {"ok": False, "message": "Recognized student not registered"}
+        if (
+            student.id <= 0
+            or student.faculty_id <= 0
+            or student.department_id <= 0
+            or student.class_batch_id <= 0
+        ):
+            return {"ok": False, "message": "Recognized student has invalid references"}
 
         if student.class_batch_id != session.course.class_batch_id:
             return {"ok": False, "message": "Student does not belong to class"}
@@ -60,6 +72,8 @@ class AttendanceService:
             .filter(
                 Enrollment.student_id == student.id,
                 Enrollment.course_id == session.course_id,
+                Enrollment.student_id > 0,
+                Enrollment.course_id > 0,
             )
             .first()
         )
@@ -72,6 +86,9 @@ class AttendanceService:
                 AttendanceRecord.student_id == student.id,
                 AttendanceRecord.course_id == session.course_id,
                 AttendanceRecord.session_id == session.id,
+                AttendanceRecord.student_id > 0,
+                AttendanceRecord.course_id > 0,
+                AttendanceRecord.session_id > 0,
             )
             .first()
         )
@@ -109,14 +126,20 @@ class AttendanceService:
         enrolled_students = (
             db.query(Student)
             .join(Enrollment, Enrollment.student_id == Student.id)
-            .filter(Enrollment.course_id == session.course_id)
+            .filter(
+                Enrollment.course_id == session.course_id,
+                Student.id > 0,
+                Student.class_batch_id > 0,
+                Enrollment.student_id > 0,
+                Enrollment.course_id > 0,
+            )
             .all()
         )
 
         present_ids = {
             record.student_id
             for record in db.query(AttendanceRecord)
-            .filter(AttendanceRecord.session_id == session.id)
+            .filter(AttendanceRecord.session_id == session.id, AttendanceRecord.student_id > 0)
             .all()
         }
 

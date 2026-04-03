@@ -73,8 +73,6 @@ def ensure_faculty_row_available(
         id=central_faculty.id,
         name=central_faculty.name,
         code=central_faculty.code,
-        tenant_db_name=central_faculty.tenant_db_name,
-        tenant_db_provisioned_at=central_faculty.tenant_db_provisioned_at,
     )
     db.add(materialized)
     try:
@@ -84,5 +82,5 @@ def ensure_faculty_row_available(
         existing = db.query(Faculty).filter(Faculty.id == faculty_id).first()
         if existing is not None:
             return existing
-        raise HTTPException(status_code=400, detail="Faculty metadata row is missing in tenant database")
+        raise HTTPException(status_code=400, detail="Faculty metadata row is missing in database")
     return materialized

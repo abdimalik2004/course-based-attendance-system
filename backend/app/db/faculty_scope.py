@@ -4,7 +4,6 @@ from dataclasses import dataclass
 
 from fastapi import Depends, HTTPException
 
-from app.core.config import settings
 from app.core.security import get_current_user
 from app.db.models import Faculty, User
 from app.db.session import SessionLocal
@@ -14,18 +13,16 @@ from app.db.session import SessionLocal
 class FacultyScopeContext:
     faculty_id: int
     faculty_code: str
-    tenant_db_name: str | None
-    tenant_db_provisioned: bool
 
 
 def get_optional_faculty_scope_context(
     current_user: User = Depends(get_current_user),
 ) -> FacultyScopeContext | None:
-    if not settings.tenant_db_runtime_routing_enabled:
+    role_names = {role.name for role in current_user.roles}
+    if "ACADEMIA" in role_names or "HR" in role_names or "ADMISSIONS" in role_names:
         return None
 
-    role_names = {role.name for role in current_user.roles}
-    if "ACADEMIA" in role_names:
+    if "FACULTY" not in role_names and "FACULTY_ADMIN" not in role_names:
         return None
 
     if current_user.faculty_id is None:
@@ -43,8 +40,6 @@ def get_optional_faculty_scope_context(
     return FacultyScopeContext(
         faculty_id=faculty.id,
         faculty_code=faculty.code,
-        tenant_db_name=faculty.tenant_db_name,
-        tenant_db_provisioned=faculty.tenant_db_provisioned_at is not None,
     )
 
 

@@ -17,25 +17,56 @@ class FaceService:
     def __init__(self) -> None:
         self._lock = threading.Lock()
         self._recognizer = None
+        self._model_signature: tuple[int | None, int | None, int | None] | None = None
 
-    def load_models(self) -> None:
+    def _current_model_signature(self) -> tuple[int | None, int | None, int | None]:
+        from utils.config import load_config  # noqa: WPS433
+
+        cfg = load_config(base_dir=_ROOT)
+
+        def _mtime(path: Path) -> int | None:
+            try:
+                return int(path.stat().st_mtime_ns)
+            except FileNotFoundError:
+                return None
+
+        return (_mtime(Path(cfg.model_path)), _mtime(Path(cfg.label_map_path)), _mtime(Path(cfg.embedding_path)))
+
+    def _load_models_locked(self) -> None:
+        from face_recognition.embedding_recognizer import FaceEmbeddingRecognizer  # noqa: WPS433
+        from utils.config import load_config  # noqa: WPS433
+
+        cfg = load_config(base_dir=_ROOT)
+        recognizer = FaceEmbeddingRecognizer(cfg)
+        recognizer.load_model()
+        self._recognizer = recognizer
+        self._model_signature = self._current_model_signature()
+
+    def load_models(self, force: bool = False) -> None:
         with self._lock:
-            if self._recognizer is not None:
+            current_signature = self._current_model_signature()
+            if not force and self._recognizer is not None and self._model_signature == current_signature:
                 return
-            from face_recognition.embedding_recognizer import FaceEmbeddingRecognizer  # noqa: WPS433
-            from utils.config import load_config  # noqa: WPS433
+            self._load_models_locked()
 
-            cfg = load_config(base_dir=_ROOT)
-            recognizer = FaceEmbeddingRecognizer(cfg)
-            recognizer.load_model()
-            self._recognizer = recognizer
+    def reload_models(self) -> None:
+        self.load_models(force=True)
+
+    def _ensure_current_models(self) -> None:
+        current_signature = self._current_model_signature()
+        if self._recognizer is None or self._model_signature != current_signature:
+            self._load_models_locked()
 
     def recognize_student(self, frame):
-        if self._recognizer is None:
+        with self._lock:
+            self._ensure_current_models()
+            recognizer = self._recognizer
+
+        if recognizer is None:
             raise RuntimeError("Face models not loaded")
 
         start = time.perf_counter()
-        results = self._recognizer.recognize_frame(frame)
+        results = recognizer.recognize_frame(frame)
         duration = time.perf_counter() - start
 
         known = [r for r in results if r.get("is_known")]

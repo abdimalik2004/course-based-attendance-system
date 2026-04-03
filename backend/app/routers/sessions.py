@@ -15,7 +15,7 @@ from app.schemas.attendance import AttendanceSessionRead
 router = APIRouter(prefix="/sessions", tags=["sessions"])
 
 
-@router.get("", response_model=list[AttendanceSessionRead], dependencies=[Depends(require_roles("ACADEMIA", "FACULTY_ADMIN", "TEACHER"))])
+@router.get("", response_model=list[AttendanceSessionRead], dependencies=[Depends(require_roles("ACADEMIA", "FACULTY", "TEACHER"))])
 def list_sessions(
     db: Session = Depends(get_role_scoped_db),
     faculty_scope = Depends(get_optional_faculty_scope_context),
@@ -30,7 +30,7 @@ def list_sessions(
 @router.get(
     "/active",
     response_model=list[AttendanceSessionRead],
-    dependencies=[Depends(require_roles("ACADEMIA", "FACULTY_ADMIN", "TEACHER"))],
+    dependencies=[Depends(require_roles("ACADEMIA", "FACULTY", "TEACHER"))],
 )
 def list_active_sessions(
     db: Session = Depends(get_role_scoped_db),

@@ -68,7 +68,7 @@ def _class_batch_duplicate_exists(
 def _class_batch_integrity_detail(exc: IntegrityError) -> str:
     error_kind = classify_integrity_error(exc)
     if error_kind == "foreign_key":
-        return "Class batch references missing faculty/department metadata in tenant DB"
+        return "Class batch references missing faculty/department metadata"
     if error_kind == "duplicate" and integrity_error_mentions(
         exc,
         "uq_class_batch_department_name",
@@ -114,7 +114,7 @@ def _generate_class_batch_name(
     return f"{best_prefix}{max_seq + 1:0{width}d}"
 
 
-@router.post("", response_model=ClassBatchRead, dependencies=[Depends(require_roles("FACULTY_ADMIN"))])
+@router.post("", response_model=ClassBatchRead, dependencies=[Depends(require_roles("ACADEMIA"))])
 def create_class_batch(
     payload: ClassBatchCreate,
     db: Session = Depends(get_role_scoped_db),
@@ -144,7 +144,7 @@ def create_class_batch(
     if not faculty_code_for_generation:
         raise HTTPException(status_code=400, detail="Faculty code is required for class name generation")
 
-    class_name = payload.name or _generate_class_batch_name(
+    class_name = _generate_class_batch_name(
         db,
         faculty_code=faculty_code_for_generation,
         department_id=payload.department_id,
@@ -189,7 +189,7 @@ def create_class_batch(
     return obj
 
 
-@router.get("", response_model=PaginatedClassBatchRead, dependencies=[Depends(require_roles("FACULTY_ADMIN", "TEACHER", "ACADEMIA"))])
+@router.get("", response_model=PaginatedClassBatchRead, dependencies=[Depends(require_roles("FACULTY", "TEACHER", "ACADEMIA"))])
 def list_class_batches(
     db: Session = Depends(get_role_scoped_db),
     skip: int = Query(default=0, ge=0, description="Number of rows to skip", examples=[0]),
@@ -211,7 +211,7 @@ def list_class_batches(
     return {"items": items, "total": total, "skip": skip, "limit": limit}
 
 
-@router.put("/{class_id}", response_model=ClassBatchRead, dependencies=[Depends(require_roles("FACULTY_ADMIN"))])
+@router.put("/{class_id}", response_model=ClassBatchRead, dependencies=[Depends(require_roles("ACADEMIA"))])
 def update_class_batch(
     class_id: int,
     payload: ClassBatchUpdate,
@@ -264,7 +264,7 @@ def update_class_batch(
     return obj
 
 
-@router.delete("/{class_id}", dependencies=[Depends(require_roles("FACULTY_ADMIN"))])
+@router.delete("/{class_id}", dependencies=[Depends(require_roles("ACADEMIA"))])
 def delete_class_batch(class_id: int, db: Session = Depends(get_role_scoped_db)):
     obj = db.query(ClassBatch).filter(ClassBatch.id == class_id).first()
     if not obj:

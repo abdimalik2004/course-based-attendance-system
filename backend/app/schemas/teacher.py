@@ -1,14 +1,14 @@
 from __future__ import annotations
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class TeacherBase(BaseModel):
     teacher_number: str
     full_name: str
-    faculty_id: int
-    department_id: int
-    user_id: int | None = None
+    faculty_id: int = Field(gt=0)
+    department_id: int = Field(gt=0)
+    user_id: int | None = Field(default=None, gt=0)
 
 
 class TeacherCreate(BaseModel):
@@ -24,9 +24,9 @@ class TeacherCreate(BaseModel):
     )
 
     full_name: str
-    faculty_id: int
-    department_id: int
-    user_id: int | None = None
+    faculty_id: int = Field(gt=0)
+    department_id: int = Field(gt=0)
+    user_id: int | None = Field(default=None, gt=0)
 
 
 class TeacherUpdate(BaseModel):
@@ -38,9 +38,9 @@ class TeacherUpdate(BaseModel):
 
     teacher_number: str | None = None
     full_name: str | None = None
-    faculty_id: int | None = None
-    department_id: int | None = None
-    user_id: int | None = None
+    faculty_id: int | None = Field(default=None, gt=0)
+    department_id: int | None = Field(default=None, gt=0)
+    user_id: int | None = Field(default=None, gt=0)
 
 
 class TeacherRead(TeacherBase):
