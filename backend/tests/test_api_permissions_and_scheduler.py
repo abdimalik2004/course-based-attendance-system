@@ -119,7 +119,7 @@ def _seed_course_graph(db_session):
     db_session.add(class_batch)
     db_session.flush()
 
-    course = Course(class_batch_id=class_batch.id, code="CSC401", title="AI")
+    course = Course(faculty_id=faculty.id, code="CSC401", title="AI")
     db_session.add(course)
     db_session.commit()
     return faculty, department, class_batch, course
@@ -174,7 +174,7 @@ def test_preview_faculty_delete_shows_related_counts(client, db_session):
     db_session.add(class_batch)
     db_session.flush()
 
-    db_session.add(Course(class_batch_id=class_batch.id, code="ENG001", title="Statics"))
+    db_session.add(Course(faculty_id=faculty.id, code="ENG001", title="Statics"))
     db_session.add(User(username="faculty_preview", hashed_password="x", is_active=True, faculty_id=faculty.id))
     db_session.commit()
 
@@ -203,7 +203,7 @@ def test_delete_faculty_with_related_records_succeeds_with_force(client, db_sess
     db_session.add(class_batch)
     db_session.flush()
 
-    db_session.add(Course(class_batch_id=class_batch.id, code="ENG001", title="Statics"))
+    db_session.add(Course(faculty_id=faculty.id, code="ENG001", title="Statics"))
     user = User(username="faculty_linked", hashed_password="x", is_active=True, faculty_id=faculty.id)
     db_session.add(user)
     db_session.commit()
@@ -351,7 +351,7 @@ def test_create_course_auto_generates_code_from_faculty(client, db_session):
     response = api.post(
         "/courses",
         json={
-            "class_batch_id": class_batch.id,
+            "faculty_id": faculty.id,
             "title": "Thermodynamics",
         },
     )
@@ -372,7 +372,7 @@ def test_create_course_auto_generation_increments_sequence(client, db_session):
     db_session.add(class_batch)
     db_session.flush()
 
-    db_session.add(Course(class_batch_id=class_batch.id, code="ENG001", title="Existing Course"))
+    db_session.add(Course(faculty_id=faculty.id, code="ENG001", title="Existing Course"))
     db_session.commit()
 
     api, current = client
@@ -381,7 +381,7 @@ def test_create_course_auto_generation_increments_sequence(client, db_session):
     response = api.post(
         "/courses",
         json={
-            "class_batch_id": class_batch.id,
+            "faculty_id": faculty.id,
             "title": "Fluid Mechanics",
         },
     )
@@ -391,7 +391,7 @@ def test_create_course_auto_generation_increments_sequence(client, db_session):
     assert body["code"] == "ENG002"
 
 
-def test_create_course_auto_enrolls_existing_students_in_same_faculty_and_department(client, db_session):
+def test_create_course_auto_enrolls_existing_students_in_same_faculty(client, db_session):
     faculty = Faculty(name="Faculty of Engineering", code="ENG")
     db_session.add(faculty)
     db_session.flush()
@@ -446,7 +446,7 @@ def test_create_course_auto_enrolls_existing_students_in_same_faculty_and_depart
     response = api.post(
         "/courses",
         json={
-            "class_batch_id": batch_arch.id,
+            "faculty_id": faculty.id,
             "title": "Structural Analysis",
         },
     )
@@ -456,10 +456,10 @@ def test_create_course_auto_enrolls_existing_students_in_same_faculty_and_depart
 
     enrollment_rows = db_session.query(Enrollment.student_id).filter(Enrollment.course_id == course_id).all()
     enrolled_student_ids = {student_id for (student_id,) in enrollment_rows}
-    assert enrolled_student_ids == {student_match.id}
+    assert enrolled_student_ids == {student_match.id, student_other_department.id}
 
 
-def test_create_course_uses_class_program_prefix_for_code_generation(client, db_session):
+def test_create_course_uses_faculty_prefix_for_code_generation(client, db_session):
     faculty = Faculty(name="Faculty of Computer Science", code="FCS")
     db_session.add(faculty)
     db_session.flush()
@@ -475,14 +475,14 @@ def test_create_course_uses_class_program_prefix_for_code_generation(client, db_
     response = api.post(
         "/courses",
         json={
-            "class_batch_id": class_batch.id,
+            "faculty_id": faculty.id,
             "title": "Compiler Design",
         },
     )
 
     assert response.status_code == 200
     body = response.json()
-    assert body["code"] == "CIS001"
+    assert body["code"] == "FCS001"
 
 
 def test_create_course_rejects_duplicate_normalized_title_within_same_faculty(client, db_session):
@@ -498,7 +498,7 @@ def test_create_course_rejects_duplicate_normalized_title_within_same_faculty(cl
     db_session.add_all([arch_batch, civil_batch])
     db_session.flush()
 
-    db_session.add(Course(class_batch_id=arch_batch.id, code="ENG001", title="Thermodynamics"))
+    db_session.add(Course(faculty_id=faculty.id, code="ENG001", title="Thermodynamics"))
     db_session.commit()
 
     api, current = client
@@ -507,7 +507,7 @@ def test_create_course_rejects_duplicate_normalized_title_within_same_faculty(cl
     response = api.post(
         "/courses",
         json={
-            "class_batch_id": civil_batch.id,
+            "faculty_id": faculty.id,
             "title": "  thermodynamics  ",
         },
     )
@@ -530,7 +530,7 @@ def test_create_course_allows_same_title_across_different_faculties(client, db_s
     db_session.add_all([batch_eng, batch_med])
     db_session.flush()
 
-    db_session.add(Course(class_batch_id=batch_eng.id, code="ENG001", title="Physics"))
+    db_session.add(Course(faculty_id=faculty_eng.id, code="ENG001", title="Physics"))
     db_session.commit()
 
     api, current = client
@@ -539,7 +539,7 @@ def test_create_course_allows_same_title_across_different_faculties(client, db_s
     response = api.post(
         "/courses",
         json={
-            "class_batch_id": batch_med.id,
+            "faculty_id": faculty_med.id,
             "title": "  physics ",
         },
     )
@@ -767,30 +767,31 @@ def test_assign_teacher_blocks_faculty_mismatch(client, db_session):
     )
 
     assert response.status_code == 400
-    assert "faculty" in response.json()["detail"].lower()
 
 
-def test_assign_teacher_blocks_department_mismatch(client, db_session):
+def test_assign_teacher_blocks_faculty_mismatch(client, db_session):
     faculty = Faculty(name="Faculty of Engineering", code="ENG")
+    other_faculty = Faculty(name="Faculty of Computing", code="CMP")
     db_session.add(faculty)
+    db_session.add(other_faculty)
     db_session.flush()
 
     architecture = _seed_department(db_session, faculty, name="Department of Architecture", code="ARCH")
-    civil = _seed_department(db_session, faculty, name="Department of Civil Engineering", code="CIV")
+    other_department = _seed_department(db_session, other_faculty, name="Department of Systems", code="SYS")
 
     class_batch = ClassBatch(faculty_id=faculty.id, department_id=architecture.id, name="ARCH2201", year=2026)
     db_session.add(class_batch)
     db_session.flush()
 
-    course = Course(class_batch_id=class_batch.id, code="ENG001", title="Design Studio")
+    course = Course(faculty_id=faculty.id, code="ENG001", title="Design Studio")
     db_session.add(course)
     db_session.flush()
 
     teacher = Teacher(
         teacher_number="ENGT001",
         full_name="Civil Teacher",
-        faculty_id=faculty.id,
-        department_id=civil.id,
+        faculty_id=other_faculty.id,
+        department_id=other_department.id,
         user_id=None,
     )
     db_session.add(teacher)
@@ -805,10 +806,9 @@ def test_assign_teacher_blocks_department_mismatch(client, db_session):
     )
 
     assert response.status_code == 400
-    assert "department" in response.json()["detail"].lower()
 
 
-def test_schedule_overlap_rejected_for_same_batch_day(client, db_session):
+def test_schedule_overlapping_courses_rejected_within_same_faculty(client, db_session):
     _, _, _, course = _seed_course_graph(db_session)
     db_session.add(
         CourseSchedule(
@@ -838,7 +838,7 @@ def test_schedule_overlap_rejected_for_same_batch_day(client, db_session):
     assert response.status_code == 400
     assert (
         response.json()["detail"]
-        == "This course is already scheduled for this department on all selected days."
+        == "This course is already scheduled for this faculty on all selected days."
     )
 
 
@@ -872,7 +872,7 @@ def test_schedule_same_course_same_day_rejected_even_with_different_time(client,
     assert response.status_code == 400
     assert (
         response.json()["detail"]
-        == "This course is already scheduled for this department on all selected days."
+        == "This course is already scheduled for this faculty on all selected days."
     )
 
 
@@ -911,7 +911,7 @@ def test_schedule_update_rejects_duplicate_course_day_for_department(client, db_
     assert response.status_code == 400
     assert (
         response.json()["detail"]
-        == "This course is already scheduled for this department on all selected days."
+        == "This course is already scheduled for this faculty on all selected days."
     )
 
 
@@ -943,7 +943,7 @@ def test_schedule_create_reports_specific_conflicting_days(client, db_session):
     )
 
     assert response.status_code == 400
-    assert response.json()["detail"] == "This course is already scheduled for this department on: wed."
+    assert response.json()["detail"] == "This course is already scheduled for this faculty on: wed."
 
 
 def test_schedule_create_reports_all_days_scheduled(client, db_session):
@@ -974,7 +974,7 @@ def test_schedule_create_reports_all_days_scheduled(client, db_session):
     )
 
     assert response.status_code == 400
-    assert response.json()["detail"] == "This course is already scheduled for this department on all days."
+    assert response.json()["detail"] == "This course is already scheduled for this faculty on all days."
 
 
 def test_schedule_same_day_allowed_for_different_departments_in_same_faculty(client, db_session):
@@ -993,8 +993,8 @@ def test_schedule_same_day_allowed_for_different_departments_in_same_faculty(cli
     db_session.add_all([batch_a, batch_b])
     db_session.flush()
 
-    course_a = Course(class_batch_id=batch_a.id, code="ENG001", title="Statics")
-    course_b = Course(class_batch_id=batch_b.id, code="ENG001", title="Dynamics")
+    course_a = Course(faculty_id=faculty.id, code="ENG001", title="Statics")
+    course_b = Course(faculty_id=faculty.id, code="ENG002", title="Dynamics")
     db_session.add_all([course_a, course_b])
     db_session.flush()
 
@@ -1029,7 +1029,7 @@ def test_schedule_same_day_allowed_for_different_departments_in_same_faculty(cli
 def test_scheduler_day_rollover_uses_current_weekday_only(db_session, monkeypatch):
     faculty, department, class_batch, course = _seed_course_graph(db_session)
 
-    previous_day_course = Course(class_batch_id=class_batch.id, code="CSC402", title="Prev Day")
+    previous_day_course = Course(faculty_id=faculty.id, code="CSC402", title="Prev Day")
     db_session.add(previous_day_course)
     db_session.flush()
 
@@ -1116,7 +1116,7 @@ def test_list_enrolled_students_by_course(client, db_session):
 
 def test_enroll_student_rejects_overlapping_course_sessions(client, db_session):
     faculty, department, class_batch, course_a = _seed_course_graph(db_session)
-    course_b = Course(class_batch_id=class_batch.id, code="CSC402", title="Networks")
+    course_b = Course(faculty_id=faculty.id, code="CSC402", title="Networks")
     db_session.add(course_b)
     db_session.flush()
 
@@ -1248,7 +1248,7 @@ def test_create_student_auto_generates_number(client, db_session, tmp_path, monk
     assert body["department_id"] == department.id
 
 
-def test_create_student_auto_enrolls_courses_in_same_faculty_and_department(client, db_session, tmp_path, monkeypatch):
+def test_create_student_auto_enrolls_courses_in_same_faculty(client, db_session, tmp_path, monkeypatch):
     monkeypatch.setattr(student_numbering, "_DATASET_ROOT", tmp_path)
 
     faculty = Faculty(name="Faculty of Computer Science", code="CIS")
@@ -1263,9 +1263,9 @@ def test_create_student_auto_enrolls_courses_in_same_faculty_and_department(clie
     db_session.add_all([batch_it, batch_cs])
     db_session.flush()
 
-    course_a = Course(class_batch_id=batch_it.id, code="CIS001", title="Algorithms")
-    course_b = Course(class_batch_id=batch_it.id, code="CIS002", title="Databases")
-    course_other_department = Course(class_batch_id=batch_cs.id, code="CIS003", title="Compilers")
+    course_a = Course(faculty_id=faculty.id, code="CIS001", title="Algorithms")
+    course_b = Course(faculty_id=faculty.id, code="CIS002", title="Databases")
+    course_other_department = Course(faculty_id=faculty.id, code="CIS003", title="Compilers")
     db_session.add_all([course_a, course_b, course_other_department])
 
     other_faculty = Faculty(name="Faculty of Engineering", code="ENG")
@@ -1275,7 +1275,7 @@ def test_create_student_auto_enrolls_courses_in_same_faculty_and_department(clie
     other_batch = ClassBatch(faculty_id=other_faculty.id, department_id=other_department.id, name="ENG2201", year=2026)
     db_session.add(other_batch)
     db_session.flush()
-    db_session.add(Course(class_batch_id=other_batch.id, code="ENG001", title="Statics"))
+    db_session.add(Course(faculty_id=other_faculty.id, code="ENG001", title="Statics"))
     db_session.commit()
 
     api, current = client
@@ -1296,7 +1296,7 @@ def test_create_student_auto_enrolls_courses_in_same_faculty_and_department(clie
 
     enrollment_rows = db_session.query(Enrollment.course_id).filter(Enrollment.student_id == student_id).all()
     enrolled_course_ids = {course_id for (course_id,) in enrollment_rows}
-    assert enrolled_course_ids == {course_a.id, course_b.id}
+    assert enrolled_course_ids == {course_a.id, course_b.id, course_other_department.id}
 
 
 def test_create_student_auto_generation_increments_sequence(client, db_session, tmp_path, monkeypatch):

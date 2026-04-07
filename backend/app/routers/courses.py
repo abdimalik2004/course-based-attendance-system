@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import re
-
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 from sqlalchemy import or_
@@ -10,7 +8,7 @@ from sqlalchemy.exc import IntegrityError
 from app.core.security import require_roles
 from app.db.faculty_scope import enforce_faculty_scope, get_optional_faculty_scope_context
 from app.db.models import (
-    ClassBatch,
+    Faculty,
     Course,
     CourseAssignment,
     CourseSchedule,
@@ -34,23 +32,16 @@ from app.utils.weekday_utils import weekdays_intersect
 
 router = APIRouter(prefix="/courses", tags=["courses"])
 
-_LEADING_ALPHA_RE = re.compile(r"^(?P<alpha>[A-Z]+)")
 
-
-def _course_code_prefix(*, faculty_code: str, class_batch_name: str | None) -> str:
-    if class_batch_name:
-        match = _LEADING_ALPHA_RE.match(class_batch_name.strip().upper())
-        if match:
-            return match.group("alpha")
-
+def _course_code_prefix(*, faculty_code: str) -> str:
     prefix = faculty_code.strip().upper()
     if not prefix:
         raise HTTPException(status_code=400, detail="Faculty code is required for course code generation")
     return prefix
 
 
-def _generate_course_code(db: Session, *, faculty_code: str, class_batch_name: str | None) -> str:
-    prefix = _course_code_prefix(faculty_code=faculty_code, class_batch_name=class_batch_name)
+def _generate_course_code(db: Session, *, faculty_code: str) -> str:
+    prefix = _course_code_prefix(faculty_code=faculty_code)
 
     existing = (
         db.query(Course.code)
@@ -129,33 +120,22 @@ def create_course(
     db: Session = Depends(get_role_scoped_db),
     faculty_scope = Depends(get_optional_faculty_scope_context),
 ):
-    class_batch = db.query(ClassBatch).filter(ClassBatch.id == payload.class_batch_id).first()
-    if not class_batch:
-        raise HTTPException(status_code=404, detail="Class batch not found")
+    faculty = db.query(Faculty).filter(Faculty.id == payload.faculty_id).first()
+    if not faculty:
+        raise HTTPException(status_code=404, detail="Faculty not found")
 
     if faculty_scope is not None:
-        enforce_faculty_scope(class_batch.faculty_id, faculty_scope)
-        faculty_code = faculty_scope.faculty_code
-    else:
-        faculty_code = class_batch.faculty.code if class_batch.faculty else None
-
-    if not faculty_code:
-        raise HTTPException(status_code=400, detail="Faculty code is required for course code generation")
+        enforce_faculty_scope(faculty.id, faculty_scope)
 
     _ensure_unique_course_title_in_faculty(
         db,
-        faculty_id=class_batch.faculty_id,
+        faculty_id=faculty.id,
         title=payload.title,
     )
 
     obj = Course(
-        class_batch_id=payload.class_batch_id,
-        faculty_id=class_batch.faculty_id,
-        code=_generate_course_code(
-            db,
-            faculty_code=faculty_code,
-            class_batch_name=class_batch.name,
-        ),
+        faculty_id=faculty.id,
+        code=_generate_course_code(db, faculty_code=faculty.code),
         title=payload.title,
         normalized_title=normalize_course_title(payload.title),
     )
@@ -166,7 +146,7 @@ def create_course(
         db.commit()
     except IntegrityError as exc:
         db.rollback()
-        raise HTTPException(status_code=409, detail="Course code already exists in this class") from exc
+        raise HTTPException(status_code=409, detail="Course code already exists in this faculty") from exc
     db.refresh(obj)
     return obj
 
@@ -177,19 +157,11 @@ def list_courses(
     skip: int = Query(default=0, ge=0, description="Number of rows to skip", examples=[0]),
     limit: int = Query(default=50, ge=1, le=200, description="Page size", examples=[20]),
     faculty_id: int | None = Query(default=None, description="Filter by faculty id", examples=[1]),
-    department_id: int | None = Query(default=None, description="Filter by department id", examples=[1]),
-    class_batch_id: int | None = Query(default=None, description="Filter by class batch id", examples=[1]),
     search: str | None = Query(default=None, description="Search by course code or title", examples=["CSC"]),
 ):
     query = db.query(Course)
-    if faculty_id is not None or department_id is not None:
-        query = query.join(ClassBatch, ClassBatch.id == Course.class_batch_id)
     if faculty_id is not None:
-        query = query.filter(ClassBatch.faculty_id == faculty_id)
-    if department_id is not None:
-        query = query.filter(ClassBatch.department_id == department_id)
-    if class_batch_id is not None:
-        query = query.filter(Course.class_batch_id == class_batch_id)
+        query = query.filter(Course.faculty_id == faculty_id)
     if search:
         pattern = f"%{search.strip()}%"
         query = query.filter(or_(Course.code.ilike(pattern), Course.title.ilike(pattern)))
@@ -209,17 +181,17 @@ def update_course(
     if not obj:
         raise HTTPException(status_code=404, detail="Course not found")
 
-    target_batch_id = payload.class_batch_id if payload.class_batch_id is not None else obj.class_batch_id
-    target_batch = db.query(ClassBatch).filter(ClassBatch.id == target_batch_id).first()
-    if not target_batch:
-        raise HTTPException(status_code=404, detail="Class batch not found")
+    target_faculty_id = payload.faculty_id if payload.faculty_id is not None else obj.faculty_id
+    target_faculty = db.query(Faculty).filter(Faculty.id == target_faculty_id).first()
+    if not target_faculty:
+        raise HTTPException(status_code=404, detail="Faculty not found")
     if faculty_scope is not None:
-        enforce_faculty_scope(target_batch.faculty_id, faculty_scope)
+        enforce_faculty_scope(target_faculty.id, faculty_scope)
 
     next_title = payload.title if payload.title is not None else obj.title
     _ensure_unique_course_title_in_faculty(
         db,
-        faculty_id=target_batch.faculty_id,
+        faculty_id=target_faculty.id,
         title=next_title,
         exclude_course_id=obj.id,
     )
@@ -227,7 +199,7 @@ def update_course(
     for field, value in payload.model_dump(exclude_unset=True).items():
         setattr(obj, field, value)
 
-    obj.faculty_id = target_batch.faculty_id
+    obj.faculty_id = target_faculty.id
     obj.normalized_title = normalize_course_title(next_title)
 
     db.add(obj)
@@ -268,21 +240,13 @@ def assign_teacher(
     if not teacher:
         raise HTTPException(status_code=404, detail="Teacher not found")
 
-    class_batch = db.query(ClassBatch).filter(ClassBatch.id == course.class_batch_id).first()
-    if not class_batch:
-        raise HTTPException(status_code=404, detail="Class batch not found for course")
     if faculty_scope is not None:
-        enforce_faculty_scope(class_batch.faculty_id, faculty_scope)
+        enforce_faculty_scope(course.faculty_id, faculty_scope)
 
-    if teacher.faculty_id != class_batch.faculty_id:
+    if teacher.faculty_id != course.faculty_id:
         raise HTTPException(
             status_code=400,
             detail="Teacher faculty does not match course faculty",
-        )
-    if teacher.department_id != class_batch.department_id:
-        raise HTTPException(
-            status_code=400,
-            detail="Teacher department does not match course department",
         )
 
     assignment = CourseAssignment(**payload.model_dump())
@@ -307,18 +271,15 @@ def enroll_student(
     if not course:
         raise HTTPException(status_code=404, detail="Course not found")
 
-    class_batch = db.query(ClassBatch).filter(ClassBatch.id == course.class_batch_id).first()
-    if not class_batch:
-        raise HTTPException(status_code=404, detail="Class batch not found for course")
     if faculty_scope is not None:
-        enforce_faculty_scope(class_batch.faculty_id, faculty_scope)
+        enforce_faculty_scope(course.faculty_id, faculty_scope)
 
     student = db.query(Student).filter(Student.id == student_id).first()
     if not student:
         raise HTTPException(status_code=404, detail="Student not found")
 
-    if student.class_batch_id != course.class_batch_id:
-        raise HTTPException(status_code=400, detail="Student class does not match course class")
+    if student.faculty_id != course.faculty_id:
+        raise HTTPException(status_code=400, detail="Student faculty does not match course faculty")
 
     _ensure_student_schedule_has_no_conflict(db, student_id=student_id, course_id=course_id)
 

@@ -47352,3 +47352,6 @@
 2026-04-03 14:32:07,610 INFO face_recognition.detector - SCRFD detector initialized (det_size=640 threshold=0.50 max_faces=10)
 2026-04-03 14:33:45,220 INFO face_recognition.detector - SCRFD detector initialized (det_size=640 threshold=0.50 max_faces=10)
 2026-04-03 14:34:26,237 INFO face_recognition.train - Trained FaceNet embeddings with 60 samples
+2026-04-06 15:37:30,220 INFO face_recognition.detector - SCRFD detector initialized (det_size=640 threshold=0.50 max_faces=10)
+2026-04-06 15:39:51,001 INFO face_recognition.detector - SCRFD detector initialized (det_size=640 threshold=0.50 max_faces=10)
+2026-04-06 15:40:53,152 INFO face_recognition.train - Trained FaceNet embeddings with 86 samples

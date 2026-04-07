@@ -2,25 +2,20 @@ from __future__ import annotations
 
 from sqlalchemy.orm import Session
 
-from app.db.models import ClassBatch, Course, Enrollment, Student
+from app.db.models import Course, Enrollment, Student
 
 
 def auto_enroll_student_in_matching_courses(db: Session, student: Student) -> int:
-    """Enroll a student into all courses in the same faculty and department."""
+    """Enroll a student into all courses in the same faculty."""
     if student.id <= 0 or student.faculty_id <= 0 or student.department_id <= 0:
         return 0
 
     course_rows = (
         db.query(Course.id)
-        .join(ClassBatch, ClassBatch.id == Course.class_batch_id)
         .filter(
             Course.faculty_id == student.faculty_id,
-            ClassBatch.department_id == student.department_id,
             Course.id > 0,
-            Course.class_batch_id > 0,
             Course.faculty_id > 0,
-            ClassBatch.id > 0,
-            ClassBatch.department_id > 0,
         )
         .all()
     )
@@ -50,24 +45,16 @@ def auto_enroll_student_in_matching_courses(db: Session, student: Student) -> in
 
 
 def auto_enroll_existing_students_for_course(db: Session, course: Course) -> int:
-    """Enroll existing students in matching faculty and department into a new course."""
-    if course.id <= 0 or course.class_batch_id <= 0 or course.faculty_id <= 0:
-        return 0
-
-    class_batch = db.query(ClassBatch).filter(ClassBatch.id == course.class_batch_id).first()
-    if class_batch is None:
-        return 0
-    if class_batch.id <= 0 or class_batch.department_id <= 0:
+    """Enroll existing students in the same faculty into a new course."""
+    if course.id <= 0 or course.faculty_id <= 0:
         return 0
 
     student_rows = (
         db.query(Student.id)
         .filter(
             Student.faculty_id == course.faculty_id,
-            Student.department_id == class_batch.department_id,
             Student.id > 0,
             Student.faculty_id > 0,
-            Student.department_id > 0,
         )
         .all()
     )

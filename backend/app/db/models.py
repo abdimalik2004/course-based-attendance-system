@@ -17,7 +17,7 @@ from sqlalchemy import (
     func,
     event,
 )
-from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, object_session, relationship
+from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 
 class Base(DeclarativeBase):
@@ -34,7 +34,7 @@ _POSITIVE_ID_FIELDS: dict[str, tuple[str, ...]] = {
     "users": ("id", "faculty_id"),
     "students": ("id", "faculty_id", "department_id", "class_batch_id"),
     "teachers": ("id", "faculty_id", "department_id", "user_id"),
-    "courses": ("id", "class_batch_id", "faculty_id"),
+    "courses": ("id", "faculty_id"),
     "course_assignments": ("id", "course_id", "teacher_id"),
     "enrollments": ("id", "student_id", "course_id"),
     "course_schedules": ("id", "course_id"),
@@ -101,6 +101,7 @@ class Faculty(Base):
 
     departments: Mapped[list["Department"]] = relationship(back_populates="faculty", cascade="all, delete-orphan")
     class_batches: Mapped[list["ClassBatch"]] = relationship(back_populates="faculty", cascade="all, delete-orphan")
+    courses: Mapped[list["Course"]] = relationship(back_populates="faculty")
     students: Mapped[list["Student"]] = relationship(back_populates="faculty")
     teachers: Mapped[list["Teacher"]] = relationship(back_populates="faculty")
 
@@ -137,7 +138,6 @@ class ClassBatch(Base):
     faculty: Mapped[Faculty] = relationship(back_populates="class_batches")
     department: Mapped[Department] = relationship(back_populates="class_batches")
     students: Mapped[list["Student"]] = relationship(back_populates="class_batch", cascade="all, delete-orphan")
-    courses: Mapped[list["Course"]] = relationship(back_populates="class_batch", cascade="all, delete-orphan")
 
 
 class User(Base):
@@ -190,18 +190,17 @@ class Teacher(Base):
 class Course(Base):
     __tablename__ = "courses"
     __table_args__ = (
-        UniqueConstraint("class_batch_id", "code", name="uq_course_batch_code"),
+        UniqueConstraint("faculty_id", "code", name="uq_course_faculty_code"),
         UniqueConstraint("faculty_id", "normalized_title", name="uq_course_faculty_normalized_title"),
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True, autoincrement=True)
-    class_batch_id: Mapped[int] = mapped_column(ForeignKey("class_batches.id", ondelete="CASCADE"), nullable=False)
-    faculty_id: Mapped[int] = mapped_column(ForeignKey("faculties.id", ondelete="CASCADE"), nullable=False)
+    faculty_id: Mapped[int] = mapped_column(ForeignKey("faculties.id", ondelete="CASCADE"), nullable=False, index=True)
     code: Mapped[str] = mapped_column(String(32), nullable=False)
     title: Mapped[str] = mapped_column(String(200), nullable=False)
     normalized_title: Mapped[str] = mapped_column(String(200), nullable=False)
 
-    class_batch: Mapped[ClassBatch] = relationship(back_populates="courses")
+    faculty: Mapped[Faculty] = relationship(back_populates="courses")
     assignments: Mapped[list["CourseAssignment"]] = relationship(back_populates="course", cascade="all, delete-orphan")
     enrollments: Mapped[list["Enrollment"]] = relationship(back_populates="course", cascade="all, delete-orphan")
     schedules: Mapped[list["CourseSchedule"]] = relationship(back_populates="course", cascade="all, delete-orphan")
@@ -212,35 +211,17 @@ def normalize_course_title(value: str) -> str:
     return value.strip().lower()
 
 
-def _resolve_course_faculty_id(target: Course) -> int | None:
-    if target.class_batch is not None:
-        return target.class_batch.faculty_id
-
-    session = object_session(target)
-    if session is None:
-        return None
-
-    class_batch = session.query(ClassBatch).filter(ClassBatch.id == target.class_batch_id).first()
-    if class_batch is None:
-        return None
-    return class_batch.faculty_id
-
-
 @event.listens_for(Course, "before_insert")
 def _sync_course_uniqueness_columns_before_insert(_mapper, _connection, target: Course) -> None:
-    faculty_id = _resolve_course_faculty_id(target)
-    if faculty_id is None:
-        raise ValueError("Cannot resolve faculty for course")
-    target.faculty_id = faculty_id
+    if target.faculty_id is None or int(target.faculty_id) <= 0:
+        raise ValueError("courses.faculty_id must be a positive integer")
     target.normalized_title = normalize_course_title(target.title)
 
 
 @event.listens_for(Course, "before_update")
 def _sync_course_uniqueness_columns_before_update(_mapper, _connection, target: Course) -> None:
-    faculty_id = _resolve_course_faculty_id(target)
-    if faculty_id is None:
-        raise ValueError("Cannot resolve faculty for course")
-    target.faculty_id = faculty_id
+    if target.faculty_id is None or int(target.faculty_id) <= 0:
+        raise ValueError("courses.faculty_id must be a positive integer")
     target.normalized_title = normalize_course_title(target.title)
 
 

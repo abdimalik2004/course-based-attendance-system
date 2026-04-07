@@ -64,8 +64,8 @@ class AttendanceService:
         ):
             return {"ok": False, "message": "Recognized student has invalid references"}
 
-        if student.class_batch_id != session.course.class_batch_id:
-            return {"ok": False, "message": "Student does not belong to class"}
+        if student.faculty_id != session.course.faculty_id:
+            return {"ok": False, "message": "Student does not belong to course faculty"}
 
         enrolled = (
             db.query(Enrollment)
@@ -129,7 +129,7 @@ class AttendanceService:
             .filter(
                 Enrollment.course_id == session.course_id,
                 Student.id > 0,
-                Student.class_batch_id > 0,
+                Student.faculty_id > 0,
                 Enrollment.student_id > 0,
                 Enrollment.course_id > 0,
             )

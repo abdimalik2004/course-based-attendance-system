@@ -21,9 +21,9 @@ def _session_faculty_id(db: Session, session_id: int) -> int:
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
     course = session.course
-    if course is None or course.class_batch is None:
+    if course is None:
         raise HTTPException(status_code=404, detail="Course context not found for session")
-    return course.class_batch.faculty_id
+    return course.faculty_id
 
 
 @router.post(

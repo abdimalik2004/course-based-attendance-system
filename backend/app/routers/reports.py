@@ -23,10 +23,7 @@ def _course_faculty_id(db: Session, course_id: int) -> int:
     course = db.query(Course).filter(Course.id == course_id).first()
     if not course:
         raise HTTPException(status_code=404, detail="Course not found")
-    class_batch = course.class_batch
-    if class_batch is None:
-        raise HTTPException(status_code=404, detail="Class batch not found for course")
-    return class_batch.faculty_id
+    return course.faculty_id
 
 
 @router.get("/course/{course_id}", dependencies=[Depends(require_roles("TEACHER", "FACULTY", "ACADEMIA"))])

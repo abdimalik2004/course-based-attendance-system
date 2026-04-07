@@ -7,7 +7,7 @@ from sqlalchemy import and_
 
 from app.core.security import require_roles
 from app.db.faculty_scope import enforce_faculty_scope, get_optional_faculty_scope_context
-from app.db.models import ClassBatch, Course, CourseSchedule
+from app.db.models import Course, CourseSchedule
 from app.db.role_scoped import get_role_scoped_db
 from app.utils.weekday_utils import (
     weekday_code,
@@ -39,10 +39,7 @@ def _course_faculty_id(db: Session, course_id: int) -> int:
     target_course = db.query(Course).filter(Course.id == course_id).first()
     if not target_course:
         raise HTTPException(status_code=404, detail="Course not found")
-    class_batch = target_course.class_batch
-    if class_batch is None:
-        raise HTTPException(status_code=404, detail="Class batch not found for course")
-    return class_batch.faculty_id
+    return target_course.faculty_id
 
 
 def _ensure_no_overlap(
@@ -62,7 +59,7 @@ def _ensure_no_overlap(
         db.query(CourseSchedule)
         .join(Course, Course.id == CourseSchedule.course_id)
         .filter(
-            Course.class_batch_id == target_course.class_batch_id,
+            Course.faculty_id == target_course.faculty_id,
             and_(CourseSchedule.start_time < end_time, CourseSchedule.end_time > start_time),
         )
     )
@@ -78,11 +75,11 @@ def _ensure_no_overlap(
     if overlap is not None:
         raise HTTPException(
             status_code=400,
-            detail="Schedule overlaps with another class schedule in this batch/day",
+            detail="Schedule overlaps with another course schedule in this faculty/day",
         )
 
 
-def _ensure_course_not_scheduled_twice_same_day_for_department(
+def _ensure_course_not_scheduled_twice_same_day_for_faculty(
     db: Session,
     *,
     course_id: int,
@@ -93,18 +90,10 @@ def _ensure_course_not_scheduled_twice_same_day_for_department(
     if not target_course:
         raise HTTPException(status_code=404, detail="Course not found")
 
-    class_batch = target_course.class_batch
-    if class_batch is None:
-        raise HTTPException(status_code=404, detail="Class batch not found for course")
-
     query = (
         db.query(CourseSchedule)
         .join(Course, Course.id == CourseSchedule.course_id)
-        .join(ClassBatch, ClassBatch.id == Course.class_batch_id)
-        .filter(
-            ClassBatch.department_id == class_batch.department_id,
-            Course.id == target_course.id,
-        )
+        .filter(Course.id == target_course.id)
     )
     if exclude_schedule_id is not None:
         query = query.filter(CourseSchedule.id != exclude_schedule_id)
@@ -124,13 +113,13 @@ def _ensure_course_not_scheduled_twice_same_day_for_department(
     if existing_days == {1, 2, 3, 4, 5, 6, 7}:
         raise HTTPException(
             status_code=400,
-            detail="This course is already scheduled for this department on all days.",
+            detail="This course is already scheduled for this faculty on all days.",
         )
 
     if conflict_days == selected_set:
         raise HTTPException(
             status_code=400,
-            detail="This course is already scheduled for this department on all selected days.",
+            detail="This course is already scheduled for this faculty on all selected days.",
         )
 
     day_codes = [weekday_code(day) for day in selected_weekdays if day in conflict_days]
@@ -138,7 +127,7 @@ def _ensure_course_not_scheduled_twice_same_day_for_department(
     day_summary = ", ".join(day_codes)
     raise HTTPException(
         status_code=400,
-        detail=f"This course is already scheduled for this department on: {day_summary}.",
+        detail=f"This course is already scheduled for this faculty on: {day_summary}.",
     )
 
 
@@ -173,7 +162,7 @@ def create_schedule(
     if faculty_scope is not None:
         enforce_faculty_scope(_course_faculty_id(db, payload.course_id), faculty_scope)
 
-    _ensure_course_not_scheduled_twice_same_day_for_department(
+    _ensure_course_not_scheduled_twice_same_day_for_faculty(
         db,
         course_id=payload.course_id,
         selected_weekdays=weekdays,
@@ -260,7 +249,7 @@ def update_schedule(
     if faculty_scope is not None:
         enforce_faculty_scope(_course_faculty_id(db, next_course_id), faculty_scope)
 
-    _ensure_course_not_scheduled_twice_same_day_for_department(
+    _ensure_course_not_scheduled_twice_same_day_for_faculty(
         db,
         course_id=next_course_id,
         selected_weekdays=parsed_weekdays,

@@ -194,12 +194,12 @@ def seed_demo_data() -> None:
 
         course = (
             db.query(Course)
-            .filter(Course.class_batch_id == class_batch.id, Course.code == "CSC401")
+            .filter(Course.faculty_id == faculty.id, Course.code == "CSC401")
             .first()
         )
         if not course:
             course = Course(
-                class_batch_id=class_batch.id,
+                faculty_id=faculty.id,
                 code="CSC401",
                 title="Artificial Intelligence",
             )

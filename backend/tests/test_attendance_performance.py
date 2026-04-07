@@ -39,7 +39,7 @@ def _seed(db):
     batch = ClassBatch(faculty_id=faculty.id, department_id=department.id, name="CIS2201")
     db.add(batch)
     db.flush()
-    course = Course(class_batch_id=batch.id, code="CSC401", title="AI")
+    course = Course(faculty_id=faculty.id, code="CSC401", title="AI")
     db.add(course)
     db.flush()
     schedule = CourseSchedule(
