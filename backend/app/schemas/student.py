@@ -19,16 +19,15 @@ class StudentCreate(BaseModel):
                 "full_name": "Abdimalik Hassan",
                 "faculty_id": 1,
                 "department_id": 1,
-                "class_batch_id": 1
+                "class_batch_id": 1,
             }
         }
     )
 
     full_name: str
     faculty_id: int = Field(gt=0)
-    department_id: int | None = Field(default=None, gt=0)
+    department_id: int = Field(gt=0)
     class_batch_id: int = Field(gt=0)
-    embedding_ref: str | None = None
 
 
 class StudentUpdate(BaseModel):

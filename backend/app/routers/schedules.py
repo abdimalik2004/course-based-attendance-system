@@ -7,7 +7,7 @@ from sqlalchemy import and_
 
 from app.core.security import require_roles
 from app.db.faculty_scope import enforce_faculty_scope, get_optional_faculty_scope_context
-from app.db.models import Course, CourseSchedule
+from app.db.models import Course, CourseSchedule, CourseScheduleWeekday
 from app.db.role_scoped import get_role_scoped_db
 from app.utils.weekday_utils import (
     weekday_code,
@@ -146,6 +146,11 @@ def _to_read_model(obj: CourseSchedule) -> CourseScheduleRead:
     )
 
 
+def _sync_schedule_weekdays(schedule: CourseSchedule, weekdays: list[int]) -> None:
+    schedule.weekday = encode_weekday_storage(weekdays)
+    schedule.weekday_rows = [CourseScheduleWeekday(weekday=weekday) for weekday in weekdays]
+
+
 @router.post("", response_model=CourseScheduleRead, dependencies=[Depends(require_roles("FACULTY"))])
 def create_schedule(
     payload: CourseScheduleCreate,
@@ -178,11 +183,11 @@ def create_schedule(
 
     obj = CourseSchedule(
         course_id=payload.course_id,
-        weekday=weekday_storage,
         start_time=payload.start_time,
         end_time=payload.end_time,
         grace_period_minutes=payload.grace_period_minutes,
     )
+    _sync_schedule_weekdays(obj, weekdays)
     db.add(obj)
 
     try:
@@ -270,6 +275,8 @@ def update_schedule(
         if field == "weekday":
             value = next_weekday_storage
         setattr(obj, field, value)
+
+    _sync_schedule_weekdays(obj, parsed_weekdays)
 
     db.add(obj)
     try:

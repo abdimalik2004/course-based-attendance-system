@@ -36,7 +36,7 @@ def _build_app_and_db():
     Base.metadata.create_all(bind=engine)
 
     db = TestingSession()
-    for role_name in ("ACADEMIA", "FACULTY", "FACULTY_ADMIN", "HR", "ADMISSIONS", "TEACHER"):
+    for role_name in ("SUPER_ADMIN", "ACADEMIA", "FACULTY", "FACULTY_ADMIN", "HR", "ADMISSIONS", "TEACHER"):
         db.add(Role(name=role_name))
 
     faculty = Faculty(name="Faculty of Engineering", code="ENG")
@@ -102,7 +102,7 @@ def test_faculty_can_schedule_course():
         "/schedules",
         json={
             "course_id": course_id,
-            "weekday": [1, 3],
+            "weekday": ["sat", "mon"],
             "start_time": "08:00:00",
             "end_time": "10:00:00",
             "grace_period_minutes": 10,

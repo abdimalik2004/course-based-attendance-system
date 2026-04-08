@@ -8,7 +8,6 @@ from sqlalchemy.exc import IntegrityError
 from app.core.security import require_roles
 from app.db.faculty_scope import (
     enforce_faculty_scope,
-    get_central_user_for_faculty,
     get_optional_faculty_scope_context,
 )
 from app.db.models import Teacher
@@ -60,8 +59,6 @@ def create_teacher(
 
     department = get_department_or_404(db, payload.department_id)
     ensure_department_belongs_to_faculty(department, payload.faculty_id)
-    if payload.user_id is not None:
-        get_central_user_for_faculty(payload.user_id, faculty_scope)
 
     teacher_number = _generate_teacher_number(db, faculty_code)
 
@@ -70,7 +67,6 @@ def create_teacher(
         full_name=payload.full_name,
         faculty_id=payload.faculty_id,
         department_id=payload.department_id,
-        user_id=payload.user_id,
     )
     db.add(obj)
     try:
@@ -124,8 +120,6 @@ def update_teacher(
 
     department = get_department_or_404(db, target_department_id)
     ensure_department_belongs_to_faculty(department, target_faculty_id)
-    if payload.user_id is not None:
-        get_central_user_for_faculty(payload.user_id, faculty_scope)
 
     for field, value in payload.model_dump(exclude_unset=True).items():
         setattr(obj, field, value)

@@ -19,6 +19,9 @@ def get_optional_faculty_scope_context(
     current_user: User = Depends(get_current_user),
 ) -> FacultyScopeContext | None:
     role_names = {role.name for role in current_user.roles}
+    if "SUPER_ADMIN" in role_names:
+        return None
+
     if "ACADEMIA" in role_names or "HR" in role_names or "ADMISSIONS" in role_names:
         return None
 

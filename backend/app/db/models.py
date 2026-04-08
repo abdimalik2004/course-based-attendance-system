@@ -38,6 +38,7 @@ _POSITIVE_ID_FIELDS: dict[str, tuple[str, ...]] = {
     "course_assignments": ("id", "course_id", "teacher_id"),
     "enrollments": ("id", "student_id", "course_id"),
     "course_schedules": ("id", "course_id"),
+    "course_schedule_weekdays": ("id", "schedule_id", "weekday"),
     "attendance_sessions": ("id", "course_id", "schedule_id"),
     "attendance_records": ("id", "student_id", "course_id", "session_id"),
 }
@@ -153,6 +154,10 @@ class User(Base):
 
     roles: Mapped[list[Role]] = relationship(secondary="user_role_links", back_populates="users", lazy="selectin")
 
+    @property
+    def role_names(self) -> list[str]:
+        return [role.name for role in self.roles]
+
 
 class Student(Base):
     __tablename__ = "students"
@@ -264,7 +269,22 @@ class CourseSchedule(Base):
     grace_period_minutes: Mapped[int] = mapped_column(Integer, default=10, nullable=False)
 
     course: Mapped[Course] = relationship(back_populates="schedules")
+    weekday_rows: Mapped[list["CourseScheduleWeekday"]] = relationship(
+        back_populates="schedule",
+        cascade="all, delete-orphan",
+    )
     sessions: Mapped[list["AttendanceSession"]] = relationship(back_populates="schedule")
+
+
+class CourseScheduleWeekday(Base):
+    __tablename__ = "course_schedule_weekdays"
+    __table_args__ = (UniqueConstraint("schedule_id", "weekday", name="uq_schedule_weekday"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True, autoincrement=True)
+    schedule_id: Mapped[int] = mapped_column(ForeignKey("course_schedules.id", ondelete="CASCADE"), nullable=False)
+    weekday: Mapped[int] = mapped_column(Integer, nullable=False)
+
+    schedule: Mapped[CourseSchedule] = relationship(back_populates="weekday_rows")
 
 
 class AttendanceSession(Base):
@@ -319,6 +339,7 @@ for _model in (
     CourseAssignment,
     Enrollment,
     CourseSchedule,
+    CourseScheduleWeekday,
     AttendanceSession,
     AttendanceRecord,
 ):

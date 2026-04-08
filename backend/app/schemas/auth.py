@@ -40,20 +40,18 @@ class UserCreate(BaseModel):
     model_config = ConfigDict(
         json_schema_extra={
             "example": {
-                "username": "teacher2",
-                "password": "teacher123",
-                "email": "teacher2@university.edu",
-                "faculty_id": 1,
-                "role_names": ["TEACHER"],
+                "email": "email@university.edu",
+                "username": "Username",
+                "password": "Password",
+                "role_names": ["YOUR_ROLE"],
             }
         }
     )
 
+    email: str
     username: str
     password: str
-    email: str | None = None
-    faculty_id: int | None = Field(default=None, gt=0)
-    role_names: list[str] = Field(default_factory=list)
+    role_names: list[str] = Field(min_length=1)
 
 
 class ResetDatabaseRequest(BaseModel):
@@ -76,3 +74,4 @@ class UserRead(BaseModel):
     email: str | None
     is_active: bool
     faculty_id: int | None
+    role_names: list[str]

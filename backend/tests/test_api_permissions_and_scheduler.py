@@ -33,6 +33,7 @@ from app.routers import classes, courses, departments, faculties, reports, sched
 from app.services.schedule_service import ScheduleService
 from app.utils.datetime_utils import schedule_weekday_from_datetime
 from app.utils import student_numbering
+from app.utils.weekday_utils import weekday_code
 
 
 class _Role:
@@ -62,7 +63,7 @@ def db_session():
     db = TestingSession()
     try:
         # Seed role rows used by ORM relationships.
-        for role_name in ("ACADEMIA", "FACULTY", "FACULTY_ADMIN", "HR", "ADMISSIONS", "TEACHER"):
+        for role_name in ("SUPER_ADMIN", "ACADEMIA", "FACULTY", "FACULTY_ADMIN", "HR", "ADMISSIONS", "TEACHER"):
             db.add(Role(name=role_name))
         db.commit()
         yield db
@@ -579,7 +580,7 @@ def _seed_mixed_attendance_for_reports(db_session):
 
     schedule = CourseSchedule(
         course_id=course.id,
-        weekday=schedule_weekday_from_datetime(datetime.now()),
+        weekday=weekday_code(schedule_weekday_from_datetime(datetime.now())),
         start_time=time(8, 0),
         end_time=time(10, 0),
         grace_period_minutes=10,
@@ -753,7 +754,6 @@ def test_assign_teacher_blocks_faculty_mismatch(client, db_session):
         full_name="Teacher One",
         faculty_id=faculty_b.id,
         department_id=department_b.id,
-        user_id=user.id,
     )
     db_session.add(teacher)
     db_session.commit()
@@ -792,7 +792,6 @@ def test_assign_teacher_blocks_faculty_mismatch(client, db_session):
         full_name="Civil Teacher",
         faculty_id=other_faculty.id,
         department_id=other_department.id,
-        user_id=None,
     )
     db_session.add(teacher)
     db_session.commit()
@@ -813,7 +812,7 @@ def test_schedule_overlapping_courses_rejected_within_same_faculty(client, db_se
     db_session.add(
         CourseSchedule(
             course_id=course.id,
-            weekday=1,
+            weekday="sat",
             start_time=time(9, 0),
             end_time=time(10, 0),
             grace_period_minutes=10,
@@ -828,7 +827,7 @@ def test_schedule_overlapping_courses_rejected_within_same_faculty(client, db_se
         "/schedules",
         json={
             "course_id": course.id,
-            "weekday": 1,
+            "weekday": ["sat"],
             "start_time": "09:30:00",
             "end_time": "10:30:00",
             "grace_period_minutes": 10,
@@ -847,7 +846,7 @@ def test_schedule_same_course_same_day_rejected_even_with_different_time(client,
     db_session.add(
         CourseSchedule(
             course_id=course.id,
-            weekday=1,
+            weekday="sat",
             start_time=time(9, 0),
             end_time=time(10, 0),
             grace_period_minutes=10,
@@ -862,7 +861,7 @@ def test_schedule_same_course_same_day_rejected_even_with_different_time(client,
         "/schedules",
         json={
             "course_id": course.id,
-            "weekday": 1,
+            "weekday": ["sat"],
             "start_time": "11:00:00",
             "end_time": "12:00:00",
             "grace_period_minutes": 10,
@@ -882,7 +881,7 @@ def test_schedule_update_rejects_duplicate_course_day_for_department(client, db_
         [
             CourseSchedule(
                 course_id=course.id,
-                weekday=1,
+                weekday="sat",
                 start_time=time(8, 0),
                 end_time=time(9, 0),
                 grace_period_minutes=10,
@@ -904,7 +903,7 @@ def test_schedule_update_rejects_duplicate_course_day_for_department(client, db_
     response = api.put(
         "/schedules/2",
         json={
-            "weekday": 1,
+            "weekday": ["sat"],
         },
     )
 
@@ -1035,12 +1034,12 @@ def test_scheduler_day_rollover_uses_current_weekday_only(db_session, monkeypatc
 
     fake_now = datetime(2026, 3, 9, 0, 5, 0)  # Monday
     current_weekday = schedule_weekday_from_datetime(fake_now)
-    previous_weekday = 2  # Sunday under Saturday=1..Friday=7 mapping
+    previous_weekday = "sun"
 
     db_session.add(
         CourseSchedule(
             course_id=course.id,
-            weekday=current_weekday,
+            weekday=weekday_code(current_weekday),
             start_time=time(0, 0),
             end_time=time(1, 0),
             grace_period_minutes=5,
@@ -1487,7 +1486,6 @@ def test_create_teacher_auto_generation_increments_sequence(client, db_session):
             full_name="Existing Teacher",
             faculty_id=faculty.id,
             department_id=department.id,
-            user_id=None,
         )
     )
     db_session.commit()
@@ -1562,7 +1560,7 @@ def test_create_class_batch_allows_same_name_across_departments(client, db_sessi
     assert response.json()["department_id"] == department_b.id
 
 
-def test_create_class_batch_rejects_case_and_whitespace_duplicate(client, db_session):
+def test_create_class_batch_ignores_manual_name_and_generates_next_code(client, db_session):
     faculty = Faculty(name="Faculty of Engineering", code="ENG")
     db_session.add(faculty)
     db_session.flush()
@@ -1584,8 +1582,8 @@ def test_create_class_batch_rejects_case_and_whitespace_duplicate(client, db_ses
         },
     )
 
-    assert response.status_code == 409
-    assert "already exists" in response.json()["detail"].lower()
+    assert response.status_code == 200
+    assert response.json()["name"] == "ENG2202"
 
 
 def test_create_class_batch_requires_faculty_id_without_scope(client, db_session):
@@ -1600,10 +1598,10 @@ def test_create_class_batch_requires_faculty_id_without_scope(client, db_session
 
     response = api.post(
         "/classes",
-        json={"department_id": department.id, "name": "FA2201", "year": 2026},
+        json={"department_id": department.id, "year": 2026},
     )
 
-    assert response.status_code == 400
+    assert response.status_code == 422
 
 
 def test_create_class_batch_auto_generates_name_and_increments_sequence(client, db_session):

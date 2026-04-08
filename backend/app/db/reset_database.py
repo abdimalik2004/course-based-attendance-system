@@ -18,8 +18,14 @@ class SystemUserSeed:
     role_name: str
 
 
-SYSTEM_ROLE_NAMES: tuple[str, ...] = ("ACADEMIA", "FACULTY", "HR", "ADMISSIONS")
+SYSTEM_ROLE_NAMES: tuple[str, ...] = ("SUPER_ADMIN", "ACADEMIA", "FACULTY", "FACULTY_ADMIN", "HR", "ADMISSIONS", "TEACHER")
 SYSTEM_USERS: tuple[SystemUserSeed, ...] = (
+    SystemUserSeed(
+        username="admin",
+        password="admin",
+        email="admin@university.edu",
+        role_name="SUPER_ADMIN",
+    ),
     SystemUserSeed(
         username="academia",
         password="academia123",

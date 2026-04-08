@@ -44,7 +44,7 @@ logger = logging.getLogger(__name__)
 def seed_roles() -> None:
     db = SessionLocal()
     try:
-        role_names = ["ACADEMIA", "FACULTY", "FACULTY_ADMIN", "HR", "ADMISSIONS", "TEACHER"]
+        role_names = ["SUPER_ADMIN", "ACADEMIA", "FACULTY", "FACULTY_ADMIN", "HR", "ADMISSIONS", "TEACHER"]
         existing = {r.name for r in db.query(Role).all()}
         for name in role_names:
             if name not in existing:

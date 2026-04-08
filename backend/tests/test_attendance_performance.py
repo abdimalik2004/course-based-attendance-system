@@ -20,6 +20,7 @@ from app.services.attendance_service import AttendanceService
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from app.utils.datetime_utils import schedule_weekday_from_datetime
+from app.utils.weekday_utils import weekday_code
 
 
 def _build_db():
@@ -44,7 +45,7 @@ def _seed(db):
     db.flush()
     schedule = CourseSchedule(
         course_id=course.id,
-        weekday=schedule_weekday_from_datetime(datetime.now()),
+        weekday=weekday_code(schedule_weekday_from_datetime(datetime.now())),
         start_time=time(8, 0),
         end_time=time(10, 0),
         grace_period_minutes=10,

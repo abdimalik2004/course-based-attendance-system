@@ -12,14 +12,16 @@ from app.core.security import (
     decode_refresh_token,
     get_current_user,
     get_password_hash,
+    pwd_context,
     require_roles,
     TokenPayloadError,
     verify_password,
 )
-from app.db.models import Role, User
+from app.db.models import User
 from app.db.session import get_db
 from app.db.reset_database import reset_database_to_clean_state
 from app.schemas.auth import RefreshTokenRequest, ResetDatabaseRequest, TokenPair, UserCreate, UserRead
+from app.services.user_service import create_user
 
 
 router = APIRouter(prefix="/auth", tags=["auth"])
@@ -29,7 +31,7 @@ router = APIRouter(prefix="/auth", tags=["auth"])
     "/register",
     response_model=UserRead,
     status_code=status.HTTP_201_CREATED,
-    dependencies=[Depends(require_roles("ACADEMIA"))],
+    dependencies=[Depends(require_roles("SUPER_ADMIN"))],
     responses={
         400: {"description": "Invalid input (duplicate username or invalid role)"},
         401: {"description": "Unauthorized"},
@@ -37,25 +39,13 @@ router = APIRouter(prefix="/auth", tags=["auth"])
     },
 )
 def register_user(payload: UserCreate, db: Session = Depends(get_db)):
-    existing = db.query(User).filter(User.username == payload.username).first()
-    if existing:
-        raise HTTPException(status_code=400, detail="Username already exists")
-
-    user = User(
-        username=payload.username,
+    user = create_user(
+        db,
         email=payload.email,
-        hashed_password=get_password_hash(payload.password),
-        faculty_id=payload.faculty_id,
+        username=payload.username,
+        password=payload.password,
+        role_names=payload.role_names,
     )
-    db.add(user)
-    db.flush()
-
-    if payload.role_names:
-        roles = db.query(Role).filter(Role.name.in_(payload.role_names)).all()
-        if len(roles) != len(set(payload.role_names)):
-            raise HTTPException(status_code=400, detail="One or more role names are invalid")
-        user.roles = roles
-
     db.commit()
     db.refresh(user)
     return user
@@ -76,8 +66,7 @@ def login_for_access_token(form_data: OAuth2PasswordRequestForm = Depends(), db:
             headers={"WWW-Authenticate": "Bearer"},
         )
 
-    # Migrate legacy hashes (e.g., bcrypt) to the preferred current scheme.
-    if not user.hashed_password.startswith("$pbkdf2-sha256$"):
+    if pwd_context.needs_update(user.hashed_password):
         user.hashed_password = get_password_hash(form_data.password)
         db.add(user)
         db.commit()
@@ -114,7 +103,7 @@ def read_current_user(user: User = Depends(get_current_user)):
 
 @router.post(
     "/reset-database",
-    dependencies=[Depends(require_roles("ACADEMIA"))],
+    dependencies=[Depends(require_roles("SUPER_ADMIN"))],
     responses={
         400: {"description": "Invalid confirmation value"},
         401: {"description": "Unauthorized"},

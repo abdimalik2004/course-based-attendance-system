@@ -14,7 +14,7 @@ from app.db.models import User
 from app.db.session import get_db
 
 
-pwd_context = CryptContext(schemes=["pbkdf2_sha256", "bcrypt"], deprecated="auto")
+pwd_context = CryptContext(schemes=["bcrypt", "pbkdf2_sha256"], deprecated="auto")
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/token")
 
 
@@ -22,6 +22,8 @@ ROLE_EQUIVALENTS: dict[str, set[str]] = {
     "FACULTY": {"FACULTY", "FACULTY_ADMIN"},
     "FACULTY_ADMIN": {"FACULTY", "FACULTY_ADMIN"},
 }
+
+SUPER_ADMIN_ROLE = "SUPER_ADMIN"
 
 
 class TokenPayloadError(Exception):
@@ -109,6 +111,9 @@ def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(
 def require_roles(*required_roles: str):
     def role_dependency(user: User = Depends(get_current_user)) -> User:
         assigned = {role.name for role in user.roles}
+        if SUPER_ADMIN_ROLE in assigned:
+            return user
+
         allowed: set[str] = set()
         for role_name in required_roles:
             allowed.update(ROLE_EQUIVALENTS.get(role_name, {role_name}))

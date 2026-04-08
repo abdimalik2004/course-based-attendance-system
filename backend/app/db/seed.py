@@ -8,6 +8,7 @@ from app.db.models import (
     Course,
     CourseAssignment,
     CourseSchedule,
+    CourseScheduleWeekday,
     Department,
     Enrollment,
     Faculty,
@@ -116,6 +117,7 @@ def seed_demo_data() -> None:
     db = SessionLocal()
     try:
         for code, name in [
+            ("ADMIN", "Administration"),
             ("ACADEMIA", "Academia"),
             ("FACULTIES", "Faculties"),
             ("HR", "HR"),
@@ -123,7 +125,7 @@ def seed_demo_data() -> None:
         ]:
             _get_or_create_org_unit(db, code, name)
 
-        for role_name in ["ACADEMIA", "FACULTY", "HR", "ADMISSIONS", "TEACHER"]:
+        for role_name in ["SUPER_ADMIN", "ACADEMIA", "FACULTY", "FACULTY_ADMIN", "HR", "ADMISSIONS", "TEACHER"]:
             _get_or_create_role(db, role_name)
         db.flush()
 
@@ -150,6 +152,7 @@ def seed_demo_data() -> None:
             db.flush()
 
         academia_user = _get_or_create_user(db, "academia", "academia123", ["ACADEMIA"])
+        admin_user = _get_or_create_user(db, "admin", "admin", ["SUPER_ADMIN"])
         faculty_admin_user = _get_or_create_user(
             db,
             "facultyadmin",
@@ -231,6 +234,7 @@ def seed_demo_data() -> None:
                     start_time=time(hour=8, minute=0),
                     end_time=time(hour=10, minute=0),
                     grace_period_minutes=10,
+                    weekday_rows=[CourseScheduleWeekday(weekday=3)],
                 )
             )
 
@@ -267,11 +271,11 @@ def seed_demo_data() -> None:
         db.commit()
         print("Seed completed.")
         print(
-            "Users: academia/academia123, facultyadmin/faculty123, "
+            "Users: admin/admin, academia/academia123, facultyadmin/faculty123, "
             "teacher1/teacher123, hr/hr123, admission/admission123"
         )
         print(f"Faculty: {faculty.name} | Class: {class_batch.name} | Course: {course.code}")
-        _ = academia_user, faculty_admin_user, hr_user, admissions_user
+        _ = academia_user, admin_user, faculty_admin_user, hr_user, admissions_user
     finally:
         db.close()
 

@@ -38,8 +38,7 @@ def create_student(
         faculty_code = faculty_scope.faculty_code
 
     class_batch = get_class_batch_or_404(db, payload.class_batch_id)
-    target_department_id = payload.department_id if payload.department_id is not None else class_batch.department_id
-    department = get_department_or_404(db, target_department_id)
+    department = get_department_or_404(db, payload.department_id)
     ensure_department_belongs_to_faculty(department, payload.faculty_id)
     ensure_class_batch_matches_faculty_and_department(
         class_batch,
@@ -48,13 +47,13 @@ def create_student(
     )
 
     student_number = next_available_student_number(db, faculty_code, class_batch.year, class_batch.name)
-    embedding_ref = payload.embedding_ref if payload.embedding_ref is not None else student_number
+    embedding_ref = student_number
 
     obj = Student(
         student_number=student_number,
         full_name=payload.full_name,
-        faculty_id=class_batch.faculty_id,
-        department_id=class_batch.department_id,
+        faculty_id=payload.faculty_id,
+        department_id=payload.department_id,
         class_batch_id=payload.class_batch_id,
         embedding_ref=embedding_ref,
     )

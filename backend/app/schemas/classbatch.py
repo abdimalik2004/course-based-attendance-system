@@ -34,7 +34,7 @@ class ClassBatchCreate(BaseModel):
         }
     )
 
-    faculty_id: int | None = Field(default=None, gt=0)
+    faculty_id: int = Field(gt=0)
     department_id: int = Field(gt=0)
     year: int | None = None
 
@@ -42,21 +42,13 @@ class ClassBatchCreate(BaseModel):
 class ClassBatchUpdate(BaseModel):
     model_config = ConfigDict(
         json_schema_extra={
-            "example": {"faculty_id": 1, "department_id": 1, "name": "CIS2202", "year": 2027}
+            "example": {"faculty_id": 1, "department_id": 1, "year": 2027}
         }
     )
 
     faculty_id: int | None = Field(default=None, gt=0)
     department_id: int | None = Field(default=None, gt=0)
-    name: str | None = None
     year: int | None = None
-
-    @field_validator("name")
-    @classmethod
-    def normalize_optional_name(cls, value: str | None) -> str | None:
-        if value is None:
-            return None
-        return _normalize_text(value).upper()
 
 
 class ClassBatchRead(ClassBatchBase):

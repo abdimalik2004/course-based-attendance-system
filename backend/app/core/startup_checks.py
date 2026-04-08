@@ -45,13 +45,15 @@ def assert_secret_key_is_strong() -> None:
 def assert_weekday_storage_schema_is_ready() -> None:
     # Prevent silent MySQL coercion of weekday strings to 0 when old INT schema is still active.
     with engine.connect() as conn:
-        weekday_col = next(
-            (c for c in inspect(conn).get_columns("course_schedules") if c.get("name") == "weekday"),
-            None,
-        )
+        inspector = inspect(conn)
+        table_names = set(inspector.get_table_names())
+        weekday_col = next((c for c in inspector.get_columns("course_schedules") if c.get("name") == "weekday"), None)
 
     if weekday_col is None:
         raise RuntimeError("course_schedules.weekday column not found")
+
+    if "course_schedule_weekdays" not in table_names:
+        raise RuntimeError("course_schedule_weekdays table not found")
 
     col_type_name = str(weekday_col.get("type", "")).upper()
     if "CHAR" in col_type_name or "TEXT" in col_type_name or "STRING" in col_type_name:

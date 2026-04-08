@@ -25,6 +25,7 @@ from app.db.models import (
 from app.services.attendance_service import AttendanceService
 from app.services.schedule_service import ScheduleService
 from app.utils.datetime_utils import schedule_weekday_from_datetime
+from app.utils.weekday_utils import weekday_code
 
 
 @pytest.fixture()
@@ -59,7 +60,7 @@ def _seed_core(db):
 
     schedule = CourseSchedule(
         course_id=course.id,
-        weekday=schedule_weekday_from_datetime(datetime.now()),
+        weekday=weekday_code(schedule_weekday_from_datetime(datetime.now())),
         start_time=time(8, 0),
         end_time=time(10, 0),
         grace_period_minutes=10,
