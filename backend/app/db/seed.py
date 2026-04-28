@@ -107,7 +107,7 @@ def _get_or_create_faculty(db, name: str, code: str) -> Faculty:
                 db.flush()
         return by_name
 
-    faculty = Faculty(name=name, code=code)
+    faculty = Faculty(name=name, code=code, years=4)
     db.add(faculty)
     db.flush()
     return faculty

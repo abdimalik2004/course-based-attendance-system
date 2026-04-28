@@ -5,6 +5,7 @@ from datetime import date, datetime, time
 
 from sqlalchemy import (
     Boolean,
+    CheckConstraint,
     Date,
     DateTime,
     Enum,
@@ -16,6 +17,7 @@ from sqlalchemy import (
     UniqueConstraint,
     func,
     event,
+    text,
 )
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
@@ -94,10 +96,16 @@ class OrganizationalUnit(Base):
 
 class Faculty(Base):
     __tablename__ = "faculties"
+    __table_args__ = (
+        CheckConstraint("years >= 3", name="ck_faculties_years_minimum"),
+        CheckConstraint("semesters = years * 2", name="ck_faculties_semesters_match_years"),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True, autoincrement=True)
     name: Mapped[str] = mapped_column(String(150), unique=True, nullable=False)
     code: Mapped[str] = mapped_column(String(30), unique=True, nullable=False)
+    years: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("4"))
+    semesters: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("8"))
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), nullable=False)
 
     departments: Mapped[list["Department"]] = relationship(back_populates="faculty", cascade="all, delete-orphan")
@@ -105,6 +113,19 @@ class Faculty(Base):
     courses: Mapped[list["Course"]] = relationship(back_populates="faculty")
     students: Mapped[list["Student"]] = relationship(back_populates="faculty")
     teachers: Mapped[list["Teacher"]] = relationship(back_populates="faculty")
+
+
+def _sync_faculty_duration(_mapper, _connection, target: Faculty) -> None:
+    years = 4 if target.years is None else target.years
+    if isinstance(years, bool):
+        raise ValueError("faculties.years must be a positive integer")
+
+    years_value = int(years)
+    if years_value < 3:
+        raise ValueError("faculties.years must be at least 3")
+
+    target.years = years_value
+    target.semesters = years_value * 2
 
 
 class Department(Base):
@@ -345,3 +366,6 @@ for _model in (
 ):
     event.listen(_model, "before_insert", _validate_positive_id_fields)
     event.listen(_model, "before_update", _validate_positive_id_fields)
+
+event.listen(Faculty, "before_insert", _sync_faculty_duration)
+event.listen(Faculty, "before_update", _sync_faculty_duration)

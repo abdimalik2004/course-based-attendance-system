@@ -1,4 +1,53 @@
-dataset/
+# =========================
+# Environment & Secrets
+# =========================
 .env
+
+# =========================
+# Virtual Environments
+# =========================
+.venv/
+venv/
+env/
+backend/.venv/
+backend/venv/
+
+# =========================
+# Python Cache
+# =========================
 __pycache__/
+*.pyc
+.pytest_cache/
+backend/__pycache__/
+backend/.pytest_cache/
+
+# =========================
+# Logs
+# =========================
+logs/
+*.log
+
+# =========================
+# Large / Generated Files
+# =========================
+*.h5
 models/*.onnx
+
+# =========================
+# IDE / Editor
+# =========================
+.vscode/
+.idea/
+
+# =========================
+# OS Files
+# =========================
+.DS_Store
+Thumbs.db
+
+# =========================
+# Misc (specific envs)
+# =========================
+.venv311_test/
+.venv311/
+.venv310/

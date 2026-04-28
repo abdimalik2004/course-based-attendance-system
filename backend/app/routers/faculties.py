@@ -102,7 +102,7 @@ def _force_delete_faculty(db: Session, faculty_id: int) -> dict[str, int]:
 
 @router.post("", response_model=FacultyRead, dependencies=[Depends(require_roles("ACADEMIA"))])
 def create_faculty(payload: FacultyCreate, db: Session = Depends(get_db)):
-    faculty = Faculty(name=payload.name, code=payload.code)
+    faculty = Faculty(name=payload.name, code=payload.code, years=payload.years)
     db.add(faculty)
     try:
         db.commit()

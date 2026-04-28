@@ -130,7 +130,7 @@ def test_permission_blocks_non_academia_faculty_create(client):
     api, current = client
     current["roles"] = ["TEACHER"]
 
-    response = api.post("/faculties", json={"name": "Science", "code": "SCI"})
+    response = api.post("/faculties", json={"name": "Science", "code": "SCI", "years": 4})
 
     assert response.status_code == 403
     assert "Role required" in response.json()["detail"]
@@ -140,10 +140,12 @@ def test_permission_allows_academia_faculty_create(client):
     api, current = client
     current["roles"] = ["ACADEMIA"]
 
-    response = api.post("/faculties", json={"name": "Science", "code": "SCI"})
+    response = api.post("/faculties", json={"name": "Science", "code": "SCI", "years": 4})
 
     assert response.status_code == 200
     assert response.json()["code"] == "SCI"
+    assert response.json()["years"] == 4
+    assert response.json()["semesters"] == 8
 
 
 def test_delete_faculty_without_force_returns_expected_response(client, db_session):

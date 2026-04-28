@@ -73,6 +73,7 @@ def ensure_faculty_row_available(
         id=central_faculty.id,
         name=central_faculty.name,
         code=central_faculty.code,
+        years=central_faculty.years,
     )
     db.add(materialized)
     try:
