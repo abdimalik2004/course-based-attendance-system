@@ -1,1 +1,2 @@
 print("Abdalla")
+print("Afyare")
