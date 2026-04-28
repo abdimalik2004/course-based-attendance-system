@@ -1,2 +1,2 @@
 print("Abdalla")
-print("Afyare")
+print("Abdalla afyare")
