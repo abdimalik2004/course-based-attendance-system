@@ -3,8 +3,8 @@
 Revision ID: 9c2d1e4f5a6b
 Revises: 3a4b5c6d7e8f
 Create Date: 2026-04-03 11:20:00.000000
-
 """
+
 from __future__ import annotations
 
 from typing import Sequence, Union
@@ -39,87 +39,57 @@ _ID_TABLES = (
 
 
 def _cleanup_negative_rows() -> None:
-    # Child tables first to avoid FK violations during cleanup.
-    op.execute(
-        sa.text(
-            """
-            DELETE FROM attendance_records
-            WHERE id < 0 OR student_id < 0 OR course_id < 0 OR session_id < 0
-            """
-        )
-    )
-    op.execute(
-        sa.text(
-            """
-            DELETE FROM attendance_sessions
-            WHERE id < 0 OR course_id < 0 OR schedule_id < 0
-            """
-        )
-    )
-    op.execute(
-        sa.text(
-            """
-            DELETE FROM course_schedules
-            WHERE id < 0 OR course_id < 0
-            """
-        )
-    )
-    op.execute(
-        sa.text(
-            """
-            DELETE FROM enrollments
-            WHERE id < 0 OR student_id < 0 OR course_id < 0
-            """
-        )
-    )
-    op.execute(
-        sa.text(
-            """
-            DELETE FROM course_assignments
-            WHERE id < 0 OR course_id < 0 OR teacher_id < 0
-            """
-        )
-    )
-    op.execute(
-        sa.text(
-            """
-            DELETE FROM students
-            WHERE id < 0 OR faculty_id < 0 OR department_id < 0 OR class_batch_id < 0
-            """
-        )
-    )
-    op.execute(
-        sa.text(
-            """
-            DELETE FROM teachers
-            WHERE id < 0 OR faculty_id < 0 OR department_id < 0 OR user_id < 0
-            """
-        )
-    )
-    op.execute(
-        sa.text(
-            """
-            DELETE FROM courses
-            WHERE id < 0 OR class_batch_id < 0 OR faculty_id < 0
-            """
-        )
-    )
-    op.execute(
-        sa.text(
-            """
-            DELETE FROM class_batches
-            WHERE id < 0 OR faculty_id < 0 OR department_id < 0
-            """
-        )
-    )
-    op.execute(
-        sa.text(
-            """
-            DELETE FROM departments
-            WHERE id < 0 OR faculty_id < 0
-            """
-        )
-    )
+    # Child tables first to avoid FK violations
+    op.execute(sa.text("""
+        DELETE FROM attendance_records
+        WHERE id < 0 OR student_id < 0 OR course_id < 0 OR session_id < 0
+    """))
+
+    op.execute(sa.text("""
+        DELETE FROM attendance_sessions
+        WHERE id < 0 OR course_id < 0 OR schedule_id < 0
+    """))
+
+    op.execute(sa.text("""
+        DELETE FROM course_schedules
+        WHERE id < 0 OR course_id < 0
+    """))
+
+    op.execute(sa.text("""
+        DELETE FROM enrollments
+        WHERE id < 0 OR student_id < 0 OR course_id < 0
+    """))
+
+    op.execute(sa.text("""
+        DELETE FROM course_assignments
+        WHERE id < 0 OR course_id < 0 OR teacher_id < 0
+    """))
+
+    op.execute(sa.text("""
+        DELETE FROM students
+        WHERE id < 0 OR faculty_id < 0 OR department_id < 0 OR class_batch_id < 0
+    """))
+
+    op.execute(sa.text("""
+        DELETE FROM teachers
+        WHERE id < 0 OR faculty_id < 0 OR department_id < 0 OR user_id < 0
+    """))
+
+    op.execute(sa.text("""
+        DELETE FROM courses
+        WHERE id < 0 OR class_batch_id < 0 OR faculty_id < 0
+    """))
+
+    op.execute(sa.text("""
+        DELETE FROM class_batches
+        WHERE id < 0 OR faculty_id < 0 OR department_id < 0
+    """))
+
+    op.execute(sa.text("""
+        DELETE FROM departments
+        WHERE id < 0 OR faculty_id < 0
+    """))
+
     op.execute(sa.text("DELETE FROM user_role_links WHERE user_id < 0 OR role_id < 0"))
     op.execute(sa.text("DELETE FROM users WHERE id < 0 OR faculty_id < 0"))
     op.execute(sa.text("DELETE FROM faculties WHERE id < 0"))
@@ -132,21 +102,20 @@ def _sync_sqlite_sequences() -> None:
     if bind.dialect.name != "sqlite":
         return
 
-    sqlite_sequence_exists = bind.execute(
+    exists = bind.execute(
         sa.text("SELECT name FROM sqlite_master WHERE type='table' AND name='sqlite_sequence'")
     ).first()
-    if sqlite_sequence_exists is None:
+
+    if exists is None:
         return
 
     for table_name in _ID_TABLES:
         bind.execute(
-            sa.text(
-                f"""
+            sa.text(f"""
                 UPDATE sqlite_sequence
                 SET seq = (SELECT COALESCE(MAX(id), 0) FROM {table_name})
                 WHERE name = :table_name
-                """
-            ),
+            """),
             {"table_name": table_name},
         )
 
