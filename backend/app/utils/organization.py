@@ -5,7 +5,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.db.faculty_scope import FacultyScopeContext
-from app.db.models import ClassBatch, Department, Faculty
+from app.db.models import ClassBatch, Course, Department, Faculty
 from app.db.session import SessionLocal
 
 
@@ -28,6 +28,13 @@ def get_class_batch_or_404(db: Session, class_batch_id: int) -> ClassBatch:
     if not class_batch:
         raise HTTPException(status_code=404, detail="Class batch not found")
     return class_batch
+
+
+def get_course_or_404(db: Session, course_id: int) -> Course:
+    course = db.query(Course).filter(Course.id == course_id).first()
+    if not course:
+        raise HTTPException(status_code=404, detail="Course not found")
+    return course
 
 
 def ensure_department_belongs_to_faculty(department: Department, faculty_id: int) -> None:

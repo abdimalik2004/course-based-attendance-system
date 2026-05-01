@@ -21,6 +21,7 @@ from app.core.startup_checks import (
 from app.db.models import Role
 from app.db.session import SessionLocal
 from app.routers import (
+    academic_structure,
     attendance,
     auth,
     classes,
@@ -29,6 +30,7 @@ from app.routers import (
     faculties,
     reports,
     schedules,
+    student_portal,
     sessions,
     students,
     teachers,
@@ -94,9 +96,11 @@ app.include_router(classes.router)
 app.include_router(students.router)
 app.include_router(teachers.router)
 app.include_router(courses.router)
+app.include_router(academic_structure.router)
 app.include_router(schedules.router)
 app.include_router(sessions.router)
 app.include_router(attendance.router)
+app.include_router(student_portal.router)
 app.include_router(reports.router)
 
 

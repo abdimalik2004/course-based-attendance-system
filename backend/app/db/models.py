@@ -8,15 +8,18 @@ from sqlalchemy import (
     CheckConstraint,
     Date,
     DateTime,
+    Float,
     Enum,
     ForeignKey,
     Integer,
+    JSON,
     String,
     Text,
     Time,
     UniqueConstraint,
     func,
     event,
+    select,
     text,
 )
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
@@ -31,18 +34,23 @@ _POSITIVE_ID_FIELDS: dict[str, tuple[str, ...]] = {
     "roles": ("id",),
     "organizational_units": ("id",),
     "faculties": ("id",),
+    "academic_years": ("id",),
     "departments": ("id", "faculty_id"),
     "class_batches": ("id", "faculty_id", "department_id"),
     "users": ("id", "faculty_id"),
     "students": ("id", "faculty_id", "department_id", "class_batch_id"),
     "teachers": ("id", "faculty_id", "department_id", "user_id"),
     "courses": ("id", "faculty_id"),
+    "course_semester_assignments": ("id", "course_id", "faculty_id", "department_id", "academic_year_id"),
+    "class_course_assignments": ("id", "class_id", "course_id", "faculty_id", "department_id"),
     "course_assignments": ("id", "course_id", "teacher_id"),
     "enrollments": ("id", "student_id", "course_id"),
     "course_schedules": ("id", "course_id"),
     "course_schedule_weekdays": ("id", "schedule_id", "weekday"),
     "attendance_sessions": ("id", "course_id", "schedule_id"),
     "attendance_records": ("id", "student_id", "course_id", "session_id"),
+    "student_attendance": ("id", "student_id"),
+    "student_schedule": ("id", "student_id"),
 }
 
 
@@ -62,9 +70,21 @@ class AttendanceStatus(str, enum.Enum):
     ABSENT = "ABSENT"
 
 
+class AttendanceSummaryStatus(str, enum.Enum):
+    GOOD = "Good"
+    WARNING = "Warning"
+    LOW = "Low"
+
+
 class SessionStatus(str, enum.Enum):
     ACTIVE = "ACTIVE"
     CLOSED = "CLOSED"
+
+
+class AcademicYearStatus(str, enum.Enum):
+    ACTIVE = "active"
+    INACTIVE = "inactive"
+    DRAFT = "draft"
 
 
 class UserRoleLink(Base):
@@ -111,6 +131,8 @@ class Faculty(Base):
     departments: Mapped[list["Department"]] = relationship(back_populates="faculty", cascade="all, delete-orphan")
     class_batches: Mapped[list["ClassBatch"]] = relationship(back_populates="faculty", cascade="all, delete-orphan")
     courses: Mapped[list["Course"]] = relationship(back_populates="faculty")
+    course_semester_assignments: Mapped[list["CourseSemesterAssignment"]] = relationship(back_populates="faculty")
+    class_course_assignments: Mapped[list["ClassCourseAssignment"]] = relationship(back_populates="faculty")
     students: Mapped[list["Student"]] = relationship(back_populates="faculty")
     teachers: Mapped[list["Teacher"]] = relationship(back_populates="faculty")
 
@@ -160,6 +182,7 @@ class ClassBatch(Base):
     faculty: Mapped[Faculty] = relationship(back_populates="class_batches")
     department: Mapped[Department] = relationship(back_populates="class_batches")
     students: Mapped[list["Student"]] = relationship(back_populates="class_batch", cascade="all, delete-orphan")
+    class_course_assignments: Mapped[list["ClassCourseAssignment"]] = relationship(back_populates="class_batch")
 
 
 class User(Base):
@@ -174,6 +197,8 @@ class User(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), nullable=False)
 
     roles: Mapped[list[Role]] = relationship(secondary="user_role_links", back_populates="users", lazy="selectin")
+    attendance_entries: Mapped[list["StudentAttendance"]] = relationship(back_populates="student")
+    schedule_entries: Mapped[list["StudentSchedule"]] = relationship(back_populates="student")
 
     @property
     def role_names(self) -> list[str]:
@@ -227,14 +252,179 @@ class Course(Base):
     normalized_title: Mapped[str] = mapped_column(String(200), nullable=False)
 
     faculty: Mapped[Faculty] = relationship(back_populates="courses")
+    course_semester_assignments: Mapped[list["CourseSemesterAssignment"]] = relationship(back_populates="course", cascade="all, delete-orphan")
+    class_course_assignments: Mapped[list["ClassCourseAssignment"]] = relationship(back_populates="course", cascade="all, delete-orphan")
     assignments: Mapped[list["CourseAssignment"]] = relationship(back_populates="course", cascade="all, delete-orphan")
     enrollments: Mapped[list["Enrollment"]] = relationship(back_populates="course", cascade="all, delete-orphan")
     schedules: Mapped[list["CourseSchedule"]] = relationship(back_populates="course", cascade="all, delete-orphan")
     sessions: Mapped[list["AttendanceSession"]] = relationship(back_populates="course")
 
 
+class AcademicYear(Base):
+    __tablename__ = "academic_years"
+    __table_args__ = (
+        UniqueConstraint("academic_year", name="uq_academic_years_academic_year"),
+        CheckConstraint("end_date > start_date", name="ck_academic_years_date_order"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True, autoincrement=True)
+    academic_year: Mapped[str] = mapped_column(String(32), nullable=False)
+    term_name: Mapped[str] = mapped_column(String(64), nullable=False)
+    start_date: Mapped[date] = mapped_column(Date, nullable=False)
+    end_date: Mapped[date] = mapped_column(Date, nullable=False)
+    status: Mapped[AcademicYearStatus] = mapped_column(
+        Enum(
+            AcademicYearStatus,
+            name="academic_year_status",
+            values_callable=lambda enum_cls: [member.value for member in enum_cls],
+        ),
+        default=AcademicYearStatus.DRAFT,
+        nullable=False,
+        index=True,
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), nullable=False)
+
+    course_semester_assignments: Mapped[list["CourseSemesterAssignment"]] = relationship(
+        back_populates="academic_year",
+        cascade="all, delete-orphan",
+    )
+
+
+class CourseSemesterAssignment(Base):
+    __tablename__ = "course_semester_assignments"
+    __table_args__ = (
+        UniqueConstraint(
+            "course_id",
+            "faculty_id",
+            "department_id",
+            "academic_year_id",
+            name="uq_course_semester_assignment",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True, autoincrement=True)
+    course_id: Mapped[int] = mapped_column(ForeignKey("courses.id", ondelete="CASCADE"), nullable=False, index=True)
+    faculty_id: Mapped[int] = mapped_column(ForeignKey("faculties.id", ondelete="CASCADE"), nullable=False, index=True)
+    department_id: Mapped[int] = mapped_column(ForeignKey("departments.id", ondelete="CASCADE"), nullable=False, index=True)
+    academic_year_id: Mapped[int] = mapped_column(
+        ForeignKey("academic_years.id"),
+        nullable=False,
+        index=True,
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), nullable=False)
+
+    course: Mapped[Course] = relationship(back_populates="course_semester_assignments")
+    faculty: Mapped[Faculty] = relationship(back_populates="course_semester_assignments")
+    department: Mapped[Department] = relationship()
+    academic_year: Mapped[AcademicYear] = relationship(back_populates="course_semester_assignments")
+
+
+class ClassCourseAssignment(Base):
+    __tablename__ = "class_course_assignments"
+    __table_args__ = (
+        UniqueConstraint("class_id", "course_id", "faculty_id", "department_id", name="uq_class_course_assignment"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True, autoincrement=True)
+    class_id: Mapped[int] = mapped_column(ForeignKey("class_batches.id", ondelete="CASCADE"), nullable=False, index=True)
+    course_id: Mapped[int] = mapped_column(ForeignKey("courses.id", ondelete="CASCADE"), nullable=False, index=True)
+    faculty_id: Mapped[int] = mapped_column(ForeignKey("faculties.id", ondelete="CASCADE"), nullable=False, index=True)
+    department_id: Mapped[int] = mapped_column(ForeignKey("departments.id", ondelete="CASCADE"), nullable=False, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), nullable=False)
+
+    class_batch: Mapped[ClassBatch] = relationship(back_populates="class_course_assignments")
+    course: Mapped[Course] = relationship(back_populates="class_course_assignments")
+    faculty: Mapped[Faculty] = relationship(back_populates="class_course_assignments")
+    department: Mapped[Department] = relationship()
+
+
 def normalize_course_title(value: str) -> str:
     return value.strip().lower()
+
+
+def _validate_academic_year_record(target: AcademicYear) -> None:
+    if not isinstance(target.start_date, date) or not isinstance(target.end_date, date):
+        raise ValueError("academic_years.start_date and academic_years.end_date are required")
+    if target.end_date <= target.start_date:
+        raise ValueError("academic_years.end_date must be later than start_date")
+
+
+def _calculate_attendance_percentage(classes_attended: int, total_classes: int) -> float:
+    if total_classes <= 0:
+        raise ValueError("attendance.total_classes must be greater than 0")
+    if classes_attended < 0:
+        raise ValueError("attendance.classes_attended must be non-negative")
+    if classes_attended > total_classes:
+        raise ValueError("attendance.classes_attended cannot exceed total_classes")
+    return round((classes_attended / total_classes) * 100, 2)
+
+
+def _attendance_status_from_percentage(percentage: float) -> AttendanceSummaryStatus:
+    if percentage >= 75:
+        return AttendanceSummaryStatus.GOOD
+    if percentage >= 50:
+        return AttendanceSummaryStatus.WARNING
+    return AttendanceSummaryStatus.LOW
+
+
+def _normalize_weekdays(weekdays: list[str] | None) -> list[str]:
+    allowed_weekdays = {"Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"}
+    if not isinstance(weekdays, list) or not weekdays:
+        raise ValueError("schedule.weekdays must be a non-empty list")
+
+    normalized: list[str] = []
+    seen: set[str] = set()
+    for weekday in weekdays:
+        if not isinstance(weekday, str):
+            raise ValueError("schedule.weekdays must contain strings")
+        candidate = weekday.strip().title()
+        if candidate not in allowed_weekdays:
+            raise ValueError("schedule.weekdays must contain valid weekday codes")
+        if candidate in seen:
+            raise ValueError("schedule.weekdays must not contain duplicates")
+        seen.add(candidate)
+        normalized.append(candidate)
+    return normalized
+
+
+def _validate_student_attendance_record(target: StudentAttendance) -> None:
+    percentage = _calculate_attendance_percentage(target.classes_attended, target.total_classes)
+    target.attendance_percentage = percentage
+    target.status = _attendance_status_from_percentage(percentage)
+
+
+def _validate_student_schedule_record(target: StudentSchedule) -> None:
+    if target.end_time <= target.start_time:
+        raise ValueError("schedule.end_time must be later than start_time")
+    target.weekdays = _normalize_weekdays(target.weekdays)
+    if target.grace_period_minutes < 0:
+        raise ValueError("schedule.grace_period_minutes must be non-negative")
+
+
+def _validate_single_active_academic_year(connection, target: AcademicYear) -> None:
+    if target.status != AcademicYearStatus.ACTIVE:
+        return
+
+    query = select(func.count()).select_from(AcademicYear.__table__).where(
+        AcademicYear.__table__.c.status == AcademicYearStatus.ACTIVE.value,
+    )
+    if target.id is not None:
+        query = query.where(AcademicYear.__table__.c.id != target.id)
+    active_count = int(connection.execute(query).scalar_one())
+    if active_count > 0:
+        raise ValueError("only one academic year can be active at a time")
+
+
+@event.listens_for(AcademicYear, "before_insert")
+def _validate_academic_year_before_insert(_mapper, connection, target: AcademicYear) -> None:
+    _validate_academic_year_record(target)
+    _validate_single_active_academic_year(connection, target)
+
+
+@event.listens_for(AcademicYear, "before_update")
+def _validate_academic_year_before_update(_mapper, connection, target: AcademicYear) -> None:
+    _validate_academic_year_record(target)
+    _validate_single_active_academic_year(connection, target)
 
 
 @event.listens_for(Course, "before_insert")
@@ -274,6 +464,56 @@ class Enrollment(Base):
 
     student: Mapped[Student] = relationship(back_populates="enrollments")
     course: Mapped[Course] = relationship(back_populates="enrollments")
+
+
+class StudentAttendance(Base):
+    __tablename__ = "student_attendance"
+    __table_args__ = (
+        CheckConstraint("classes_attended >= 0", name="ck_student_attendance_classes_attended_nonnegative"),
+        CheckConstraint("total_classes > 0", name="ck_student_attendance_total_classes_positive"),
+        CheckConstraint(
+            "classes_attended <= total_classes",
+            name="ck_student_attendance_classes_attended_not_greater_than_total",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True, autoincrement=True)
+    student_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    course_name: Mapped[str] = mapped_column(String(200), nullable=False)
+    course_code: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
+    classes_attended: Mapped[int] = mapped_column(Integer, nullable=False)
+    total_classes: Mapped[int] = mapped_column(Integer, nullable=False)
+    attendance_percentage: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    status: Mapped[AttendanceSummaryStatus] = mapped_column(
+        Enum(
+            AttendanceSummaryStatus,
+            name="attendance_summary_status",
+            values_callable=lambda enum_cls: [member.value for member in enum_cls],
+        ),
+        nullable=False,
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), nullable=False)
+
+    student: Mapped[User] = relationship(back_populates="attendance_entries")
+
+
+class StudentSchedule(Base):
+    __tablename__ = "student_schedule"
+    __table_args__ = (
+        CheckConstraint("grace_period_minutes >= 0", name="ck_student_schedule_grace_period_nonnegative"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True, autoincrement=True)
+    student_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    course_name: Mapped[str] = mapped_column(String(200), nullable=False)
+    course_code: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
+    weekdays: Mapped[list[str]] = mapped_column(JSON, nullable=False)
+    start_time: Mapped[time] = mapped_column(Time, nullable=False)
+    end_time: Mapped[time] = mapped_column(Time, nullable=False)
+    grace_period_minutes: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), nullable=False)
+
+    student: Mapped[User] = relationship(back_populates="schedule_entries")
 
 
 class CourseSchedule(Base):
@@ -346,19 +586,44 @@ class AttendanceRecord(Base):
     session: Mapped[AttendanceSession] = relationship(back_populates="records")
 
 
+@event.listens_for(StudentAttendance, "before_insert")
+def _validate_student_attendance_before_insert(_mapper, _connection, target: StudentAttendance) -> None:
+    _validate_student_attendance_record(target)
+
+
+@event.listens_for(StudentAttendance, "before_update")
+def _validate_student_attendance_before_update(_mapper, _connection, target: StudentAttendance) -> None:
+    _validate_student_attendance_record(target)
+
+
+@event.listens_for(StudentSchedule, "before_insert")
+def _validate_student_schedule_before_insert(_mapper, _connection, target: StudentSchedule) -> None:
+    _validate_student_schedule_record(target)
+
+
+@event.listens_for(StudentSchedule, "before_update")
+def _validate_student_schedule_before_update(_mapper, _connection, target: StudentSchedule) -> None:
+    _validate_student_schedule_record(target)
+
+
 for _model in (
     UserRoleLink,
     Role,
     OrganizationalUnit,
     Faculty,
+    AcademicYear,
     Department,
     ClassBatch,
     User,
     Student,
     Teacher,
     Course,
+    CourseSemesterAssignment,
+    ClassCourseAssignment,
     CourseAssignment,
     Enrollment,
+    StudentAttendance,
+    StudentSchedule,
     CourseSchedule,
     CourseScheduleWeekday,
     AttendanceSession,
