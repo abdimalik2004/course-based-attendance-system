@@ -63,7 +63,7 @@ def db_session():
     db = TestingSession()
     try:
         # Seed role rows used by ORM relationships.
-        for role_name in ("SUPER_ADMIN", "ACADEMIA", "FACULTY", "FACULTY_ADMIN", "HR", "ADMISSIONS", "TEACHER"):
+        for role_name in ("SUPER_ADMIN", "ACADEMIA", "FACULTY", "FACULTY_ADMIN", "HR", "ADMISSIONS", "TEACHER", "STUDENT"):
             db.add(Role(name=role_name))
         db.commit()
         yield db

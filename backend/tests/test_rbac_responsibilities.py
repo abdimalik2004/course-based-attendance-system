@@ -36,7 +36,7 @@ def _build_app_and_db():
     Base.metadata.create_all(bind=engine)
 
     db = TestingSession()
-    for role_name in ("SUPER_ADMIN", "ACADEMIA", "FACULTY", "FACULTY_ADMIN", "HR", "ADMISSIONS", "TEACHER"):
+    for role_name in ("SUPER_ADMIN", "ACADEMIA", "FACULTY", "FACULTY_ADMIN", "HR", "ADMISSIONS", "TEACHER", "STUDENT"):
         db.add(Role(name=role_name))
 
     faculty = Faculty(name="Faculty of Engineering", code="ENG")
