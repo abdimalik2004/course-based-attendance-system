@@ -7,10 +7,9 @@ import logging
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
-from app.db.models import AttendanceSession, CourseSchedule, SessionStatus
+from app.db.models import CourseSchedule
 from app.db.session import SessionLocal
-from app.services.attendance_service import attendance_service
-from app.utils.datetime_utils import combine_today, current_local_datetime, schedule_weekday_from_datetime
+from app.utils.datetime_utils import current_local_datetime, schedule_weekday_from_datetime
 from app.utils.weekday_utils import storage_contains_weekday
 
 
@@ -93,129 +92,16 @@ class ScheduleService:
     def _tick(self, db: Session) -> None:
         now = current_local_datetime()
 
-        closed_count, absent_count = self._close_overdue_active_sessions(db, now)
-        if closed_count:
-            self._logger.info(
-                "Catch-up closed %d overdue session(s) and marked %d absence record(s)",
-                closed_count,
-                absent_count,
-            )
-
         weekday = schedule_weekday_from_datetime(now)
-
-        schedules = [
-            row
-            for row in db.query(CourseSchedule).all()
-            if storage_contains_weekday(row.weekday, weekday)
-        ]
-        self._logger.debug("Scheduler tick at %s with %d schedules", now.isoformat(), len(schedules))
-        for schedule in schedules:
-            start_dt = combine_today(schedule.start_time)
-            end_dt = combine_today(schedule.end_time)
-
-            session = (
-                db.query(AttendanceSession)
-                .filter(
-                    AttendanceSession.schedule_id == schedule.id,
-                    AttendanceSession.session_date == date.today(),
-                )
-                .first()
-            )
-            same_course_day_session = (
-                db.query(AttendanceSession)
-                .filter(
-                    AttendanceSession.course_id == schedule.course_id,
-                    AttendanceSession.session_date == date.today(),
-                )
-                .first()
-            )
-
-            if start_dt <= now <= end_dt and session is None and same_course_day_session is None:
-                db.add(
-                    AttendanceSession(
-                        course_id=schedule.course_id,
-                        schedule_id=schedule.id,
-                        session_date=date.today(),
-                        start_time=start_dt,
-                        end_time=end_dt,
-                        status=SessionStatus.ACTIVE,
-                    )
-                )
-                db.commit()
-                self._logger.info(
-                    "Created attendance session: schedule_id=%s course_id=%s date=%s",
-                    schedule.id,
-                    schedule.course_id,
-                    date.today().isoformat(),
-                )
-                continue
-
-            # If backend was down for the whole window, backfill a missed session
-            # and close it immediately so absences are still generated.
-            if now > end_dt and session is None and same_course_day_session is None:
-                missed_session = AttendanceSession(
-                    course_id=schedule.course_id,
-                    schedule_id=schedule.id,
-                    session_date=date.today(),
-                    start_time=start_dt,
-                    end_time=end_dt,
-                    status=SessionStatus.ACTIVE,
-                )
-                db.add(missed_session)
-                db.commit()
-                db.refresh(missed_session)
-
-                absent_count = attendance_service.close_session_and_mark_absent(db, missed_session)
-                self._logger.info(
-                    "Backfilled and closed missed session_id=%s for course_id=%s and marked %d absences",
-                    missed_session.id,
-                    missed_session.course_id,
-                    absent_count,
-                )
-                continue
-
-            if start_dt <= now <= end_dt and session is not None:
-                self._logger.debug(
-                    "Skipped duplicate session creation for schedule_id=%s date=%s session_id=%s",
-                    schedule.id,
-                    date.today().isoformat(),
-                    session.id,
-                )
-
-            if start_dt <= now <= end_dt and session is None and same_course_day_session is not None:
-                self._logger.warning(
-                    "Skipped schedule_id=%s because course_id=%s already has session_id=%s for date=%s",
-                    schedule.id,
-                    schedule.course_id,
-                    same_course_day_session.id,
-                    date.today().isoformat(),
-                )
-
-            if session and session.status == SessionStatus.ACTIVE and now >= end_dt:
-                absent_count = attendance_service.close_session_and_mark_absent(db, session)
-                self._logger.info(
-                    "Closed session_id=%s for course_id=%s and marked %d absences",
-                    session.id,
-                    session.course_id,
-                    absent_count,
-                )
-
-    def _close_overdue_active_sessions(self, db: Session, now: datetime) -> tuple[int, int]:
-        overdue_sessions = (
-            db.query(AttendanceSession)
-            .filter(
-                AttendanceSession.status == SessionStatus.ACTIVE,
-                AttendanceSession.end_time <= now,
-            )
-            .all()
+        schedules = [row for row in db.query(CourseSchedule).all() if storage_contains_weekday(row.weekday, weekday)]
+        self._logger.debug(
+            "Scheduler tick at %s with %d schedule(s); automated attendance session management is disabled",
+            now.isoformat(),
+            len(schedules),
         )
 
-        closed = 0
-        absences = 0
-        for session in overdue_sessions:
-            absences += attendance_service.close_session_and_mark_absent(db, session)
-            closed += 1
-        return closed, absences
+    def _close_overdue_active_sessions(self, db: Session, now: datetime) -> tuple[int, int]:
+        return 0, 0
 
     def is_running(self) -> bool:
         return self._task is not None and not self._task.done()

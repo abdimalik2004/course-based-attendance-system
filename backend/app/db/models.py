@@ -47,7 +47,7 @@ _POSITIVE_ID_FIELDS: dict[str, tuple[str, ...]] = {
     "enrollments": ("id", "student_id", "course_id"),
     "course_schedules": ("id", "course_id"),
     "course_schedule_weekdays": ("id", "schedule_id", "weekday"),
-    "attendance_sessions": ("id", "course_id", "schedule_id"),
+    "attendance_sessions": ("id", "course_id", "instructor_id", "schedule_id"),
     "attendance_records": ("id", "student_id", "course_id", "session_id"),
     "student_attendance": ("id", "student_id"),
     "student_schedule": ("id", "student_id"),
@@ -85,6 +85,19 @@ class AcademicYearStatus(str, enum.Enum):
     ACTIVE = "active"
     INACTIVE = "inactive"
     DRAFT = "draft"
+
+
+class TeacherRole(str, enum.Enum):
+    PROFESSOR = "Professor"
+    ASSOCIATE_PROFESSOR = "Associate Professor"
+    ASSISTANT_PROFESSOR = "Assistant Professor"
+    LECTURER = "Lecturer"
+
+
+class TeacherStatus(str, enum.Enum):
+    ACTIVE = "Active"
+    ONLEAVE = "Onleave"
+    INACTIVE = "Inactive"
 
 
 class UserRoleLink(Base):
@@ -229,6 +242,24 @@ class Teacher(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True, autoincrement=True)
     teacher_number: Mapped[str] = mapped_column(String(64), unique=True, nullable=False)
     full_name: Mapped[str] = mapped_column(String(180), nullable=False)
+    role: Mapped[TeacherRole] = mapped_column(
+        Enum(
+            TeacherRole,
+            name="teacher_role",
+            values_callable=lambda enum_cls: [member.value for member in enum_cls],
+        ),
+        default=TeacherRole.LECTURER,
+        nullable=False,
+    )
+    status: Mapped[TeacherStatus] = mapped_column(
+        Enum(
+            TeacherStatus,
+            name="teacher_status",
+            values_callable=lambda enum_cls: [member.value for member in enum_cls],
+        ),
+        default=TeacherStatus.ACTIVE,
+        nullable=False,
+    )
     faculty_id: Mapped[int] = mapped_column(ForeignKey("faculties.id", ondelete="CASCADE"), nullable=False)
     department_id: Mapped[int] = mapped_column(ForeignKey("departments.id", ondelete="CASCADE"), nullable=False)
     user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
@@ -556,13 +587,15 @@ class AttendanceSession(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True, autoincrement=True)
     course_id: Mapped[int] = mapped_column(ForeignKey("courses.id", ondelete="CASCADE"), nullable=False)
+    instructor_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     schedule_id: Mapped[int] = mapped_column(ForeignKey("course_schedules.id", ondelete="CASCADE"), nullable=False)
     session_date: Mapped[date] = mapped_column(Date, nullable=False)
     start_time: Mapped[datetime] = mapped_column(DateTime, nullable=False)
-    end_time: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    end_time: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     status: Mapped[SessionStatus] = mapped_column(Enum(SessionStatus), default=SessionStatus.ACTIVE, nullable=False)
 
     course: Mapped[Course] = relationship(back_populates="sessions")
+    instructor: Mapped[User | None] = relationship()
     schedule: Mapped[CourseSchedule] = relationship(back_populates="sessions")
     records: Mapped[list["AttendanceRecord"]] = relationship(back_populates="session", cascade="all, delete-orphan")
 

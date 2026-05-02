@@ -8,9 +8,12 @@ from app.db.models import (
     AttendanceRecord,
     AttendanceSession,
     AttendanceStatus,
+    Course,
+    CourseSchedule,
     Enrollment,
     SessionStatus,
     Student,
+    User,
 )
 from app.services.face_service import face_service
 from app.utils.datetime_utils import current_local_datetime
@@ -31,8 +34,6 @@ class AttendanceService:
             return {"ok": False, "message": "Session is not active"}
 
         now = current_local_datetime()
-        if now < session.start_time or now > session.end_time:
-            return {"ok": False, "message": "Outside session window"}
 
         frame = decode_base64_image(image_b64)
         recognition = face_service.recognize_student(frame)
@@ -119,9 +120,80 @@ class AttendanceService:
             "processing_time": recognition.get("processing_time"),
         }
 
+    def start_session(self, db: Session, course_id: int, schedule_id: int | None, instructor_id: int) -> dict:
+        if course_id <= 0 or instructor_id <= 0:
+            return {"ok": False, "message": "Invalid session start payload"}
+
+        course = db.query(Course).filter(Course.id == course_id).with_for_update().first()
+        if not course:
+            return {"ok": False, "message": "Course not found"}
+
+        schedule_query = db.query(CourseSchedule).filter(CourseSchedule.course_id == course_id).with_for_update()
+        if schedule_id is not None:
+            schedule_query = schedule_query.filter(CourseSchedule.id == schedule_id)
+        schedule = schedule_query.order_by(CourseSchedule.id.asc()).first()
+        if not schedule:
+            return {"ok": False, "message": "Schedule not found for course"}
+
+        instructor = db.query(User).filter(User.id == instructor_id, User.is_active.is_(True)).first()
+        if not instructor:
+            return {"ok": False, "message": "Instructor not found"}
+
+        existing_active_session = (
+            db.query(AttendanceSession)
+            .filter(
+                AttendanceSession.course_id == course_id,
+                AttendanceSession.status == SessionStatus.ACTIVE,
+            )
+            .first()
+        )
+        if existing_active_session:
+            return {
+                "ok": True,
+                "message": "Attendance session already active",
+                "session": existing_active_session,
+                "created": False,
+            }
+
+        now = current_local_datetime()
+        session = AttendanceSession(
+            course_id=course_id,
+            instructor_id=instructor_id,
+            schedule_id=schedule_id,
+            session_date=now.date(),
+            start_time=now,
+            end_time=None,
+            status=SessionStatus.ACTIVE,
+        )
+        db.add(session)
+        db.commit()
+        db.refresh(session)
+        return {"ok": True, "message": "Attendance session started", "session": session, "created": True}
+
+    def end_session(self, db: Session, session_id: int) -> dict:
+        if session_id <= 0:
+            return {"ok": False, "message": "Invalid session id"}
+
+        session = db.query(AttendanceSession).filter(AttendanceSession.id == session_id).first()
+        if not session:
+            return {"ok": False, "message": "Session not found"}
+
+        if session.status == SessionStatus.CLOSED:
+            return {"ok": True, "message": "Attendance session already closed", "session": session, "absences": 0, "ended": False}
+
+        if session.end_time is None:
+            session.end_time = current_local_datetime()
+
+        absences = self.close_session_and_mark_absent(db, session)
+        db.refresh(session)
+        return {"ok": True, "message": "Attendance session closed", "session": session, "absences": absences, "ended": True}
+
     def close_session_and_mark_absent(self, db: Session, session: AttendanceSession) -> int:
         if session.status == SessionStatus.CLOSED:
             return 0
+
+        if session.end_time is None:
+            session.end_time = current_local_datetime()
 
         enrolled_students = (
             db.query(Student)

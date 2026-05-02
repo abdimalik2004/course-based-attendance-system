@@ -29,7 +29,7 @@ from app.db.models import (
 )
 from app.db.role_scoped import get_role_scoped_db
 from app.db.session import get_db
-from app.routers import classes, courses, departments, faculties, reports, schedules, students, teachers
+from app.routers import classes, courses, departments, faculties, reports, schedules, sessions, students, teachers
 from app.services.schedule_service import ScheduleService
 from app.utils.datetime_utils import schedule_weekday_from_datetime
 from app.utils import student_numbering
@@ -82,6 +82,7 @@ def client(db_session):
     app.include_router(reports.router)
     app.include_router(students.router)
     app.include_router(teachers.router)
+    app.include_router(sessions.router)
 
     def _override_db():
         try:
@@ -89,10 +90,12 @@ def client(db_session):
         finally:
             pass
 
-    current_roles = {"roles": ["ACADEMIA"], "faculty_id": 1}
+    current_roles = {"roles": ["ACADEMIA"], "faculty_id": 1, "user_id": 1}
 
     def _override_current_user() -> _DummyUser:
-        return _DummyUser(current_roles["roles"], current_roles.get("faculty_id"))
+        user = _DummyUser(current_roles["roles"], current_roles.get("faculty_id"))
+        user.id = current_roles.get("user_id", 1)
+        return user
 
     app.dependency_overrides[get_db] = _override_db
     app.dependency_overrides[get_role_scoped_db] = _override_db
@@ -1058,24 +1061,11 @@ def test_scheduler_day_rollover_uses_current_weekday_only(db_session, monkeypatc
     )
     db_session.commit()
 
-    class FakeDate:
-        @classmethod
-        def today(cls):
-            return date(fake_now.year, fake_now.month, fake_now.day)
-
-    monkeypatch.setattr("app.services.schedule_service.date", FakeDate)
-    monkeypatch.setattr("app.services.schedule_service.current_local_datetime", lambda: fake_now)
-    monkeypatch.setattr(
-        "app.services.schedule_service.combine_today",
-        lambda t: fake_now.replace(hour=t.hour, minute=t.minute, second=t.second, microsecond=0),
-    )
-
     svc = ScheduleService()
     svc._tick(db_session)
 
-    sessions = db_session.query(AttendanceSession).filter(AttendanceSession.status == SessionStatus.ACTIVE).all()
-    assert len(sessions) == 1
-    assert sessions[0].course_id == course.id
+    sessions_created = db_session.query(AttendanceSession).filter(AttendanceSession.status == SessionStatus.ACTIVE).all()
+    assert sessions_created == []
 
 
 def test_list_enrolled_students_by_course(client, db_session):
@@ -1189,32 +1179,59 @@ def test_scheduler_backfills_missed_session_and_marks_absent(db_session, monkeyp
     )
     db_session.commit()
 
-    fake_now = datetime(2026, 3, 14, 12, 30, 0)  # Saturday
-
-    class FakeDate:
-        @classmethod
-        def today(cls):
-            return date(fake_now.year, fake_now.month, fake_now.day)
-
-    monkeypatch.setattr("app.services.schedule_service.date", FakeDate)
-    monkeypatch.setattr("app.services.schedule_service.current_local_datetime", lambda: fake_now)
-    monkeypatch.setattr(
-        "app.services.schedule_service.combine_today",
-        lambda t: fake_now.replace(hour=t.hour, minute=t.minute, second=t.second, microsecond=0),
-    )
-
     svc = ScheduleService()
     svc._tick(db_session)
 
     session = db_session.query(AttendanceSession).filter(AttendanceSession.course_id == course.id).first()
-    assert session is not None
-    assert session.status == SessionStatus.CLOSED
+    assert session is None
 
-    records = db_session.query(AttendanceRecord).filter(AttendanceRecord.session_id == session.id).all()
-    assert len(records) == 1
-    assert records[0].student_id == student.id
-    assert records[0].status == AttendanceStatus.ABSENT
-    assert records[0].recognized_at == session.end_time
+
+def test_teacher_can_start_and_end_session(client, db_session):
+    faculty, department, _, course = _seed_course_graph(db_session)
+    schedule = CourseSchedule(
+        course_id=course.id,
+        weekday="mon",
+        start_time=time(9, 0),
+        end_time=time(10, 0),
+        grace_period_minutes=10,
+    )
+    db_session.add(schedule)
+
+    user = User(username="teacher01", hashed_password="x", is_active=True, faculty_id=faculty.id)
+    db_session.add(user)
+    db_session.flush()
+
+    teacher = Teacher(
+        teacher_number="T001",
+        full_name="Teacher One",
+        faculty_id=faculty.id,
+        department_id=department.id,
+        user_id=user.id,
+    )
+    db_session.add(teacher)
+    db_session.commit()
+
+    api, current = client
+    current["roles"] = ["TEACHER"]
+    current["user_id"] = user.id
+
+    start_response = api.post("/sessions/start", json={"course_id": course.id, "schedule_id": schedule.id})
+    assert start_response.status_code == 200
+    started = start_response.json()
+    assert started["course_id"] == course.id
+    assert started["instructor_id"] == user.id
+    assert started["status"] == "ACTIVE"
+    assert started["end_time"] is None
+
+    duplicate_response = api.post("/sessions/start", json={"course_id": course.id, "schedule_id": schedule.id})
+    assert duplicate_response.status_code == 200
+    assert duplicate_response.json()["id"] == started["id"]
+
+    end_response = api.post("/sessions/end", json={"session_id": started["id"]})
+    assert end_response.status_code == 200
+    ended = end_response.json()
+    assert ended["status"] == "CLOSED"
+    assert ended["end_time"] is not None
 
 
 def test_create_student_auto_generates_number(client, db_session, tmp_path, monkeypatch):
@@ -1466,6 +1483,8 @@ def test_create_teacher_auto_generates_number(client, db_session):
         "/teachers",
         json={
             "full_name": "Engineer Teacher",
+            "role": "Professor",
+            "status": "Onleave",
             "faculty_id": faculty.id,
             "department_id": department.id,
         },
@@ -1474,6 +1493,8 @@ def test_create_teacher_auto_generates_number(client, db_session):
     assert response.status_code == 200
     body = response.json()
     assert body["teacher_number"] == "ENGT001"
+    assert body["role"] == "Professor"
+    assert body["status"] == "Onleave"
     assert body["department_id"] == department.id
 
 
@@ -1507,6 +1528,8 @@ def test_create_teacher_auto_generation_increments_sequence(client, db_session):
     assert response.status_code == 200
     body = response.json()
     assert body["teacher_number"] == "ENGT002"
+    assert body["role"] == "Lecturer"
+    assert body["status"] == "Active"
 
 
 def test_create_class_batch_rejects_department_faculty_mismatch(client, db_session):

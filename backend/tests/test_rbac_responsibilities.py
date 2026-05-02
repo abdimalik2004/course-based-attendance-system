@@ -132,6 +132,8 @@ def test_hr_manages_teachers_and_admissions_manages_students():
         "/teachers",
         json={
             "full_name": "Dr. Role Check",
+            "role": "Assistant Professor",
+            "status": "Inactive",
             "faculty_id": faculty.id,
             "department_id": department.id,
         },

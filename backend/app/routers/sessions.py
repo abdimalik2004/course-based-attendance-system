@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from datetime import datetime
-
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
@@ -9,10 +7,62 @@ from app.core.security import get_current_user, require_roles
 from app.db.faculty_scope import enforce_faculty_scope, get_optional_faculty_scope_context
 from app.db.models import AttendanceSession, Course, CourseAssignment, SessionStatus, Teacher, User
 from app.db.role_scoped import get_role_scoped_db
-from app.schemas.attendance import AttendanceSessionRead
+from app.schemas.attendance import AttendanceSessionEndRequest, AttendanceSessionRead, AttendanceSessionStartRequest
+from app.services.attendance_service import attendance_service
 
 
 router = APIRouter(prefix="/sessions", tags=["sessions"])
+
+
+@router.post(
+    "/start",
+    response_model=AttendanceSessionRead,
+    dependencies=[Depends(require_roles("ACADEMIA", "FACULTY", "TEACHER"))],
+)
+def start_session(
+    payload: AttendanceSessionStartRequest,
+    db: Session = Depends(get_role_scoped_db),
+    current_user: User = Depends(get_current_user),
+    faculty_scope = Depends(get_optional_faculty_scope_context),
+):
+    course = db.query(Course).filter(Course.id == payload.course_id).first()
+    if not course:
+        raise HTTPException(status_code=404, detail="Course not found")
+    if faculty_scope is not None:
+        enforce_faculty_scope(course.faculty_id, faculty_scope)
+
+    result = attendance_service.start_session(
+        db=db,
+        course_id=payload.course_id,
+        schedule_id=payload.schedule_id,
+        instructor_id=current_user.id,
+    )
+    if not result["ok"]:
+        raise HTTPException(status_code=400, detail=result["message"])
+    return result["session"]
+
+
+@router.post(
+    "/end",
+    response_model=AttendanceSessionRead,
+    dependencies=[Depends(require_roles("ACADEMIA", "FACULTY", "TEACHER"))],
+)
+def end_session(
+    payload: AttendanceSessionEndRequest,
+    db: Session = Depends(get_role_scoped_db),
+    faculty_scope = Depends(get_optional_faculty_scope_context),
+):
+    session = db.query(AttendanceSession).filter(AttendanceSession.id == payload.session_id).first()
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    if faculty_scope is not None:
+        enforce_faculty_scope(session.course.faculty_id, faculty_scope)
+
+    result = attendance_service.end_session(db=db, session_id=payload.session_id)
+    if not result["ok"]:
+        raise HTTPException(status_code=400, detail=result["message"])
+    return result["session"]
 
 
 @router.get("", response_model=list[AttendanceSessionRead], dependencies=[Depends(require_roles("ACADEMIA", "FACULTY", "TEACHER"))])
@@ -39,15 +89,10 @@ def list_active_sessions(
     course_id: int | None = Query(default=None, description="Filter by course id"),
     faculty_id: int | None = Query(default=None, description="Filter by faculty id"),
 ):
-    now = datetime.now()
     query = (
         db.query(AttendanceSession)
         .join(Course, Course.id == AttendanceSession.course_id)
-        .filter(
-            AttendanceSession.status == SessionStatus.ACTIVE,
-            AttendanceSession.start_time <= now,
-            AttendanceSession.end_time >= now,
-        )
+        .filter(AttendanceSession.status == SessionStatus.ACTIVE)
     )
 
     if faculty_scope is not None:

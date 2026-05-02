@@ -65,6 +65,8 @@ def create_teacher(
     obj = Teacher(
         teacher_number=teacher_number,
         full_name=payload.full_name,
+        role=payload.role,
+        status=payload.status,
         faculty_id=payload.faculty_id,
         department_id=payload.department_id,
     )

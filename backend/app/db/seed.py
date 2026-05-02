@@ -16,6 +16,8 @@ from app.db.models import (
     Role,
     Student,
     Teacher,
+    TeacherRole,
+    TeacherStatus,
     User,
 )
 from app.db.session import SessionLocal
@@ -188,6 +190,8 @@ def seed_demo_data() -> None:
             teacher = Teacher(
                 teacher_number="T-1001",
                 full_name="Dr. Sarah Ahmed",
+                role=TeacherRole.LECTURER,
+                status=TeacherStatus.ACTIVE,
                 faculty_id=faculty.id,
                 department_id=department.id,
                 user_id=teacher_user.id,

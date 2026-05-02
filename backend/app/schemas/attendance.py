@@ -38,8 +38,18 @@ class AttendanceSessionRead(BaseModel):
 
     id: int
     course_id: int
+    instructor_id: int | None
     schedule_id: int
     session_date: date
     start_time: datetime
-    end_time: datetime
+    end_time: datetime | None
     status: SessionStatus
+
+
+class AttendanceSessionStartRequest(BaseModel):
+    course_id: int = Field(gt=0)
+    schedule_id: int | None = None
+
+
+class AttendanceSessionEndRequest(BaseModel):
+    session_id: int = Field(gt=0)

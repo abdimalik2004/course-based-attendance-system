@@ -251,9 +251,5 @@ def test_scheduler_tick_idempotent_session_creation(db_session):
     svc._tick(db_session)
     svc._tick(db_session)
 
-    sessions = (
-        db_session.query(AttendanceSession)
-        .filter(AttendanceSession.course_id == course.id, AttendanceSession.schedule_id == schedule.id)
-        .all()
-    )
-    assert len(sessions) == 1
+    sessions = db_session.query(AttendanceSession).filter(AttendanceSession.course_id == course.id).all()
+    assert sessions == []
