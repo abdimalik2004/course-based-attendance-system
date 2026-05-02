@@ -57,33 +57,36 @@ The current architecture uses a central scheduler service in the backend, facult
 
 ## System Roles
 
-The platform currently models these roles in the system and workflows:
+The platform models the following roles. Use these canonical role names when working with RBAC and migrations.
 
-- **Academia**
-  - Global academic governance.
-  - Can register users and manage faculties.
-  - Can manage course definitions and view reports/sessions.
+- **SUPER_ADMIN**
+  - Full system administrator. Manages global configuration, system-level data, and critical operations (creates/removes tenants, upgrades, DB maintenance).
+
+- **ACADEMIA**
+  - Academic governance and curriculum management. Can register users, manage faculties/departments, create and edit courses, and view cross-faculty reports.
+
+- **FACULTY**
+  - Faculty-level administrative user. Manages faculty-scoped entities (courses, class batches) and has elevated edit rights within a faculty.
+
+- **FACULTY_ADMIN**
+  - Compatibility alias for faculty administrators. Treated equivalent to `FACULTY` by RBAC checks for backward compatibility.
 
 - **HR**
-  - Manages teacher records and teacher-user linking.
-  - Read access where permitted by router guards.
+  - Human resources responsibilities: manages teacher records, links teacher users, and performs HR-related data maintenance.
 
-- **Admission**
-  - Manages student records.
-  - Student creation supports automatic enrollment in matching courses.
+- **ADMISSIONS**
+  - Admissions and student lifecycle: creates/updates student records, triggers initial enrollments, and manages admission workflows.
 
-- **Teacher**
-  - Views active sessions and reports.
-  - Submits attendance frames for active sessions.
+- **TEACHER**
+  - Teaching staff who run sessions: starts/ends attendance sessions, submits frames for active sessions, and views course reports.
 
-- **Student**
-  - Domain participant of attendance records and reports.
-  - Student-facing self-service APIs/UI are not yet included in this repository.
+- **STUDENT**
+  - Domain participant: students have attendance records and can be the subject of reports. (Student self-service UI is not included in this repo.)
 
 Notes:
 
-- Backend RBAC currently enforces `ACADEMIA`, `FACULTY`/`FACULTY_ADMIN` equivalence, `HR`, `ADMISSIONS`, and `TEACHER` roles.
-- `FACULTY_ADMIN` is maintained as a compatibility alias through role-equivalence logic.
+- RBAC mapping in the backend treats `FACULTY` and `FACULTY_ADMIN` as equivalent for permission checks.
+- Use the exact canonical role names above when creating or querying roles in migrations and seed tooling.
 
 ## Attendance Workflow (Auto-Scheduled Sessions)
 
@@ -254,13 +257,13 @@ Additional CLI utilities:
 
 ### Seeded Accounts
 
-Current seed script creates:
+The seed script creates demo accounts (usernames only). Passwords are intentionally omitted from this README for security. Run the seed tooling locally to create or reset demo users and set secure passwords:
 
-- `academia / academia123`
-- `facultyadmin / faculty123`
-- `teacher1 / teacher123`
-- `hr / hr123`
-- `admission / admission123`
+- `academia` (Academia role)
+- `facultyadmin` (Faculty admin role)
+- `teacher1` (Teacher role)
+- `hr` (HR role)
+- `admission` (Admissions role)
 
 ### Testing
 
@@ -292,6 +295,27 @@ The README now reflects current code and intentionally removes outdated referenc
 - Removed old role summary that omitted active `HR` and `ADMISSIONS` role usage
 - Removed future-state statements that are already implemented (FastAPI backend, scheduler, reporting)
 - Clarified that `api/` is currently a placeholder and active API runtime is `backend/`
+
+## Recent Additions (since last README update)
+
+- Manual session control: sessions are no longer implicitly created/started by the scheduler. Teachers/Admins must start and end sessions explicitly using the API endpoints:
+  - `POST /sessions/start` — create and start an attendance session (records `instructor_id` on the session).
+  - `POST /sessions/end` — close an active session and trigger absence marking.
+
+- `instructor_id` tracking: `attendance_sessions` now includes an `instructor_id` foreign key to `users.id` to record who started/ran the session.
+
+- Teacher metadata: `teachers` now has a `role` enum (Professor, Associate Professor, Assistant Professor, Lecturer) and a `status` enum (Active, Onleave, Inactive). These are available in the teacher creation/update APIs and have safe migration defaults.
+
+- New `STUDENT` RBAC role: added as a data migration and included in seed/test fixtures.
+
+- Alembic migration guidance: several recent migrations required dialect-aware SQL (MySQL-aware ALTERs and merge revisions). When running migrations, prefer invoking Alembic with the project Python/venv to ensure the correct environment:
+
+```bash
+cd backend
+python -m alembic upgrade head
+```
+
+If you maintain a shared/staging DB, back it up before applying migrations and avoid concurrent branch heads that create multiple Alembic heads.
 
 ## Known Issues / Future Improvements
 
