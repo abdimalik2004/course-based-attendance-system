@@ -75,7 +75,7 @@ class CourseSemesterAssignmentBase(BaseModel):
     course_id: int = Field(gt=0)
     faculty_id: int = Field(gt=0)
     department_id: int = Field(gt=0)
-    academic_year_id: int = Field(gt=0)
+    semester: int = Field(gt=0)
 
 
 class CourseSemesterAssignmentCreate(CourseSemesterAssignmentBase):
@@ -86,7 +86,7 @@ class CourseSemesterAssignmentCreate(CourseSemesterAssignmentBase):
                 "course_id": 1,
                 "faculty_id": 1,
                 "department_id": 1,
-                "academic_year_id": 1,
+                "semester": 1,
             }
         },
     )

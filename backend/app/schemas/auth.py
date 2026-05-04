@@ -54,6 +54,25 @@ class UserCreate(BaseModel):
     role_names: list[str] = Field(min_length=1)
 
 
+class RoleCreate(BaseModel):
+    model_config = ConfigDict(
+        json_schema_extra={
+            "example": {
+                "name": "LIBRARY",
+            }
+        }
+    )
+
+    name: str = Field(min_length=1, max_length=64)
+
+
+class RoleRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    name: str
+
+
 class ResetDatabaseRequest(BaseModel):
     model_config = ConfigDict(
         json_schema_extra={

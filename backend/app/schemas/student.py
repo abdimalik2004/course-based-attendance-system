@@ -19,7 +19,6 @@ class StudentCreate(BaseModel):
                 "full_name": "Abdimalik Hassan",
                 "faculty_id": 1,
                 "department_id": 1,
-                "class_batch_id": 1,
             }
         }
     )
@@ -27,7 +26,6 @@ class StudentCreate(BaseModel):
     full_name: str
     faculty_id: int = Field(gt=0)
     department_id: int = Field(gt=0)
-    class_batch_id: int = Field(gt=0)
 
 
 class StudentUpdate(BaseModel):

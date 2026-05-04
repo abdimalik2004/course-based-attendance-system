@@ -144,6 +144,12 @@ Seeded users:
 - `facultyadmin / faculty123`
 - `teacher1 / teacher123`
 
+Role management:
+
+- `GET /auth/roles` lists the available roles for `SUPER_ADMIN`
+- `POST /auth/roles` creates a new role for `SUPER_ADMIN`
+- `POST /auth/register` assigns one or more of those roles when creating a user
+
 Password hash cleanup for seeded users:
 
 ```bash

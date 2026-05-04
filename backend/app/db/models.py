@@ -349,6 +349,14 @@ class CourseSemesterAssignment(Base):
     department: Mapped[Department] = relationship()
     academic_year: Mapped[AcademicYear] = relationship(back_populates="course_semester_assignments")
 
+    @property
+    def semester(self) -> int:
+        term_name = getattr(self.academic_year, "term_name", "") or ""
+        digits = "".join(character for character in term_name if character.isdigit())
+        if digits:
+            return int(digits)
+        return 1
+
 
 class ClassCourseAssignment(Base):
     __tablename__ = "class_course_assignments"

@@ -1255,7 +1255,6 @@ def test_create_student_auto_generates_number(client, db_session, tmp_path, monk
             "full_name": "Student Auto",
             "faculty_id": faculty.id,
             "department_id": department.id,
-            "class_batch_id": class_batch.id,
         },
     )
 
@@ -1305,7 +1304,6 @@ def test_create_student_auto_enrolls_courses_in_same_faculty(client, db_session,
             "full_name": "Auto Enroll Student",
             "faculty_id": faculty.id,
             "department_id": department_it.id,
-            "class_batch_id": batch_it.id,
         },
     )
 
@@ -1350,7 +1348,6 @@ def test_create_student_auto_generation_increments_sequence(client, db_session, 
             "full_name": "Next Student",
             "faculty_id": faculty.id,
             "department_id": department.id,
-            "class_batch_id": class_batch.id,
         },
     )
 

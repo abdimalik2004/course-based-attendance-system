@@ -30,6 +30,26 @@ def get_class_batch_or_404(db: Session, class_batch_id: int) -> ClassBatch:
     return class_batch
 
 
+def get_latest_class_batch_for_faculty_and_department_or_404(
+    db: Session,
+    *,
+    faculty_id: int,
+    department_id: int,
+) -> ClassBatch:
+    class_batch = (
+        db.query(ClassBatch)
+        .filter(
+            ClassBatch.faculty_id == faculty_id,
+            ClassBatch.department_id == department_id,
+        )
+        .order_by(ClassBatch.id.desc())
+        .first()
+    )
+    if not class_batch:
+        raise HTTPException(status_code=404, detail="Class batch not found for faculty and department")
+    return class_batch
+
+
 def get_course_or_404(db: Session, course_id: int) -> Course:
     course = db.query(Course).filter(Course.id == course_id).first()
     if not course:

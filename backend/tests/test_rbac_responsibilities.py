@@ -10,7 +10,7 @@ from app.core.security import get_current_user
 from app.db.models import Base, ClassBatch, Department, Faculty, Role
 from app.db.role_scoped import get_role_scoped_db
 from app.db.session import get_db
-from app.routers import courses, schedules, students, teachers
+from app.routers import auth, courses, schedules, students, teachers
 
 
 class _Role:
@@ -52,6 +52,7 @@ def _build_app_and_db():
     db.commit()
 
     app = FastAPI()
+    app.include_router(auth.router)
     app.include_router(courses.router)
     app.include_router(schedules.router)
     app.include_router(students.router)
@@ -147,7 +148,6 @@ def test_hr_manages_teachers_and_admissions_manages_students():
             "full_name": "Student Role Check",
             "faculty_id": faculty.id,
             "department_id": department.id,
-            "class_batch_id": class_batch.id,
         },
     )
     assert denied_student.status_code == 403
@@ -159,9 +159,24 @@ def test_hr_manages_teachers_and_admissions_manages_students():
             "full_name": "Student Role Check",
             "faculty_id": faculty.id,
             "department_id": department.id,
-            "class_batch_id": class_batch.id,
         },
     )
     assert allowed_student.status_code == 200
+
+    db.close()
+
+
+def test_super_admin_can_list_and_create_roles():
+    client, db, current, _, _, _ = _build_app_and_db()
+
+    current["roles"] = ["SUPER_ADMIN"]
+
+    created = client.post("/auth/roles", json={"name": "LIBRARY"})
+    assert created.status_code == 201
+    assert created.json()["name"] == "LIBRARY"
+
+    listed = client.get("/auth/roles")
+    assert listed.status_code == 200
+    assert any(role["name"] == "LIBRARY" for role in listed.json())
 
     db.close()

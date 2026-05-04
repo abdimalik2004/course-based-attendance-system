@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordRequestForm
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
@@ -17,14 +18,60 @@ from app.core.security import (
     TokenPayloadError,
     verify_password,
 )
-from app.db.models import User
+from app.db.models import Role, User
 from app.db.session import get_db
 from app.db.reset_database import reset_database_to_clean_state
-from app.schemas.auth import RefreshTokenRequest, ResetDatabaseRequest, TokenPair, UserCreate, UserRead
+from app.schemas.auth import (
+    RefreshTokenRequest,
+    ResetDatabaseRequest,
+    RoleCreate,
+    RoleRead,
+    TokenPair,
+    UserCreate,
+    UserRead,
+)
 from app.services.user_service import create_user
 
 
 router = APIRouter(prefix="/auth", tags=["auth"])
+
+
+@router.get(
+    "/roles",
+    response_model=list[RoleRead],
+    dependencies=[Depends(require_roles("SUPER_ADMIN"))],
+)
+def list_roles(db: Session = Depends(get_db)):
+    return db.query(Role).order_by(Role.name).all()
+
+
+@router.post(
+    "/roles",
+    response_model=RoleRead,
+    status_code=status.HTTP_201_CREATED,
+    dependencies=[Depends(require_roles("SUPER_ADMIN"))],
+    responses={
+        400: {"description": "Invalid role name"},
+        409: {"description": "Role already exists"},
+        401: {"description": "Unauthorized"},
+        403: {"description": "Forbidden"},
+    },
+)
+def create_role(payload: RoleCreate, db: Session = Depends(get_db)):
+    name = payload.name.strip().upper()
+    if not name:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Role name is required")
+
+    role = Role(name=name)
+    db.add(role)
+    try:
+        db.commit()
+    except IntegrityError as exc:
+        db.rollback()
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Role already exists") from exc
+
+    db.refresh(role)
+    return role
 
 
 @router.post(

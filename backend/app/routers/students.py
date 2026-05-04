@@ -15,6 +15,7 @@ from app.utils.organization import (
     ensure_class_batch_matches_faculty_and_department,
     ensure_department_belongs_to_faculty,
     get_class_batch_or_404,
+    get_latest_class_batch_for_faculty_and_department_or_404,
     get_department_or_404,
     get_faculty_or_404,
 )
@@ -37,9 +38,13 @@ def create_student(
         enforce_faculty_scope(payload.faculty_id, faculty_scope)
         faculty_code = faculty_scope.faculty_code
 
-    class_batch = get_class_batch_or_404(db, payload.class_batch_id)
     department = get_department_or_404(db, payload.department_id)
     ensure_department_belongs_to_faculty(department, payload.faculty_id)
+    class_batch = get_latest_class_batch_for_faculty_and_department_or_404(
+        db,
+        faculty_id=payload.faculty_id,
+        department_id=department.id,
+    )
     ensure_class_batch_matches_faculty_and_department(
         class_batch,
         faculty_id=payload.faculty_id,
@@ -54,7 +59,7 @@ def create_student(
         full_name=payload.full_name,
         faculty_id=payload.faculty_id,
         department_id=payload.department_id,
-        class_batch_id=payload.class_batch_id,
+        class_batch_id=class_batch.id,
         embedding_ref=embedding_ref,
     )
     db.add(obj)

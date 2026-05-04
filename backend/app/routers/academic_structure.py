@@ -75,6 +75,17 @@ def _course_semester_assignment_duplicate_exists(
     return db.query(query.exists()).scalar()
 
 
+def _academic_year_by_semester_or_404(db: Session, semester: int) -> AcademicYear:
+    term_name = f"Semester {semester}".strip().lower()
+    query = db.query(AcademicYear).filter(func.lower(func.trim(AcademicYear.term_name)) == term_name)
+    academic_year = query.filter(AcademicYear.status == AcademicYearStatus.ACTIVE).first()
+    if academic_year is None:
+        academic_year = query.order_by(AcademicYear.id.desc()).first()
+    if academic_year is None:
+        raise HTTPException(status_code=404, detail="Academic year for requested semester not found")
+    return academic_year
+
+
 def _class_course_assignment_duplicate_exists(
     db: Session,
     *,
@@ -190,7 +201,7 @@ def create_course_semester_assignment(
 
     course = get_course_or_404(db, payload.course_id)
     department = get_department_or_404(db, payload.department_id)
-    academic_year = _academic_year_by_id_or_404(db, payload.academic_year_id)
+    academic_year = _academic_year_by_semester_or_404(db, payload.semester)
 
     if course.faculty_id != faculty.id:
         raise HTTPException(status_code=400, detail="Course does not belong to faculty")
@@ -244,9 +255,7 @@ def list_course_semester_assignments(
     faculty_id: int | None = Query(default=None, description="Filter by faculty id", examples=[1]),
     department_id: int | None = Query(default=None, description="Filter by department id", examples=[1]),
     course_id: int | None = Query(default=None, description="Filter by course id", examples=[1]),
-    academic_year_id: int | None = Query(default=None, description="Filter by academic year id", examples=[1]),
-    term_name: str | None = Query(default=None, description="Filter by semester/term name", examples=["Semester 1"]),
-    academic_year: str | None = Query(default=None, description="Filter by academic year", examples=["2025-2026"]),
+    semester: int | None = Query(default=None, description="Filter by semester", examples=[1]),
     faculty_scope=Depends(get_optional_faculty_scope_context),
 ):
     query = db.query(CourseSemesterAssignment).join(AcademicYear, AcademicYear.id == CourseSemesterAssignment.academic_year_id)
@@ -258,12 +267,8 @@ def list_course_semester_assignments(
         query = query.filter(CourseSemesterAssignment.department_id == department_id)
     if course_id is not None:
         query = query.filter(CourseSemesterAssignment.course_id == course_id)
-    if academic_year_id is not None:
-        query = query.filter(CourseSemesterAssignment.academic_year_id == academic_year_id)
-    if term_name is not None:
-        query = query.filter(func.lower(func.trim(AcademicYear.term_name)) == term_name.strip().lower())
-    if academic_year is not None:
-        query = query.filter(func.lower(func.trim(AcademicYear.academic_year)) == academic_year.strip().lower())
+    if semester is not None:
+        query = query.filter(func.lower(func.trim(AcademicYear.term_name)) == f"semester {semester}")
     total = query.count()
     items = query.order_by(CourseSemesterAssignment.created_at.desc(), CourseSemesterAssignment.id.desc()).offset(skip).limit(limit).all()
     return {"items": items, "total": total, "skip": skip, "limit": limit}

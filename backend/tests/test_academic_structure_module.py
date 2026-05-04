@@ -147,14 +147,14 @@ def test_course_semester_assignment_duplicate_and_filtering(client, db_session):
             "course_id": course.id,
             "faculty_id": faculty.id,
             "department_id": department.id,
-            "academic_year_id": academic_year.id,
+            "semester": 1,
         },
     )
 
     assert response.status_code == 200
     body = response.json()
     assert body["course_id"] == course.id
-    assert body["academic_year_id"] == academic_year.id
+    assert body["semester"] == 1
 
     duplicate = api.post(
         "/academic-structure/course-semester-assignments",
@@ -162,14 +162,14 @@ def test_course_semester_assignment_duplicate_and_filtering(client, db_session):
             "course_id": course.id,
             "faculty_id": faculty.id,
             "department_id": department.id,
-            "academic_year_id": academic_year.id,
+            "semester": 1,
         },
     )
     assert duplicate.status_code == 409
 
     filtered = api.get(
         "/academic-structure/course-semester-assignments",
-        params={"faculty_id": faculty.id, "term_name": "Semester 1"},
+        params={"faculty_id": faculty.id, "semester": 1},
     )
     assert filtered.status_code == 200
     assert filtered.json()["total"] == 1
