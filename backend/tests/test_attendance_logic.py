@@ -54,7 +54,7 @@ def _seed_core(db):
     db.add(batch)
     db.flush()
 
-    course = Course(faculty_id=faculty.id, code="CSC401", title="AI")
+    course = Course(faculty_id=faculty.id, department_id=department.id, code="CSC401", title="AI")
     db.add(course)
     db.flush()
 
@@ -73,7 +73,6 @@ def _seed_core(db):
         full_name="Student One",
         faculty_id=faculty.id,
         department_id=department.id,
-        class_batch_id=batch.id,
         embedding_ref="2201001",
     )
     db.add(student)
@@ -161,7 +160,6 @@ def test_present_and_late_cutoff_logic(db_session, monkeypatch):
         full_name="Student Two",
         faculty_id=student.faculty_id,
         department_id=student.department_id,
-        class_batch_id=student.class_batch_id,
         embedding_ref="2201002",
     )
     db_session.add(student2)
@@ -198,7 +196,6 @@ def test_close_session_marks_absent(db_session):
         full_name="Student Three",
         faculty_id=student.faculty_id,
         department_id=student.department_id,
-        class_batch_id=student.class_batch_id,
         embedding_ref="2201003",
     )
     db_session.add(student2)

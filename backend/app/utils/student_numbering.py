@@ -1,11 +1,12 @@
 from __future__ import annotations
 
 import re
+from datetime import date
 from pathlib import Path
 
 from sqlalchemy.orm import Session
 
-from app.db.models import ClassBatch, Faculty, Student
+from app.db.models import Faculty, Student
 
 
 _NUMBER_RE = re.compile(r"^(?P<prefix>[A-Z0-9]+?)(?P<seq>\d+)$")
@@ -81,26 +82,20 @@ def next_available_student_number(db: Session, faculty_code: str, class_year: in
 
 
 def normalize_legacy_student_numbers(db: Session) -> list[tuple[str, str]]:
-    students = (
-        db.query(Student, Faculty, ClassBatch)
-        .join(Faculty, Faculty.id == Student.faculty_id)
-        .join(ClassBatch, ClassBatch.id == Student.class_batch_id)
-        .order_by(Student.id)
-        .all()
-    )
+    students = db.query(Student, Faculty).join(Faculty, Faculty.id == Student.faculty_id).order_by(Student.id).all()
 
     renamed: list[tuple[str, str]] = []
-    reserved: set[str] = {student.student_number.strip().upper() for student, _, _ in students if student.student_number}
+    reserved: set[str] = {student.student_number.strip().upper() for student, _ in students if student.student_number}
     reserved |= {
         path.name.strip().upper()
         for path in _DATASET_ROOT.rglob("*")
         if path.is_dir()
     }
 
-    for student, faculty, class_batch in students:
+    for student, faculty in students:
         current = (student.student_number or "").strip().upper()
-        year_pref = year_prefix(class_batch.year)
-        prefix = build_student_number_prefix(faculty.code, class_batch.year, class_batch.name)
+        year_pref = year_prefix(date.today().year)
+        prefix = build_student_number_prefix(faculty.code, date.today().year)
         if current.startswith(prefix) and current[len(prefix):].isdigit() and len(current[len(prefix):]) == 3:
             continue
 

@@ -123,7 +123,7 @@ def _seed_course_graph(db_session):
     db_session.add(class_batch)
     db_session.flush()
 
-    course = Course(faculty_id=faculty.id, code="CSC401", title="AI")
+    course = Course(faculty_id=faculty.id, department_id=department.id, code="CSC401", title="AI")
     db_session.add(course)
     db_session.commit()
     return faculty, department, class_batch, course
@@ -180,7 +180,7 @@ def test_preview_faculty_delete_shows_related_counts(client, db_session):
     db_session.add(class_batch)
     db_session.flush()
 
-    db_session.add(Course(faculty_id=faculty.id, code="ENG001", title="Statics"))
+    db_session.add(Course(faculty_id=faculty.id, department_id=department.id, code="ENG001", title="Statics"))
     db_session.add(User(username="faculty_preview", hashed_password="x", is_active=True, faculty_id=faculty.id))
     db_session.commit()
 
@@ -209,7 +209,7 @@ def test_delete_faculty_with_related_records_succeeds_with_force(client, db_sess
     db_session.add(class_batch)
     db_session.flush()
 
-    db_session.add(Course(faculty_id=faculty.id, code="ENG001", title="Statics"))
+    db_session.add(Course(faculty_id=faculty.id, department_id=department.id, code="ENG001", title="Statics"))
     user = User(username="faculty_linked", hashed_password="x", is_active=True, faculty_id=faculty.id)
     db_session.add(user)
     db_session.commit()
@@ -378,7 +378,7 @@ def test_create_course_auto_generation_increments_sequence(client, db_session):
     db_session.add(class_batch)
     db_session.flush()
 
-    db_session.add(Course(faculty_id=faculty.id, code="ENG001", title="Existing Course"))
+    db_session.add(Course(faculty_id=faculty.id, department_id=department.id, code="ENG001", title="Existing Course"))
     db_session.commit()
 
     api, current = client
@@ -415,7 +415,6 @@ def test_create_course_auto_enrolls_existing_students_in_same_faculty(client, db
         full_name="Match Student",
         faculty_id=faculty.id,
         department_id=department_arch.id,
-        class_batch_id=batch_arch.id,
         embedding_ref="26ENG001",
     )
     student_other_department = Student(
@@ -423,7 +422,6 @@ def test_create_course_auto_enrolls_existing_students_in_same_faculty(client, db
         full_name="Other Department Student",
         faculty_id=faculty.id,
         department_id=department_civil.id,
-        class_batch_id=batch_civil.id,
         embedding_ref="26ENG002",
     )
 
@@ -439,7 +437,6 @@ def test_create_course_auto_enrolls_existing_students_in_same_faculty(client, db
         full_name="Other Faculty Student",
         faculty_id=other_faculty.id,
         department_id=other_department.id,
-        class_batch_id=other_batch.id,
         embedding_ref="26CMP001",
     )
 
@@ -482,6 +479,7 @@ def test_create_course_uses_faculty_prefix_for_code_generation(client, db_sessio
         "/courses",
         json={
             "faculty_id": faculty.id,
+            "department_id": department.id,
             "title": "Compiler Design",
         },
     )
@@ -504,7 +502,7 @@ def test_create_course_rejects_duplicate_normalized_title_within_same_faculty(cl
     db_session.add_all([arch_batch, civil_batch])
     db_session.flush()
 
-    db_session.add(Course(faculty_id=faculty.id, code="ENG001", title="Thermodynamics"))
+    db_session.add(Course(faculty_id=faculty.id, department_id=department.id, code="ENG001", title="Thermodynamics"))
     db_session.commit()
 
     api, current = client
@@ -536,7 +534,7 @@ def test_create_course_allows_same_title_across_different_faculties(client, db_s
     db_session.add_all([batch_eng, batch_med])
     db_session.flush()
 
-    db_session.add(Course(faculty_id=faculty_eng.id, code="ENG001", title="Physics"))
+    db_session.add(Course(faculty_id=faculty_eng.id, department_id=other_department.id, code="ENG001", title="Physics"))
     db_session.commit()
 
     api, current = client
@@ -575,7 +573,6 @@ def _seed_mixed_attendance_for_reports(db_session):
         full_name="Ahmed Abdirahman",
         faculty_id=faculty.id,
         department_id=department.id,
-        class_batch_id=class_batch.id,
         embedding_ref="26CIS007",
     )
     db_session.add(student)
@@ -788,7 +785,7 @@ def test_assign_teacher_blocks_faculty_mismatch(client, db_session):
     db_session.add(class_batch)
     db_session.flush()
 
-    course = Course(faculty_id=faculty.id, code="ENG001", title="Design Studio")
+    course = Course(faculty_id=faculty.id, department_id=department.id, code="ENG001", title="Design Studio")
     db_session.add(course)
     db_session.flush()
 
@@ -997,8 +994,8 @@ def test_schedule_same_day_allowed_for_different_departments_in_same_faculty(cli
     db_session.add_all([batch_a, batch_b])
     db_session.flush()
 
-    course_a = Course(faculty_id=faculty.id, code="ENG001", title="Statics")
-    course_b = Course(faculty_id=faculty.id, code="ENG002", title="Dynamics")
+    course_a = Course(faculty_id=faculty.id, department_id=department.id, code="ENG001", title="Statics")
+    course_b = Course(faculty_id=faculty.id, department_id=department.id, code="ENG002", title="Dynamics")
     db_session.add_all([course_a, course_b])
     db_session.flush()
 
@@ -1033,7 +1030,7 @@ def test_schedule_same_day_allowed_for_different_departments_in_same_faculty(cli
 def test_scheduler_day_rollover_uses_current_weekday_only(db_session, monkeypatch):
     faculty, department, class_batch, course = _seed_course_graph(db_session)
 
-    previous_day_course = Course(faculty_id=faculty.id, code="CSC402", title="Prev Day")
+    previous_day_course = Course(faculty_id=faculty.id, department_id=department.id, code="CSC402", title="Prev Day")
     db_session.add(previous_day_course)
     db_session.flush()
 
@@ -1076,7 +1073,6 @@ def test_list_enrolled_students_by_course(client, db_session):
         full_name="Student A",
         faculty_id=faculty.id,
         department_id=department.id,
-        class_batch_id=class_batch.id,
         embedding_ref="2201991",
     )
     student_b = Student(
@@ -1084,7 +1080,6 @@ def test_list_enrolled_students_by_course(client, db_session):
         full_name="Student B",
         faculty_id=faculty.id,
         department_id=department.id,
-        class_batch_id=class_batch.id,
         embedding_ref="2201992",
     )
     db_session.add_all([student_a, student_b])
@@ -1107,7 +1102,7 @@ def test_list_enrolled_students_by_course(client, db_session):
 
 def test_enroll_student_rejects_overlapping_course_sessions(client, db_session):
     faculty, department, class_batch, course_a = _seed_course_graph(db_session)
-    course_b = Course(faculty_id=faculty.id, code="CSC402", title="Networks")
+    course_b = Course(faculty_id=faculty.id, department_id=department.id, code="CSC402", title="Networks")
     db_session.add(course_b)
     db_session.flush()
 
@@ -1116,7 +1111,6 @@ def test_enroll_student_rejects_overlapping_course_sessions(client, db_session):
         full_name="Conflict Student",
         faculty_id=faculty.id,
         department_id=department.id,
-        class_batch_id=class_batch.id,
         embedding_ref="2201888",
     )
     db_session.add(student)
@@ -1160,7 +1154,6 @@ def test_scheduler_backfills_missed_session_and_marks_absent(db_session, monkeyp
         full_name="Missed Student",
         faculty_id=faculty.id,
         department_id=department.id,
-        class_batch_id=class_batch.id,
         embedding_ref="2201999",
     )
     db_session.add(student)
@@ -1241,9 +1234,6 @@ def test_create_student_auto_generates_number(client, db_session, tmp_path, monk
     db_session.flush()
 
     department = _seed_department(db_session, faculty)
-
-    class_batch = ClassBatch(faculty_id=faculty.id, department_id=department.id, name="CIS2201", year=2026)
-    db_session.add(class_batch)
     db_session.commit()
 
     api, current = client
@@ -1280,9 +1270,9 @@ def test_create_student_auto_enrolls_courses_in_same_faculty(client, db_session,
     db_session.add_all([batch_it, batch_cs])
     db_session.flush()
 
-    course_a = Course(faculty_id=faculty.id, code="CIS001", title="Algorithms")
-    course_b = Course(faculty_id=faculty.id, code="CIS002", title="Databases")
-    course_other_department = Course(faculty_id=faculty.id, code="CIS003", title="Compilers")
+    course_a = Course(faculty_id=faculty.id, department_id=department.id, code="CIS001", title="Algorithms")
+    course_b = Course(faculty_id=faculty.id, department_id=department.id, code="CIS002", title="Databases")
+    course_other_department = Course(faculty_id=faculty.id, department_id=other_department.id, code="CIS003", title="Compilers")
     db_session.add_all([course_a, course_b, course_other_department])
 
     other_faculty = Faculty(name="Faculty of Engineering", code="ENG")
@@ -1292,7 +1282,7 @@ def test_create_student_auto_enrolls_courses_in_same_faculty(client, db_session,
     other_batch = ClassBatch(faculty_id=other_faculty.id, department_id=other_department.id, name="ENG2201", year=2026)
     db_session.add(other_batch)
     db_session.flush()
-    db_session.add(Course(faculty_id=other_faculty.id, code="ENG001", title="Statics"))
+    db_session.add(Course(faculty_id=other_faculty.id, department_id=other_department.id, code="ENG001", title="Statics"))
     db_session.commit()
 
     api, current = client
@@ -1333,7 +1323,6 @@ def test_create_student_auto_generation_increments_sequence(client, db_session, 
             full_name="Existing Student",
             faculty_id=faculty.id,
             department_id=department.id,
-            class_batch_id=class_batch.id,
             embedding_ref="26ENG001",
         )
     )
@@ -1386,7 +1375,6 @@ def test_normalize_legacy_student_numbers_renames_dataset_and_db(db_session, tmp
         full_name="Legacy Student",
         faculty_id=faculty.id,
         department_id=department.id,
-        class_batch_id=class_batch.id,
         embedding_ref="CIS001",
     )
     db_session.add(student)
@@ -1425,7 +1413,6 @@ def test_normalize_legacy_student_numbers_keeps_existing_year_prefixed_values(db
         full_name="Already Normalized",
         faculty_id=faculty.id,
         department_id=department.id,
-        class_batch_id=class_batch.id,
         embedding_ref="26CIS001",
     )
     db_session.add(student)
@@ -1454,7 +1441,6 @@ def test_normalize_legacy_student_numbers_repairs_malformed_year_prefixed_value(
         full_name="Malformed Student",
         faculty_id=faculty.id,
         department_id=department.id,
-        class_batch_id=class_batch.id,
         embedding_ref="26CIS2201001",
     )
     db_session.add(student)

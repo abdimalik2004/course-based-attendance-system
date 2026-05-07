@@ -39,6 +39,7 @@ def create_user(
     username: str,
     password: str,
     role_names: Iterable[str],
+    faculty_id: int | None = None,
 ) -> User:
     normalized_roles = _normalize_role_names(role_names)
 
@@ -55,6 +56,7 @@ def create_user(
         username=username,
         hashed_password=get_password_hash(password),
         is_active=True,
+        faculty_id=faculty_id,
     )
     user.roles = _load_roles(db, normalized_roles)
     db.add(user)

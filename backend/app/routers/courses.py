@@ -15,6 +15,7 @@ from app.db.models import (
     Enrollment,
     Student,
     Teacher,
+    Department,
     normalize_course_title,
 )
 from app.db.role_scoped import get_role_scoped_db
@@ -127,6 +128,14 @@ def create_course(
     if faculty_scope is not None:
         enforce_faculty_scope(faculty.id, faculty_scope)
 
+    # Verify that the department belongs to the faculty
+    department = db.query(Department).filter(
+        Department.id == payload.department_id,
+        Department.faculty_id == payload.faculty_id
+    ).first()
+    if not department:
+        raise HTTPException(status_code=404, detail="Department not found in the specified faculty")
+
     _ensure_unique_course_title_in_faculty(
         db,
         faculty_id=faculty.id,
@@ -135,6 +144,7 @@ def create_course(
 
     obj = Course(
         faculty_id=faculty.id,
+        department_id=payload.department_id,
         code=_generate_course_code(db, faculty_code=faculty.code),
         title=payload.title,
         normalized_title=normalize_course_title(payload.title),
@@ -187,6 +197,15 @@ def update_course(
         raise HTTPException(status_code=404, detail="Faculty not found")
     if faculty_scope is not None:
         enforce_faculty_scope(target_faculty.id, faculty_scope)
+
+    # Verify that the department belongs to the faculty if department_id is being updated
+    if payload.department_id is not None:
+        department = db.query(Department).filter(
+            Department.id == payload.department_id,
+            Department.faculty_id == target_faculty_id
+        ).first()
+        if not department:
+            raise HTTPException(status_code=404, detail="Department not found in the specified faculty")
 
     next_title = payload.title if payload.title is not None else obj.title
     _ensure_unique_course_title_in_faculty(

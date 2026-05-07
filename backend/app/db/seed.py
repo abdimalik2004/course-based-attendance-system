@@ -207,6 +207,7 @@ def seed_demo_data() -> None:
         if not course:
             course = Course(
                 faculty_id=faculty.id,
+                department_id=department.id,
                 code="CSC401",
                 title="Artificial Intelligence",
             )
@@ -256,7 +257,6 @@ def seed_demo_data() -> None:
                     full_name=full_name,
                     faculty_id=faculty.id,
                     department_id=department.id,
-                    class_batch_id=class_batch.id,
                     embedding_ref=student_number,
                 )
                 db.add(student)

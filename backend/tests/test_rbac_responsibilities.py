@@ -77,24 +77,24 @@ def _build_app_and_db():
 
 
 def test_academia_can_create_course_but_faculty_cannot():
-    client, db, current, _, _, class_batch = _build_app_and_db()
+    client, db, current, _, department, class_batch = _build_app_and_db()
 
     current["roles"] = ["FACULTY"]
-    denied = client.post("/courses", json={"faculty_id": 1, "title": "Thermodynamics"})
+    denied = client.post("/courses", json={"faculty_id": 1, "department_id": department.id, "title": "Thermodynamics"})
     assert denied.status_code == 403
 
     current["roles"] = ["ACADEMIA"]
-    allowed = client.post("/courses", json={"faculty_id": class_batch.faculty_id, "title": "Thermodynamics"})
+    allowed = client.post("/courses", json={"faculty_id": class_batch.faculty_id, "department_id": department.id, "title": "Thermodynamics"})
     assert allowed.status_code == 200
 
     db.close()
 
 
 def test_faculty_can_schedule_course():
-    client, db, current, _, _, class_batch = _build_app_and_db()
+    client, db, current, _, department, class_batch = _build_app_and_db()
 
     current["roles"] = ["ACADEMIA"]
-    create_course = client.post("/courses", json={"faculty_id": class_batch.faculty_id, "title": "Fluid Mechanics"})
+    create_course = client.post("/courses", json={"faculty_id": class_batch.faculty_id, "department_id": department.id, "title": "Fluid Mechanics"})
     assert create_course.status_code == 200
     course_id = create_course.json()["id"]
 

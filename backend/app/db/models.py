@@ -38,7 +38,7 @@ _POSITIVE_ID_FIELDS: dict[str, tuple[str, ...]] = {
     "departments": ("id", "faculty_id"),
     "class_batches": ("id", "faculty_id", "department_id"),
     "users": ("id", "faculty_id"),
-    "students": ("id", "faculty_id", "department_id", "class_batch_id"),
+    "students": ("id", "faculty_id", "department_id"),
     "teachers": ("id", "faculty_id", "department_id", "user_id"),
     "courses": ("id", "faculty_id"),
     "course_semester_assignments": ("id", "course_id", "faculty_id", "department_id", "academic_year_id"),
@@ -180,6 +180,7 @@ class Department(Base):
     class_batches: Mapped[list["ClassBatch"]] = relationship(back_populates="department", cascade="all, delete-orphan")
     students: Mapped[list["Student"]] = relationship(back_populates="department")
     teachers: Mapped[list["Teacher"]] = relationship(back_populates="department")
+    courses: Mapped[list["Course"]] = relationship(back_populates="department", cascade="all, delete-orphan")
 
 
 class ClassBatch(Base):
@@ -194,7 +195,6 @@ class ClassBatch(Base):
 
     faculty: Mapped[Faculty] = relationship(back_populates="class_batches")
     department: Mapped[Department] = relationship(back_populates="class_batches")
-    students: Mapped[list["Student"]] = relationship(back_populates="class_batch", cascade="all, delete-orphan")
     class_course_assignments: Mapped[list["ClassCourseAssignment"]] = relationship(back_populates="class_batch")
 
 
@@ -226,12 +226,10 @@ class Student(Base):
     full_name: Mapped[str] = mapped_column(String(180), nullable=False)
     faculty_id: Mapped[int] = mapped_column(ForeignKey("faculties.id", ondelete="CASCADE"), nullable=False)
     department_id: Mapped[int] = mapped_column(ForeignKey("departments.id", ondelete="CASCADE"), nullable=False)
-    class_batch_id: Mapped[int] = mapped_column(ForeignKey("class_batches.id", ondelete="CASCADE"), nullable=False)
     embedding_ref: Mapped[str | None] = mapped_column(String(255), nullable=True)
 
     faculty: Mapped[Faculty] = relationship(back_populates="students")
     department: Mapped[Department] = relationship(back_populates="students")
-    class_batch: Mapped[ClassBatch] = relationship(back_populates="students")
     enrollments: Mapped[list["Enrollment"]] = relationship(back_populates="student", cascade="all, delete-orphan")
     attendance_records: Mapped[list["AttendanceRecord"]] = relationship(back_populates="student")
 
@@ -278,11 +276,13 @@ class Course(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True, autoincrement=True)
     faculty_id: Mapped[int] = mapped_column(ForeignKey("faculties.id", ondelete="CASCADE"), nullable=False, index=True)
+    department_id: Mapped[int] = mapped_column(ForeignKey("departments.id", ondelete="CASCADE"), nullable=False)
     code: Mapped[str] = mapped_column(String(32), nullable=False)
     title: Mapped[str] = mapped_column(String(200), nullable=False)
     normalized_title: Mapped[str] = mapped_column(String(200), nullable=False)
 
     faculty: Mapped[Faculty] = relationship(back_populates="courses")
+    department: Mapped[Department] = relationship(back_populates="courses")
     course_semester_assignments: Mapped[list["CourseSemesterAssignment"]] = relationship(back_populates="course", cascade="all, delete-orphan")
     class_course_assignments: Mapped[list["ClassCourseAssignment"]] = relationship(back_populates="course", cascade="all, delete-orphan")
     assignments: Mapped[list["CourseAssignment"]] = relationship(back_populates="course", cascade="all, delete-orphan")

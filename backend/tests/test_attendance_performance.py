@@ -40,7 +40,7 @@ def _seed(db):
     batch = ClassBatch(faculty_id=faculty.id, department_id=department.id, name="CIS2201")
     db.add(batch)
     db.flush()
-    course = Course(faculty_id=faculty.id, code="CSC401", title="AI")
+    course = Course(faculty_id=faculty.id, department_id=department.id, code="CSC401", title="AI")
     db.add(course)
     db.flush()
     schedule = CourseSchedule(
@@ -57,7 +57,6 @@ def _seed(db):
         full_name="Student One",
         faculty_id=faculty.id,
         department_id=department.id,
-        class_batch_id=batch.id,
         embedding_ref="2201001",
     )
     db.add(student)

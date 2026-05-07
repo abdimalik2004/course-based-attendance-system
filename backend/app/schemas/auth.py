@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 class Token(BaseModel):
@@ -44,6 +44,7 @@ class UserCreate(BaseModel):
                 "username": "Username",
                 "password": "Password",
                 "role_names": ["YOUR_ROLE"],
+                "faculty_id": 0,
             }
         }
     )
@@ -52,6 +53,14 @@ class UserCreate(BaseModel):
     username: str
     password: str
     role_names: list[str] = Field(min_length=1)
+    faculty_id: int | None = Field(default=None, gt=0, description="Required when role_names includes FACULTY")
+
+    @model_validator(mode="after")
+    def _faculty_required_for_faculty_role(self) -> "UserCreate":
+        normalized_roles = {role_name.strip().upper() for role_name in self.role_names if role_name.strip()}
+        if "FACULTY" in normalized_roles and self.faculty_id is None:
+            raise ValueError("faculty_id is required when role_names includes FACULTY")
+        return self
 
 
 class RoleCreate(BaseModel):

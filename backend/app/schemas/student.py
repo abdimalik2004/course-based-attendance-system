@@ -8,7 +8,6 @@ class StudentBase(BaseModel):
     full_name: str
     faculty_id: int = Field(gt=0)
     department_id: int = Field(gt=0)
-    class_batch_id: int = Field(gt=0)
     embedding_ref: str | None = None
 
 
@@ -34,7 +33,6 @@ class StudentUpdate(BaseModel):
             "example": {
                 "full_name": "Updated Student Name",
                 "department_id": 2,
-                "class_batch_id": 2,
                 "embedding_ref": "2201999"
             }
         }
@@ -44,7 +42,6 @@ class StudentUpdate(BaseModel):
     full_name: str | None = None
     faculty_id: int | None = Field(default=None, gt=0)
     department_id: int | None = Field(default=None, gt=0)
-    class_batch_id: int | None = Field(default=None, gt=0)
     embedding_ref: str | None = None
 
 

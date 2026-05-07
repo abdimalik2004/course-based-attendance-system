@@ -86,12 +86,24 @@ def create_role(payload: RoleCreate, db: Session = Depends(get_db)):
     },
 )
 def register_user(payload: UserCreate, db: Session = Depends(get_db)):
+    normalized_roles = {role_name.strip().upper() for role_name in payload.role_names if role_name.strip()}
+    faculty_id = payload.faculty_id
+    if "FACULTY" in normalized_roles:
+        if faculty_id is None:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="faculty_id is required when role_names includes FACULTY",
+            )
+    else:
+        faculty_id = None
+
     user = create_user(
         db,
         email=payload.email,
         username=payload.username,
         password=payload.password,
         role_names=payload.role_names,
+        faculty_id=faculty_id,
     )
     db.commit()
     db.refresh(user)

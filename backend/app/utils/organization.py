@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import re
+from datetime import date
+
 from fastapi import HTTPException
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -47,6 +50,80 @@ def get_latest_class_batch_for_faculty_and_department_or_404(
     )
     if not class_batch:
         raise HTTPException(status_code=404, detail="Class batch not found for faculty and department")
+    return class_batch
+
+
+_CLASS_BATCH_NAME_RE = re.compile(r"^(?P<prefix>[A-Z0-9]+?)(?P<number>\d+)$")
+
+
+def _generate_class_batch_name(db: Session, *, faculty_code: str, department_id: int) -> str:
+    existing_names = db.query(ClassBatch.name).filter(ClassBatch.department_id == department_id).all()
+
+    best_prefix = faculty_code.strip().upper()
+    max_seq = 0
+    width = 3
+
+    for (raw_name,) in existing_names:
+        if not raw_name:
+            continue
+        normalized = raw_name.strip().upper()
+        match = _CLASS_BATCH_NAME_RE.match(normalized)
+        if not match:
+            continue
+        number = int(match.group("number"))
+        if number > max_seq:
+            max_seq = number
+            best_prefix = match.group("prefix")
+            width = max(len(match.group("number")), 3)
+
+    return f"{best_prefix}{max_seq + 1:0{width}d}"
+
+
+def get_or_create_class_batch_for_faculty_and_department(
+    db: Session,
+    *,
+    faculty_id: int,
+    department_id: int,
+) -> ClassBatch:
+    class_batch = (
+        db.query(ClassBatch)
+        .filter(
+            ClassBatch.faculty_id == faculty_id,
+            ClassBatch.department_id == department_id,
+        )
+        .order_by(ClassBatch.id.desc())
+        .first()
+    )
+    if class_batch is not None:
+        return class_batch
+
+    faculty = get_faculty_or_404(db, faculty_id)
+    department = get_department_or_404(db, department_id)
+    ensure_department_belongs_to_faculty(department, faculty_id)
+
+    class_batch = ClassBatch(
+        faculty_id=faculty_id,
+        department_id=department_id,
+        name=_generate_class_batch_name(db, faculty_code=faculty.code, department_id=department_id),
+        year=date.today().year,
+    )
+    db.add(class_batch)
+    try:
+        db.flush()
+    except IntegrityError as exc:
+        db.rollback()
+        existing = (
+            db.query(ClassBatch)
+            .filter(
+                ClassBatch.faculty_id == faculty_id,
+                ClassBatch.department_id == department_id,
+            )
+            .order_by(ClassBatch.id.desc())
+            .first()
+        )
+        if existing is not None:
+            return existing
+        raise HTTPException(status_code=400, detail="Class batch could not be created for faculty and department") from exc
     return class_batch
 
 

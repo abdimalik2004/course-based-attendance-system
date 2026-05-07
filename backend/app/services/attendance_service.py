@@ -61,7 +61,6 @@ class AttendanceService:
             student.id <= 0
             or student.faculty_id <= 0
             or student.department_id <= 0
-            or student.class_batch_id <= 0
         ):
             return {"ok": False, "message": "Recognized student has invalid references"}
 

@@ -87,7 +87,7 @@ def _seed_faculty_graph(db_session):
     db_session.add(class_batch)
     db_session.flush()
 
-    course = Course(faculty_id=faculty.id, code="CSC401", title="AI")
+    course = Course(faculty_id=faculty.id, department_id=department.id, code="CSC401", title="AI")
     db_session.add(course)
     db_session.commit()
     return faculty, department, class_batch, course
