@@ -44,7 +44,7 @@ class Settings:
 
     face_confidence_threshold: float = float(os.getenv("FACE_CONFIDENCE_THRESHOLD", "0.60"))
     face_timeout_seconds: float = float(os.getenv("FACE_TIMEOUT_SECONDS", "2.0"))
-    cors_allow_origins: tuple[str, ...] = _env_list("CORS_ALLOW_ORIGINS", "http://localhost:3000")
+    cors_allow_origins: tuple[str, ...] = _env_list("CORS_ALLOW_ORIGINS", "http://localhost:5173")
     cors_allow_methods: tuple[str, ...] = _env_list("CORS_ALLOW_METHODS", "*")
     cors_allow_headers: tuple[str, ...] = _env_list("CORS_ALLOW_HEADERS", "*")
     cors_allow_credentials: bool = os.getenv("CORS_ALLOW_CREDENTIALS", "true").strip().lower() in {
@@ -52,6 +52,8 @@ class Settings:
         "true",
         "yes",
     }
+    static_dir: str = os.getenv("STATIC_DIR", "backend/static")
+    static_upload_dir: str = os.getenv("STATIC_UPLOAD_DIR", "backend/static/uploads")
     log_level: str = os.getenv("LOG_LEVEL", "INFO").upper()
     auth_rate_limit_requests: int = int(os.getenv("AUTH_RATE_LIMIT_REQUESTS", "10"))
     auth_rate_limit_window_seconds: int = int(os.getenv("AUTH_RATE_LIMIT_WINDOW_SECONDS", "60"))

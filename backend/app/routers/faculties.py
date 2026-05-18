@@ -113,7 +113,11 @@ def create_faculty(payload: FacultyCreate, db: Session = Depends(get_db)):
     return faculty
 
 
-@router.get("", response_model=PaginatedFacultyRead, dependencies=[Depends(require_roles("ACADEMIA", "FACULTY"))])
+@router.get(
+    "",
+    response_model=PaginatedFacultyRead,
+    dependencies=[Depends(require_roles("SUPER_ADMIN", "ADMIN", "ACADEMIA", "FACULTY", "HR", "ADMISSION", "ADMISSIONS"))],
+)
 def list_faculties(
     db: Session = Depends(get_db),
     skip: int = Query(default=0, ge=0, description="Number of rows to skip", examples=[0]),

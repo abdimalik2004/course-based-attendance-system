@@ -54,12 +54,18 @@ class UserCreate(BaseModel):
     password: str
     role_names: list[str] = Field(min_length=1)
     faculty_id: int | None = Field(default=None, gt=0, description="Required when role_names includes FACULTY")
+    teacher_id: int | None = Field(default=None, gt=0, description="Required when role_names includes TEACHER")
+    student_id: int | None = Field(default=None, gt=0, description="Required when role_names includes STUDENT")
 
     @model_validator(mode="after")
     def _faculty_required_for_faculty_role(self) -> "UserCreate":
         normalized_roles = {role_name.strip().upper() for role_name in self.role_names if role_name.strip()}
         if "FACULTY" in normalized_roles and self.faculty_id is None:
             raise ValueError("faculty_id is required when role_names includes FACULTY")
+        if "TEACHER" in normalized_roles and self.teacher_id is None:
+            raise ValueError("teacher_id is required when role_names includes TEACHER")
+        if "STUDENT" in normalized_roles and self.student_id is None:
+            raise ValueError("student_id is required when role_names includes STUDENT")
         return self
 
 

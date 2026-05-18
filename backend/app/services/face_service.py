@@ -18,6 +18,8 @@ class FaceService:
         self._lock = threading.Lock()
         self._recognizer = None
         self._model_signature: tuple[int | None, int | None, int | None] | None = None
+        self._failed_model_signature: tuple[int | None, int | None, int | None] | None = None
+        self._load_error: str | None = None
 
     def _current_model_signature(self) -> tuple[int | None, int | None, int | None]:
         from utils.config import load_config  # noqa: WPS433
@@ -37,15 +39,28 @@ class FaceService:
         from utils.config import load_config  # noqa: WPS433
 
         cfg = load_config(base_dir=_ROOT)
-        recognizer = FaceEmbeddingRecognizer(cfg)
-        recognizer.load_model()
+        current_signature = self._current_model_signature()
+        try:
+            recognizer = FaceEmbeddingRecognizer(cfg)
+            recognizer.load_model()
+        except Exception as exc:
+            self._recognizer = None
+            self._model_signature = None
+            self._failed_model_signature = current_signature
+            self._load_error = str(exc)
+            return
+
         self._recognizer = recognizer
-        self._model_signature = self._current_model_signature()
+        self._model_signature = current_signature
+        self._failed_model_signature = None
+        self._load_error = None
 
     def load_models(self, force: bool = False) -> None:
         with self._lock:
             current_signature = self._current_model_signature()
             if not force and self._recognizer is not None and self._model_signature == current_signature:
+                return
+            if not force and self._recognizer is None and self._failed_model_signature == current_signature:
                 return
             self._load_models_locked()
 
@@ -54,6 +69,8 @@ class FaceService:
 
     def _ensure_current_models(self) -> None:
         current_signature = self._current_model_signature()
+        if self._recognizer is None and self._failed_model_signature == current_signature:
+            return
         if self._recognizer is None or self._model_signature != current_signature:
             self._load_models_locked()
 
@@ -63,7 +80,7 @@ class FaceService:
             recognizer = self._recognizer
 
         if recognizer is None:
-            raise RuntimeError("Face models not loaded")
+            raise RuntimeError(self._load_error or "Face models not loaded")
 
         start = time.perf_counter()
         results = recognizer.recognize_frame(frame)

@@ -3,11 +3,13 @@ from __future__ import annotations
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 import logging
+from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from fastapi.staticfiles import StaticFiles
 
 from app.core.config import settings
 from app.core.logging_config import configure_logging
@@ -47,7 +49,7 @@ def seed_roles() -> None:
     db = SessionLocal()
     try:
         role_names = ["SUPER_ADMIN", "ACADEMIA", "FACULTY", "FACULTY_ADMIN", "HR", "ADMISSIONS", "TEACHER"]
-        existing = {r.name for r in db.query(Role).all()}
+        existing = {name for (name,) in db.query(Role.name).all()}
         for name in role_names:
             if name not in existing:
                 db.add(Role(name=name))
@@ -66,10 +68,6 @@ async def lifespan(_: FastAPI):
 
     seed_roles()
 
-    # Load AI models exactly once during startup.
-    face_service.load_models()
-    logger.info("Face models loaded")
-
     await schedule_service.start()
     logger.info("Startup checks passed and scheduler started")
     try:
@@ -83,10 +81,10 @@ app = FastAPI(title="Course Attendance System API", version="1.0.0", lifespan=li
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=list(settings.cors_allow_origins),
-    allow_credentials=settings.cors_allow_credentials,
-    allow_methods=list(settings.cors_allow_methods),
-    allow_headers=list(settings.cors_allow_headers),
+    allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 app.include_router(auth.router)
@@ -102,6 +100,14 @@ app.include_router(sessions.router)
 app.include_router(attendance.router)
 app.include_router(student_portal.router)
 app.include_router(reports.router)
+from app.routers import users
+
+# Mount static files for uploaded assets
+static_dir = Path(settings.static_dir or "static")
+static_dir.mkdir(parents=True, exist_ok=True)
+app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
+
+app.include_router(users.router)
 
 
 def _error_payload(code: str, message: str, path: str, details=None) -> dict:

@@ -151,6 +151,45 @@ def test_permission_allows_academia_faculty_create(client):
     assert response.json()["semesters"] == 8
 
 
+@pytest.mark.parametrize("roles", [["HR"], ["ADMIN"], ["ADMISSIONS"]])
+def test_permission_allows_faculty_list_for_staff_roles(client, roles):
+    api, current = client
+    current["roles"] = roles
+
+    response = api.get("/faculties")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert "items" in body
+    assert "total" in body
+
+
+@pytest.mark.parametrize("roles", [["HR"], ["ADMIN"], ["ADMISSIONS"]])
+def test_permission_allows_department_list_for_staff_roles(client, roles):
+    api, current = client
+    current["roles"] = roles
+
+    response = api.get("/departments")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert "items" in body
+    assert "total" in body
+
+
+@pytest.mark.parametrize("roles", [["HR"], ["ADMIN"], ["ADMISSIONS"]])
+def test_permission_allows_course_list_for_staff_roles(client, roles):
+    api, current = client
+    current["roles"] = roles
+
+    response = api.get("/courses")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert "items" in body
+    assert "total" in body
+
+
 def test_delete_faculty_without_force_returns_expected_response(client, db_session):
     faculty = Faculty(name="Faculty of Computer Science", code="FCS")
     db_session.add(faculty)

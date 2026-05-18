@@ -210,10 +210,16 @@ def list_schedules(
         description="Filter by weekday as 1..7 or day code (sat..fri)",
         examples=["sat"],
     ),
+    faculty_scope = Depends(get_optional_faculty_scope_context),
 ):
     query = db.query(CourseSchedule)
     if course_id is not None:
         query = query.filter(CourseSchedule.course_id == course_id)
+    if faculty_scope is not None:
+        if course_id is not None:
+            enforce_faculty_scope(_course_faculty_id(db, course_id), faculty_scope)
+        else:
+            query = query.join(Course, Course.id == CourseSchedule.course_id).filter(Course.faculty_id == faculty_scope.faculty_id)
     rows = query.all()
     if weekday is not None:
         try:

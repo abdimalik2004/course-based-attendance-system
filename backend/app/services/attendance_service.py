@@ -36,7 +36,10 @@ class AttendanceService:
         now = current_local_datetime()
 
         frame = decode_base64_image(image_b64)
-        recognition = face_service.recognize_student(frame)
+        try:
+            recognition = face_service.recognize_student(frame)
+        except RuntimeError as exc:
+            return {"ok": False, "message": str(exc)}
         if not recognition.get("matched"):
             if recognition.get("reason") == "timeout":
                 return {

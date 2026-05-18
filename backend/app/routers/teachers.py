@@ -88,8 +88,14 @@ def list_teachers(
     faculty_id: int | None = Query(default=None, description="Filter by faculty id", examples=[1]),
     department_id: int | None = Query(default=None, description="Filter by department id", examples=[1]),
     search: str | None = Query(default=None, description="Search by teacher number or full name", examples=["T-1001"]),
+    faculty_scope = Depends(get_optional_faculty_scope_context),
 ):
     query = db.query(Teacher)
+    if faculty_scope is not None:
+        if faculty_id is not None:
+            enforce_faculty_scope(faculty_id, faculty_scope)
+        else:
+            faculty_id = faculty_scope.faculty_id
     if faculty_id is not None:
         query = query.filter(Teacher.faculty_id == faculty_id)
     if department_id is not None:

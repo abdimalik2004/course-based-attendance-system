@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 
 from app.core.security import get_password_hash
 from app.db.models import Role, User
+from app.db.models import Teacher, Student
 
 
 def _normalize_role_names(role_names: Iterable[str]) -> list[str]:
@@ -40,6 +41,8 @@ def create_user(
     password: str,
     role_names: Iterable[str],
     faculty_id: int | None = None,
+    teacher_id: int | None = None,
+    student_id: int | None = None,
 ) -> User:
     normalized_roles = _normalize_role_names(role_names)
 
@@ -61,4 +64,18 @@ def create_user(
     user.roles = _load_roles(db, normalized_roles)
     db.add(user)
     db.flush()
+
+    # If a teacher_id is provided, link the teacher record to the new user
+    if teacher_id is not None:
+        teacher = db.query(Teacher).filter(Teacher.id == int(teacher_id)).first()
+        if teacher is None:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="teacher_id not found")
+        teacher.user_id = user.id
+        db.add(teacher)
+
+    # Validate student_id exists if provided (no direct user link on Student model)
+    if student_id is not None:
+        student = db.query(Student).filter(Student.id == int(student_id)).first()
+        if student is None:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="student_id not found")
     return user

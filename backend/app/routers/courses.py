@@ -22,9 +22,12 @@ from app.db.role_scoped import get_role_scoped_db
 from app.services.enrollment_service import auto_enroll_existing_students_for_course
 from app.schemas.course import (
     CourseAssignmentCreate,
+    CourseAssignmentRead,
+    CourseAssignmentUpdate,
     CourseCreate,
     CourseRead,
     CourseUpdate,
+    PaginatedCourseAssignmentRead,
     PaginatedCourseRead,
 )
 from app.schemas.student import StudentRead
@@ -161,15 +164,25 @@ def create_course(
     return obj
 
 
-@router.get("", response_model=PaginatedCourseRead, dependencies=[Depends(require_roles("FACULTY", "TEACHER", "ACADEMIA"))])
+@router.get(
+    "",
+    response_model=PaginatedCourseRead,
+    dependencies=[Depends(require_roles("SUPER_ADMIN", "ADMIN", "ACADEMIA", "FACULTY", "TEACHER", "HR", "ADMISSION", "ADMISSIONS"))],
+)
 def list_courses(
     db: Session = Depends(get_role_scoped_db),
     skip: int = Query(default=0, ge=0, description="Number of rows to skip", examples=[0]),
     limit: int = Query(default=50, ge=1, le=200, description="Page size", examples=[20]),
     faculty_id: int | None = Query(default=None, description="Filter by faculty id", examples=[1]),
     search: str | None = Query(default=None, description="Search by course code or title", examples=["CSC"]),
+    faculty_scope = Depends(get_optional_faculty_scope_context),
 ):
     query = db.query(Course)
+    if faculty_scope is not None:
+        if faculty_id is not None:
+            enforce_faculty_scope(faculty_id, faculty_scope)
+        else:
+            faculty_id = faculty_scope.faculty_id
     if faculty_id is not None:
         query = query.filter(Course.faculty_id == faculty_id)
     if search:
@@ -277,6 +290,93 @@ def assign_teacher(
         raise HTTPException(status_code=409, detail="Teacher already assigned to this course") from exc
     db.refresh(assignment)
     return {"id": assignment.id}
+
+
+@router.get(
+    "/assignments",
+    response_model=list[CourseAssignmentRead],
+    dependencies=[Depends(require_roles("FACULTY", "ACADEMIA", "HR"))],
+)
+def list_assignments(
+    course_id: int | None = Query(default=None, description="Filter by course id", examples=[1]),
+    db: Session = Depends(get_role_scoped_db),
+    faculty_scope = Depends(get_optional_faculty_scope_context),
+):
+    query = db.query(CourseAssignment)
+    if course_id is not None:
+        query = query.filter(CourseAssignment.course_id == course_id)
+    if faculty_scope is not None:
+        if course_id is not None:
+            course = db.query(Course).filter(Course.id == course_id).first()
+            if not course:
+                raise HTTPException(status_code=404, detail="Course not found")
+            enforce_faculty_scope(course.faculty_id, faculty_scope)
+        else:
+            query = query.join(Course, Course.id == CourseAssignment.course_id).filter(Course.faculty_id == faculty_scope.faculty_id)
+    return query.order_by(CourseAssignment.id).all()
+
+
+@router.put(
+    "/assignments/{assignment_id}",
+    response_model=CourseAssignmentRead,
+    dependencies=[Depends(require_roles("FACULTY"))],
+)
+def update_assignment(
+    assignment_id: int,
+    payload: CourseAssignmentUpdate,
+    db: Session = Depends(get_role_scoped_db),
+    faculty_scope = Depends(get_optional_faculty_scope_context),
+):
+    assignment = db.query(CourseAssignment).filter(CourseAssignment.id == assignment_id).first()
+    if not assignment:
+        raise HTTPException(status_code=404, detail="Assignment not found")
+
+    if faculty_scope is not None:
+        enforce_faculty_scope(assignment.course.faculty_id, faculty_scope)
+
+    update_data = payload.model_dump(exclude_unset=True)
+    if update_data.get("teacher_id") is not None:
+        teacher = db.query(Teacher).filter(Teacher.id == update_data["teacher_id"]).first()
+        if not teacher:
+            raise HTTPException(status_code=404, detail="Teacher not found")
+        if teacher.faculty_id != assignment.course.faculty_id:
+            raise HTTPException(status_code=400, detail="Teacher faculty does not match course faculty")
+        assignment.teacher_id = teacher.id
+
+    if update_data.get("is_primary") is not None:
+        assignment.is_primary = update_data["is_primary"]
+
+    db.add(assignment)
+    try:
+        db.commit()
+    except IntegrityError as exc:
+        db.rollback()
+        raise HTTPException(status_code=409, detail="Assignment update conflicts with existing data") from exc
+    db.refresh(assignment)
+    return assignment
+
+
+@router.delete(
+    "/assignments/{assignment_id}",
+    dependencies=[Depends(require_roles("FACULTY"))],
+)
+def delete_assignment(
+    assignment_id: int,
+    db: Session = Depends(get_role_scoped_db),
+    faculty_scope = Depends(get_optional_faculty_scope_context),
+):
+    assignment = db.query(CourseAssignment).filter(CourseAssignment.id == assignment_id).first()
+    if not assignment:
+        raise HTTPException(status_code=404, detail="Assignment not found")
+    if faculty_scope is not None:
+        enforce_faculty_scope(assignment.course.faculty_id, faculty_scope)
+    db.delete(assignment)
+    try:
+        db.commit()
+    except IntegrityError as exc:
+        db.rollback()
+        raise HTTPException(status_code=409, detail="Cannot delete assignment due to related records") from exc
+    return {"deleted": True, "assignment_id": assignment_id}
 
 
 @router.post("/{course_id}/enroll/{student_id}", dependencies=[Depends(require_roles("FACULTY"))])

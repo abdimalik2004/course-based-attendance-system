@@ -1,0 +1,42 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  body {
+    @apply bg-white dark:bg-[#0B0F19] text-gray-900 dark:text-gray-100 antialiased transition-colors duration-300;
+    font-family: 'Inter', system-ui, -apple-system, sans-serif;
+  }
+}
+
+@layer utilities {
+  .glass-card {
+    @apply bg-gray-100 dark:bg-[#111827] border border-gray-300 dark:border-gray-700 shadow-xl dark:shadow-2xl dark:shadow-primary/5 transition-all duration-300;
+  }
+  
+  .glass-input {
+    @apply bg-white dark:bg-gray-900 border border-gray-300 dark:border-gray-700 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 focus:border-primary focus:ring-1 focus:ring-primary outline-none transition-all duration-300;
+  }
+  
+  .text-gradient {
+    @apply bg-clip-text text-transparent bg-gradient-to-r from-primary via-primary-secondary to-primary-accent;
+  }
+  
+  .bg-gradient-brand {
+    @apply bg-gradient-to-r from-primary via-primary-secondary to-primary-accent;
+  }
+}
+
+/* Custom Scrollbar */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  @apply bg-gray-100 dark:bg-[#0B0F19];
+}
+
+::-webkit-scrollbar-thumb {
+  @apply bg-gray-300 hover:bg-gray-400 dark:bg-gray-700 dark:hover:bg-gray-600 rounded-full transition-colors;
+}

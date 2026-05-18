@@ -2,17 +2,28 @@ from __future__ import annotations
 
 from datetime import date, datetime, time
 
-from sqlalchemy import func
+from sqlalchemy import func, or_
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from app.core.security import require_roles
 from app.db.faculty_scope import enforce_faculty_scope, get_optional_faculty_scope_context
-from app.db.models import AttendanceRecord, AttendanceSession, AttendanceStatus, Course, Student
+from app.db.models import (
+    AttendanceRecord,
+    AttendanceSession,
+    AttendanceStatus,
+    Course,
+    Student,
+    Teacher,
+    Faculty,
+    Department,
+)
 from app.db.role_scoped import get_role_scoped_db
 
 
 router = APIRouter(prefix="/reports", tags=["reports"])
+
+report_access_dependency = Depends(require_roles("SUPER_ADMIN", "ADMIN", "ACADEMIA", "FACULTY", "FACULTY_ADMIN", "TEACHER", "HR", "ADMISSIONS"))
 
 
 def _is_present_status(status: AttendanceStatus) -> bool:
@@ -24,6 +35,146 @@ def _course_faculty_id(db: Session, course_id: int) -> int:
     if not course:
         raise HTTPException(status_code=404, detail="Course not found")
     return course.faculty_id
+
+
+@router.get("/summary", dependencies=[report_access_dependency])
+def report_summary(db: Session = Depends(get_role_scoped_db)):
+    total_students = db.query(func.count(Student.id)).scalar() or 0
+    total_teachers = db.query(func.count(Teacher.id)).scalar() or 0
+    total_faculties = db.query(func.count(Faculty.id)).scalar() or 0
+    attendance_total = db.query(func.count(AttendanceRecord.id)).scalar() or 0
+    attendance_present = (
+        db.query(func.count(AttendanceRecord.id))
+        .filter(AttendanceRecord.status.in_([AttendanceStatus.PRESENT, AttendanceStatus.LATE]))
+        .scalar() or 0
+    )
+    attendance_rate = round((attendance_present / attendance_total) * 100, 1) if attendance_total else 0.0
+
+    return {
+        "totalStudents": total_students,
+        "totalTeachers": total_teachers,
+        "totalFaculties": total_faculties,
+        "totalAttendanceRecords": attendance_total,
+        "attendanceRate": attendance_rate,
+    }
+
+
+@router.get("/absence-ranking", dependencies=[report_access_dependency])
+def absence_ranking(
+    page: int = 1,
+    limit: int = 10,
+    search: str | None = None,
+    type: str | None = None,
+    faculty: str | None = None,
+    department: str | None = None,
+    course: str | None = None,
+    db: Session = Depends(get_role_scoped_db),
+):
+    query = (
+        db.query(AttendanceRecord, Student, Course, AttendanceSession)
+        .join(Student, Student.id == AttendanceRecord.student_id)
+        .join(Course, Course.id == AttendanceRecord.course_id)
+        .join(AttendanceSession, AttendanceSession.id == AttendanceRecord.session_id)
+    )
+
+    if search:
+        pattern = f"%{search.strip()}%"
+        query = query.filter(
+            or_(
+                Student.full_name.ilike(pattern),
+                Student.student_number.ilike(pattern),
+                Course.title.ilike(pattern),
+                Course.code.ilike(pattern),
+            )
+        )
+
+    if faculty and faculty.lower() != "all":
+        pattern = f"%{faculty.strip()}%"
+        query = query.filter(
+            or_(
+                Course.faculty.has(Faculty.name.ilike(pattern)),
+                Student.faculty.has(Faculty.name.ilike(pattern)),
+                Course.title.ilike(pattern),
+                Course.code.ilike(pattern),
+            )
+        )
+
+    if department and department.lower() != "all":
+        pattern = f"%{department.strip()}%"
+        query = query.filter(
+            or_(
+                Course.department.has(Department.name.ilike(pattern)),
+                Student.department.has(Department.name.ilike(pattern)),
+                Course.title.ilike(pattern),
+                Course.code.ilike(pattern),
+            )
+        )
+
+    if course and course.lower() != "all":
+        pattern = f"%{course.strip()}%"
+        query = query.filter(
+            or_(
+                Course.title.ilike(pattern),
+                Course.code.ilike(pattern),
+            )
+        )
+
+    if type and type.lower() != "" and type.lower() != "student_attendance":
+        return {"data": [], "total": 0}
+
+    grouped: dict[str, dict] = {}
+    for record, student, course_obj, _session in query.all():
+        key = f"{student.id}:{course_obj.id}"
+        item = grouped.setdefault(
+            key,
+            {
+                "id": key,
+                "studentName": student.full_name,
+                "type": "Student",
+                "facultyOrDepartment": f"{course_obj.title} ({course_obj.code})",
+                "totalAbsences": 0,
+                "presentCount": 0,
+                "lateCount": 0,
+                "total": 0,
+            },
+        )
+        if record.status == AttendanceStatus.ABSENT:
+            item["totalAbsences"] += 1
+        if record.status in (AttendanceStatus.PRESENT, AttendanceStatus.LATE):
+            item["presentCount"] += 1
+        if record.status == AttendanceStatus.LATE:
+            item["lateCount"] += 1
+        item["total"] += 1
+
+    records = []
+    for item in grouped.values():
+        total = item["total"]
+        present_or_late = item["presentCount"]
+        attendance_percentage = round((present_or_late / total) * 100) if total else 0
+        records.append(
+            {
+                "id": item["id"],
+                "studentName": item["studentName"],
+                "type": item["type"],
+                "facultyOrDepartment": item["facultyOrDepartment"],
+                "totalAbsences": item["totalAbsences"],
+                "attendancePercentage": attendance_percentage,
+                "status": (
+                    "High"
+                    if item["totalAbsences"] >= 10
+                    else "Medium"
+                    if item["totalAbsences"] >= 5
+                    else "Low"
+                ),
+            }
+        )
+
+    records.sort(key=lambda x: (-x["totalAbsences"], -x["attendancePercentage"], x["studentName"]))
+    total = len(records)
+    start = (page - 1) * limit
+    end = start + limit
+
+    return {"data": records[start:end], "total": total}
 
 
 @router.get("/course/{course_id}", dependencies=[Depends(require_roles("TEACHER", "FACULTY", "ACADEMIA"))])

@@ -47,7 +47,7 @@ def _get_or_create_org_unit(db, code: str, name: str) -> OrganizationalUnit:
     return unit
 
 
-def _get_or_create_user(db, username: str, password: str, role_names: list[str], faculty_id: int | None = None) -> User:
+def _get_or_create_user(db, username: str, password: str, role_names: list[str], faculty_id: int | None = None, user_id: int | None = None) -> User:
     user = db.query(User).filter(User.username == username).first()
     roles = db.query(Role).filter(Role.name.in_(role_names)).all()
     if user:
@@ -60,12 +60,22 @@ def _get_or_create_user(db, username: str, password: str, role_names: list[str],
         db.flush()
         return user
 
-    user = User(
-        username=username,
-        hashed_password=get_password_hash(password),
-        is_active=True,
-        faculty_id=faculty_id,
-    )
+    # create new user; allow explicit id for seeded environments
+    if user_id is not None:
+        user = User(
+            id=user_id,
+            username=username,
+            hashed_password=get_password_hash(password),
+            is_active=True,
+            faculty_id=faculty_id,
+        )
+    else:
+        user = User(
+            username=username,
+            hashed_password=get_password_hash(password),
+            is_active=True,
+            faculty_id=faculty_id,
+        )
     user.roles = roles
     db.add(user)
     db.flush()
@@ -153,7 +163,7 @@ def seed_demo_data() -> None:
             db.add(class_batch)
             db.flush()
 
-        academia_user = _get_or_create_user(db, "academia", "academia123", ["ACADEMIA"])
+        academia_user = _get_or_create_user(db, "academia", "academia", ["ACADEMIA"])
         admin_user = _get_or_create_user(db, "admin", "admin", ["SUPER_ADMIN"])
         faculty_admin_user = _get_or_create_user(
             db,
@@ -162,28 +172,32 @@ def seed_demo_data() -> None:
             ["FACULTY"],
             faculty_id=faculty.id,
         )
-
+        # Create/update seed users with requested credentials
         teacher_user = _get_or_create_user(
             db,
-            "teacher1",
-            "teacher123",
+            "teacher",
+            "teacher",
             ["TEACHER"],
             faculty_id=faculty.id,
+            user_id=7,
         )
 
         hr_user = _get_or_create_user(
             db,
             "hr",
-            "hr123",
+            "hr",
             ["HR"],
         )
 
         admissions_user = _get_or_create_user(
             db,
             "admission",
-            "admission123",
+            "admission",
             ["ADMISSIONS"],
         )
+
+        # ensure there is a student login user with id 6
+        student_user = _get_or_create_user(db, "student", "student", ["STUDENT"], user_id=6)
 
         teacher = db.query(Teacher).filter(Teacher.teacher_number == "T-1001").first()
         if not teacher:
@@ -275,11 +289,11 @@ def seed_demo_data() -> None:
         db.commit()
         print("Seed completed.")
         print(
-            "Users: admin/admin, academia/academia123, facultyadmin/faculty123, "
-            "teacher1/teacher123, hr/hr123, admission/admission123"
+            "Users: admin/admin, academia/academia, facultyadmin/faculty123, "
+            "teacher/teacher, hr/hr, admission/admission, student/student"
         )
         print(f"Faculty: {faculty.name} | Class: {class_batch.name} | Course: {course.code}")
-        _ = academia_user, admin_user, faculty_admin_user, hr_user, admissions_user
+        _ = academia_user, admin_user, faculty_admin_user, hr_user, admissions_user, student_user, teacher_user
     finally:
         db.close()
 

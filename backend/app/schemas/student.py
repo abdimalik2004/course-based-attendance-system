@@ -1,6 +1,15 @@
 from __future__ import annotations
 
+from datetime import datetime
+from enum import Enum
+
 from pydantic import BaseModel, ConfigDict, Field
+
+
+class StudentStatus(str, Enum):
+    PENDING = "pending"
+    APPROVED = "approved"
+    REJECTED = "rejected"
 
 
 class StudentBase(BaseModel):
@@ -9,6 +18,7 @@ class StudentBase(BaseModel):
     faculty_id: int = Field(gt=0)
     department_id: int = Field(gt=0)
     embedding_ref: str | None = None
+    status: StudentStatus = StudentStatus.PENDING
 
 
 class StudentCreate(BaseModel):
@@ -43,12 +53,14 @@ class StudentUpdate(BaseModel):
     faculty_id: int | None = Field(default=None, gt=0)
     department_id: int | None = Field(default=None, gt=0)
     embedding_ref: str | None = None
+    status: StudentStatus | None = None
 
 
 class StudentRead(StudentBase):
     model_config = ConfigDict(from_attributes=True)
 
     id: int
+    created_at: datetime
 
 
 class PaginatedStudentRead(BaseModel):
@@ -56,3 +68,22 @@ class PaginatedStudentRead(BaseModel):
     total: int
     skip: int
     limit: int
+
+
+class StudentDashboardStatsRead(BaseModel):
+    total_students: int
+    new_admissions: int
+    pending_admissions: int
+    rejected_applications: int
+
+
+class StudentCapturedImageRead(BaseModel):
+    file_name: str
+    url: str
+
+
+class StudentCapturedImagesRead(BaseModel):
+    student_id: int
+    student_number: str
+    image_count: int
+    images: list[StudentCapturedImageRead]

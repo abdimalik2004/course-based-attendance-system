@@ -130,15 +130,25 @@ def create_department(
     return obj
 
 
-@router.get("", response_model=PaginatedDepartmentRead, dependencies=[Depends(require_roles("ACADEMIA", "FACULTY", "TEACHER"))])
+@router.get(
+    "",
+    response_model=PaginatedDepartmentRead,
+    dependencies=[Depends(require_roles("SUPER_ADMIN", "ADMIN", "ACADEMIA", "FACULTY", "TEACHER", "HR", "ADMISSION", "ADMISSIONS"))],
+)
 def list_departments(
     db: Session = Depends(get_role_scoped_db),
     skip: int = Query(default=0, ge=0, description="Number of rows to skip", examples=[0]),
     limit: int = Query(default=50, ge=1, le=200, description="Page size", examples=[20]),
     faculty_id: int | None = Query(default=None, description="Filter by faculty id", examples=[1]),
     search: str | None = Query(default=None, description="Search by department name or code", examples=["IT"]),
+    faculty_scope = Depends(get_optional_faculty_scope_context),
 ):
     query = db.query(Department)
+    if faculty_scope is not None:
+        if faculty_id is not None:
+            enforce_faculty_scope(faculty_id, faculty_scope)
+        else:
+            faculty_id = faculty_scope.faculty_id
     if faculty_id is not None:
         query = query.filter(Department.faculty_id == faculty_id)
     if search:

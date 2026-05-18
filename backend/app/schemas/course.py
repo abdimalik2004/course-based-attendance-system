@@ -55,3 +55,22 @@ class CourseAssignmentCreate(BaseModel):
     course_id: int = Field(gt=0)
     teacher_id: int = Field(gt=0)
     is_primary: bool = False
+
+
+class CourseAssignmentUpdate(BaseModel):
+    teacher_id: int | None = Field(default=None, gt=0)
+    is_primary: bool | None = None
+
+
+class CourseAssignmentRead(BaseModel):
+    id: int
+    course_id: int = Field(gt=0)
+    teacher_id: int = Field(gt=0)
+    is_primary: bool
+
+
+class PaginatedCourseAssignmentRead(BaseModel):
+    items: list[CourseAssignmentRead]
+    total: int
+    skip: int
+    limit: int

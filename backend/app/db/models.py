@@ -68,6 +68,7 @@ class AttendanceStatus(str, enum.Enum):
     PRESENT = "PRESENT"
     LATE = "LATE"
     ABSENT = "ABSENT"
+    EXCUSED = "EXCUSED"
 
 
 class AttendanceSummaryStatus(str, enum.Enum):
@@ -98,6 +99,12 @@ class TeacherStatus(str, enum.Enum):
     ACTIVE = "Active"
     ONLEAVE = "Onleave"
     INACTIVE = "Inactive"
+
+
+class StudentAdmissionStatus(str, enum.Enum):
+    PENDING = "pending"
+    APPROVED = "approved"
+    REJECTED = "rejected"
 
 
 class UserRoleLink(Base):
@@ -206,6 +213,7 @@ class User(Base):
     email: Mapped[str | None] = mapped_column(String(150), unique=True, nullable=True)
     hashed_password: Mapped[str] = mapped_column(String(255), nullable=False)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    profile_image_url: Mapped[str | None] = mapped_column(String(255), nullable=True)
     faculty_id: Mapped[int | None] = mapped_column(ForeignKey("faculties.id"), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), nullable=False)
 
@@ -227,6 +235,17 @@ class Student(Base):
     faculty_id: Mapped[int] = mapped_column(ForeignKey("faculties.id", ondelete="CASCADE"), nullable=False)
     department_id: Mapped[int] = mapped_column(ForeignKey("departments.id", ondelete="CASCADE"), nullable=False)
     embedding_ref: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    status: Mapped[StudentAdmissionStatus] = mapped_column(
+        Enum(
+            StudentAdmissionStatus,
+            name="student_admission_status",
+            values_callable=lambda enum_cls: [member.value for member in enum_cls],
+        ),
+        default=StudentAdmissionStatus.PENDING,
+        nullable=False,
+        index=True,
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), nullable=False)
 
     faculty: Mapped[Faculty] = relationship(back_populates="students")
     department: Mapped[Department] = relationship(back_populates="students")

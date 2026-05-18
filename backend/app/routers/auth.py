@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, Request, Response
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -22,11 +22,10 @@ from app.db.models import Role, User
 from app.db.session import get_db
 from app.db.reset_database import reset_database_to_clean_state
 from app.schemas.auth import (
-    RefreshTokenRequest,
     ResetDatabaseRequest,
     RoleCreate,
     RoleRead,
-    TokenPair,
+    Token,
     UserCreate,
     UserRead,
 )
@@ -104,6 +103,8 @@ def register_user(payload: UserCreate, db: Session = Depends(get_db)):
         password=payload.password,
         role_names=payload.role_names,
         faculty_id=faculty_id,
+        teacher_id=payload.teacher_id,
+        student_id=payload.student_id,
     )
     db.commit()
     db.refresh(user)
@@ -112,11 +113,16 @@ def register_user(payload: UserCreate, db: Session = Depends(get_db)):
 
 @router.post(
     "/token",
-    response_model=TokenPair,
+    response_model=Token,
     dependencies=[Depends(rate_limit_dependency(settings.auth_rate_limit_requests, settings.auth_rate_limit_window_seconds))],
     responses={401: {"description": "Incorrect username or password"}},
 )
-def login_for_access_token(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get_db)):
+def login_for_access_token(
+    request: Request,
+    response: Response,
+    form_data: OAuth2PasswordRequestForm = Depends(),
+    db: Session = Depends(get_db),
+):
     user = db.query(User).filter(User.username == form_data.username).first()
     if not user or not verify_password(form_data.password, user.hashed_password):
         raise HTTPException(
@@ -132,17 +138,35 @@ def login_for_access_token(form_data: OAuth2PasswordRequestForm = Depends(), db:
 
     access_token = create_access_token(subject=user.username)
     refresh_token = create_refresh_token(subject=user.username)
-    return TokenPair(access_token=access_token, refresh_token=refresh_token)
+
+    # Set refresh token as httpOnly cookie. Cookie security depends on environment.
+    secure = settings.app_env == "production" and request.url.scheme == "https"
+    max_age = settings.refresh_token_expire_minutes * 60
+    response.set_cookie(
+        key="refresh_token",
+        value=refresh_token,
+        httponly=True,
+        secure=secure,
+        samesite="lax",
+        max_age=max_age,
+        path="/",
+    )
+    return Token(access_token=access_token)
 
 
 @router.post(
     "/refresh",
-    response_model=TokenPair,
+    response_model=Token,
     dependencies=[Depends(rate_limit_dependency(settings.auth_rate_limit_requests, settings.auth_rate_limit_window_seconds))],
 )
-def refresh_tokens(payload: RefreshTokenRequest, db: Session = Depends(get_db)):
+def refresh_tokens(request: Request, response: Response, db: Session = Depends(get_db)):
+    # Read refresh token from httpOnly cookie
+    cookie_token = request.cookies.get("refresh_token")
+    if not cookie_token:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Missing refresh token")
+
     try:
-        username = decode_refresh_token(payload.refresh_token)
+        username = decode_refresh_token(cookie_token)
     except TokenPayloadError as exc:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid refresh token") from exc
 
@@ -152,7 +176,27 @@ def refresh_tokens(payload: RefreshTokenRequest, db: Session = Depends(get_db)):
 
     access_token = create_access_token(subject=user.username)
     refresh_token = create_refresh_token(subject=user.username)
-    return TokenPair(access_token=access_token, refresh_token=refresh_token)
+
+    secure = settings.app_env == "production" and request.url.scheme == "https"
+    max_age = settings.refresh_token_expire_minutes * 60
+    response.set_cookie(
+        key="refresh_token",
+        value=refresh_token,
+        httponly=True,
+        secure=secure,
+        samesite="lax",
+        max_age=max_age,
+        path="/",
+    )
+
+    return Token(access_token=access_token)
+
+
+@router.post("/logout")
+def logout(response: Response):
+    # Clear the refresh token cookie
+    response.delete_cookie("refresh_token", path="/")
+    return {"ok": True}
 
 
 @router.get("/me", response_model=UserRead)

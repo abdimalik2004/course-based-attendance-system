@@ -197,8 +197,14 @@ def list_class_batches(
     faculty_id: int | None = Query(default=None, description="Filter by faculty id", examples=[1]),
     department_id: int | None = Query(default=None, description="Filter by department id", examples=[1]),
     search: str | None = Query(default=None, description="Search class name", examples=["CIS"]),
+    faculty_scope = Depends(get_optional_faculty_scope_context),
 ):
     query = db.query(ClassBatch)
+    if faculty_scope is not None:
+        if faculty_id is not None:
+            enforce_faculty_scope(faculty_id, faculty_scope)
+        else:
+            faculty_id = faculty_scope.faculty_id
     if faculty_id is not None:
         query = query.filter(ClassBatch.faculty_id == faculty_id)
     if department_id is not None:
