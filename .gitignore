@@ -2,6 +2,9 @@
 # Environment & Secrets
 # =========================
 .env
+# frontend/.env only contains VITE_API_URL (no secrets) — allow it so
+# teammates get the correct API URL without manual setup.
+!frontend/.env
 
 # =========================
 # Virtual Environments
