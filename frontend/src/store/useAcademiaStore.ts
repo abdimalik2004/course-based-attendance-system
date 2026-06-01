@@ -161,16 +161,25 @@ const mapAcademicYear = (year: any): AcademicStructure => ({
   term: year.term_name ?? year.term ?? "",
   startDate: year.start_date ?? new Date().toISOString(),
   endDate: year.end_date ?? new Date().toISOString(),
-  status: year.status ?? "Draft",
+  status:
+    year.status === "active" || year.status === "Active"
+      ? "Active"
+      : year.status === "inactive" || year.status === "Inactive"
+        ? "Inactive"
+        : "Draft",
   createdAt: year.created_at ?? new Date().toISOString(),
 });
+
+const academicYearStatusToApi = (status: AcademicStructure["status"]) =>
+  status.toLowerCase();
 
 const mapCourseAssignment = (assignment: any): CourseAssignment => ({
   id: String(assignment.id),
   courseId: String(assignment.course_id),
   facultyId: String(assignment.faculty_id),
   departmentId: String(assignment.department_id),
-  semester: assignment.semester ?? assignment.academic_year_id ?? 0,
+  semester: assignment.semester ?? 0,
+  academicYearId: String(assignment.academic_year_id ?? ""),
   createdAt: assignment.created_at ?? new Date().toISOString(),
 });
 
@@ -331,7 +340,8 @@ export const useAcademiaStore = create<AcademiaState>((set) => ({
     const response = await api.post("/courses", {
       faculty_id: Number(data.facultyId),
       department_id: Number(data.departmentId),
-      title: data.title,
+      // support both `title` (Course type) and `name` (legacy form field)
+      title: (data as any).title ?? (data as any).name,
     });
     set((state) => ({ courses: [...state.courses, mapCourse(response.data)] }));
   },
@@ -391,7 +401,7 @@ export const useAcademiaStore = create<AcademiaState>((set) => ({
       term_name: data.term,
       start_date: data.startDate,
       end_date: data.endDate,
-      status: data.status,
+      status: academicYearStatusToApi(data.status),
     });
     set((state) => ({
       structures: [...state.structures, mapAcademicYear(response.data)],
@@ -403,7 +413,9 @@ export const useAcademiaStore = create<AcademiaState>((set) => ({
       term_name: updates.term,
       start_date: updates.startDate,
       end_date: updates.endDate,
-      status: updates.status,
+      status: updates.status
+        ? academicYearStatusToApi(updates.status)
+        : undefined,
     });
     set((state) => ({
       structures: state.structures.map((structure) =>
@@ -436,16 +448,10 @@ export const useAcademiaStore = create<AcademiaState>((set) => ({
     }));
   },
   updateCourseAssignment: async (id, updates) => {
+    // Only `semester` is updatable on an existing course-semester assignment
     const response = await api.put(
       `/academic-structure/course-semester-assignments/${id}`,
-      {
-        course_id: updates.courseId ? Number(updates.courseId) : undefined,
-        faculty_id: updates.facultyId ? Number(updates.facultyId) : undefined,
-        department_id: updates.departmentId
-          ? Number(updates.departmentId)
-          : undefined,
-        semester: updates.semester,
-      },
+      { semester: Number(updates.semester) },
     );
     set((state) => ({
       courseAssignments: state.courseAssignments.map((assignment) =>

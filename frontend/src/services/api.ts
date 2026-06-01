@@ -4,6 +4,7 @@ import axios, {
   type AxiosRequestConfig,
 } from "axios";
 import { useAuthStore } from "@/store/useAuthStore";
+import { toast } from "@/store/useToastStore";
 
 const BASE_URL = import.meta.env.VITE_API_URL || "/api";
 
@@ -89,11 +90,15 @@ api.interceptors.response.use(
       }
     }
 
-    // Handle forbidden globally
+    // Handle forbidden — show a non-blocking toast instead of alert()
     if (status === 403) {
-      // Optional: show toast / redirect
-      // For now, we use a simple alert to keep UX consistent
-      alert("You do not have permission to perform this action.");
+      const data = error.response?.data as any;
+      // Backend wraps errors as { error: { message: "..." } }; fall back to legacy { detail: "..." }
+      const message =
+        (typeof data?.error?.message === "string" ? data.error.message : null) ??
+        (typeof data?.detail === "string" ? data.detail : null) ??
+        "You don't have permission to perform this action.";
+      toast.error(message);
     }
 
     return Promise.reject(error);

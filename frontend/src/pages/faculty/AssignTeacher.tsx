@@ -25,6 +25,7 @@ export default function AssignTeacher() {
     assignments,
     courses,
     isLoading,
+    error,
     fetchData,
     openModal,
     deleteAssignment,
@@ -76,6 +77,12 @@ export default function AssignTeacher() {
           Assign Teacher
         </Button>
       </div>
+
+      {error ? (
+        <div className="rounded-2xl border border-rose-200 dark:border-rose-500/20 bg-rose-50 dark:bg-rose-500/10 p-4 text-sm text-rose-700 dark:text-rose-200">
+          {error}
+        </div>
+      ) : null}
 
       <Card>
         <CardContent className="p-0">

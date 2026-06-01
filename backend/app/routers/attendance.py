@@ -1,17 +1,22 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Body, Depends, HTTPException, Query
-from sqlalchemy import or_
+from fastapi import APIRouter, Depends, HTTPException, Query
+from pydantic import BaseModel
+from sqlalchemy import or_, false as sa_false
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.core.rate_limit import rate_limit_dependency
-from app.core.security import require_roles
+from app.core.security import require_roles, get_current_user
 from app.db.faculty_scope import enforce_faculty_scope, get_optional_faculty_scope_context
-from app.db.models import AttendanceRecord, AttendanceSession, AttendanceStatus, Course, Student, Faculty, Department
+from app.db.models import AttendanceRecord, AttendanceSession, AttendanceStatus, Course, CourseAssignment, Student, Faculty, Department, Teacher, User
 from app.db.role_scoped import get_role_scoped_db
 from app.schemas.attendance import AttendanceFrameRequest
 from app.services.attendance_service import attendance_service
+
+
+class UpdateAttendanceStatusRequest(BaseModel):
+    status: str
 
 
 router = APIRouter(prefix="/attendance", tags=["attendance"])
@@ -30,7 +35,7 @@ def _session_faculty_id(db: Session, session_id: int) -> int:
 @router.post(
     "/frame",
     dependencies=[
-        Depends(require_roles("TEACHER", "FACULTY")),
+        Depends(require_roles("SUPER_ADMIN", "ACADEMIA", "FACULTY_ADMIN", "TEACHER")),
         Depends(rate_limit_dependency(settings.frame_rate_limit_requests, settings.frame_rate_limit_window_seconds)),
     ],
     responses={
@@ -58,8 +63,10 @@ def list_attendance_records(
     faculty: str | None = Query(default=None),
     department: str | None = Query(default=None),
     course: str | None = Query(default=None),
+    course_id: int | None = Query(default=None),
     status: str | None = Query(default=None),
     db: Session = Depends(get_role_scoped_db),
+    current_user: User = Depends(get_current_user),
     faculty_scope = Depends(get_optional_faculty_scope_context),
 ):
     query = (
@@ -69,6 +76,22 @@ def list_attendance_records(
     )
     if faculty_scope is not None:
         query = query.filter(Course.faculty_id == faculty_scope.faculty_id)
+
+    # Scope TEACHER: only show records from sessions THIS teacher personally managed.
+    # Admin or another teacher may have run sessions on the same course — exclude those.
+    role_names = {role.name for role in current_user.roles}
+    if "TEACHER" in role_names and not {"SUPER_ADMIN", "ACADEMIA", "FACULTY_ADMIN", "HR", "ADMISSIONS", "ADMIN"}.intersection(role_names):
+        teacher = db.query(Teacher).filter(Teacher.user_id == current_user.id).first()
+        if teacher:
+            # Join to the session and filter by the session's teacher_id
+            query = (
+                query
+                .join(AttendanceSession, AttendanceSession.id == AttendanceRecord.session_id)
+                .filter(AttendanceSession.teacher_id == teacher.id)
+            )
+        else:
+            # No Teacher record linked to this user — return nothing
+            query = query.filter(sa_false())
 
     if search:
         pattern = f"%{search.strip()}%"
@@ -103,7 +126,9 @@ def list_attendance_records(
             )
         )
 
-    if course and course.lower() != "all":
+    if course_id is not None:
+        query = query.filter(AttendanceRecord.course_id == course_id)
+    elif course and course.lower() != "all":
         pattern = f"%{course.strip()}%"
         query = query.filter(
             or_(
@@ -136,6 +161,7 @@ def list_attendance_records(
         data.append(
             {
                 "id": record.id,
+                "courseId": course_obj.id,
                 "studentName": student.full_name,
                 "course": course_obj.title,
                 "sessionId": f"SES-{record.session_id}",
@@ -158,7 +184,7 @@ def list_attendance_records(
 )
 def update_attendance_record_status(
     record_id: int,
-    status: str = Body(..., description="New attendance status"),
+    body: UpdateAttendanceStatusRequest,
     db: Session = Depends(get_role_scoped_db),
     faculty_scope = Depends(get_optional_faculty_scope_context),
 ):
@@ -172,22 +198,14 @@ def update_attendance_record_status(
             raise HTTPException(status_code=404, detail="Course not found")
         enforce_faculty_scope(course.faculty_id, faculty_scope)
 
-    normalized_status = status.strip().upper()
-    if normalized_status == "PRESENT":
-        status_filter = AttendanceStatus.PRESENT
-    elif normalized_status == "LATE":
-        status_filter = AttendanceStatus.LATE
-    elif normalized_status == "ABSENT":
-        status_filter = AttendanceStatus.ABSENT
-    elif normalized_status == "EXCUSED":
-        status_filter = AttendanceStatus.EXCUSED
-    else:
-        raise HTTPException(status_code=422, detail="Invalid attendance status")
+    normalized_status = body.status.strip().upper()
+    if normalized_status != "EXCUSED":
+        raise HTTPException(status_code=400, detail="Faculty users can only change Absent records to Excused")
 
-    if status_filter == AttendanceStatus.EXCUSED and record.status != AttendanceStatus.ABSENT:
+    if record.status != AttendanceStatus.ABSENT:
         raise HTTPException(status_code=400, detail="Only absent records can be marked as excused")
 
-    record.status = status_filter
+    record.status = AttendanceStatus.EXCUSED
     db.add(record)
     db.commit()
     db.refresh(record)

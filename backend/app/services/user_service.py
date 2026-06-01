@@ -73,9 +73,11 @@ def create_user(
         teacher.user_id = user.id
         db.add(teacher)
 
-    # Validate student_id exists if provided (no direct user link on Student model)
+    # If a student_id is provided, store the FK on the user so attendance/schedule lookups work
     if student_id is not None:
         student = db.query(Student).filter(Student.id == int(student_id)).first()
         if student is None:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="student_id not found")
+        user.student_id = student.id
+
     return user

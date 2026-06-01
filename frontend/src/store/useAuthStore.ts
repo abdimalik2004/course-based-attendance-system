@@ -17,6 +17,12 @@ interface User {
   username: string;
   email?: string;
   role?: Role;
+  facultyId?: string | number | null;
+  teacherId?: string | number | null;
+  studentId?: number | null;
+  studentNumber?: string | null;
+  profile_image_url?: string | null;
+  full_name?: string | null;
 }
 
 interface AuthState {
@@ -28,6 +34,7 @@ interface AuthState {
   clearTokens: () => void;
   login: (user: User, access?: string) => void;
   logout: () => void;
+  updateProfileImage: (url: string | null) => void;
 }
 
 export const useAuthStore = create<AuthState>()(
@@ -52,6 +59,12 @@ export const useAuthStore = create<AuthState>()(
           id: user?.id,
           username: user?.username,
           email: user?.email,
+          facultyId: user?.faculty_id ?? user?.facultyId ?? null,
+          teacherId: user?.teacher_id ?? user?.teacherId ?? null,
+          studentId: user?.student_id ?? user?.studentId ?? null,
+          studentNumber: user?.student_number ?? user?.studentNumber ?? null,
+          profile_image_url: user?.profile_image_url ?? null,
+          full_name: user?.full_name ?? null,
           role: primaryRole
             ? (primaryRole.toString().toUpperCase() as Role)
             : null,
@@ -68,6 +81,10 @@ export const useAuthStore = create<AuthState>()(
           isAuthenticated: false,
           accessToken: null,
         }),
+      updateProfileImage: (url: string | null) =>
+        set((state) => ({
+          user: state.user ? { ...state.user, profile_image_url: url } : state.user,
+        })),
     }),
     {
       name: "heegan-auth",

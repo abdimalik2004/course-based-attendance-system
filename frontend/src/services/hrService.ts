@@ -2,6 +2,7 @@ import { api } from "./api";
 
 export interface Teacher {
   id: string;
+  teacherNumber: string;
   fullName: string;
   facultyId: string;
   departmentId: string;
@@ -28,6 +29,7 @@ export const hrService = {
     });
     return (response.data?.items ?? []).map((teacher: any) => ({
       id: String(teacher.id),
+      teacherNumber: teacher.teacher_number ?? "",
       fullName: teacher.full_name ?? teacher.name ?? "",
       facultyId: String(teacher.faculty_id ?? ""),
       departmentId: String(teacher.department_id ?? ""),
@@ -50,6 +52,7 @@ export const hrService = {
     const teacher = response.data;
     return {
       id: String(teacher.id),
+      teacherNumber: teacher.teacher_number ?? "",
       fullName: teacher.full_name ?? teacher.name ?? data.fullName,
       facultyId: String(teacher.faculty_id ?? data.facultyId),
       departmentId: String(teacher.department_id ?? data.departmentId),
@@ -78,6 +81,7 @@ export const hrService = {
     const teacher = response.data;
     return {
       id: String(teacher.id),
+      teacherNumber: teacher.teacher_number ?? "",
       fullName: teacher.full_name ?? teacher.name ?? data.fullName ?? "",
       facultyId: String(teacher.faculty_id ?? data.facultyId ?? ""),
       departmentId: String(teacher.department_id ?? data.departmentId ?? ""),

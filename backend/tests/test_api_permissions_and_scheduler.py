@@ -1251,7 +1251,8 @@ def test_teacher_can_start_and_end_session(client, db_session):
     assert start_response.status_code == 200
     started = start_response.json()
     assert started["course_id"] == course.id
-    assert started["instructor_id"] == user.id
+    assert started["teacher_id"] == teacher.id
+    assert started["admin_id"] is None
     assert started["status"] == "ACTIVE"
     assert started["end_time"] is None
 

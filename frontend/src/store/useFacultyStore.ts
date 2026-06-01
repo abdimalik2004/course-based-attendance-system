@@ -1,6 +1,5 @@
 import { create } from "zustand";
-import { api } from "@/services/api";
-import { courseService } from "@/services/courseService";
+import { facultyService } from "@/services/facultyService";
 
 export interface TeacherAssignment {
   id: string;
@@ -62,6 +61,7 @@ interface FacultyState {
   };
 
   isLoading: boolean;
+  error: string | null;
 
   assignModal: ModalState<TeacherAssignment>;
   scheduleModal: ModalState<CourseSchedule>;
@@ -110,17 +110,25 @@ const mapAssignment = (assignment: any): TeacherAssignment => ({
   createdAt: assignment.created_at ?? new Date().toISOString(),
 });
 
+// Normalize a time string from the backend ("HH:MM:SS") to "HH:MM" for HTML time inputs
+const normalizeTime = (t: string | null | undefined): string => {
+  if (!t) return "";
+  // If seconds are present (HH:MM:SS), strip them
+  const parts = t.split(":");
+  return parts.length >= 2 ? `${parts[0]}:${parts[1]}` : t;
+};
+
 const mapSchedule = (schedule: any): CourseSchedule => ({
   id: String(schedule.id),
   courseId: String(schedule.course_id),
   weekdays: Array.isArray(schedule.weekday) ? schedule.weekday.map(String) : [],
-  startTime: schedule.start_time,
-  endTime: schedule.end_time,
+  startTime: normalizeTime(schedule.start_time),
+  endTime: normalizeTime(schedule.end_time),
   gracePeriod: schedule.grace_period_minutes ?? 0,
   createdAt: schedule.created_at ?? new Date().toISOString(),
 });
 
-export const useFacultyStore = create<FacultyState>((set) => ({
+export const useFacultyStore = create<FacultyState>((set, get) => ({
   courses: [],
   assignments: [],
   schedules: [],
@@ -134,6 +142,7 @@ export const useFacultyStore = create<FacultyState>((set) => ({
   },
 
   isLoading: false,
+  error: null,
 
   assignModal: { ...defaultModalState },
   scheduleModal: { ...defaultModalState },
@@ -152,115 +161,140 @@ export const useFacultyStore = create<FacultyState>((set) => ({
     })),
 
   fetchData: async () => {
-    set({ isLoading: true });
+    set({ isLoading: true, error: null });
     try {
-      const [
-        coursesRes,
-        assignmentsRes,
-        schedulesRes,
-        studentsRes,
-        teachersRes,
-        departmentsRes,
-        classesRes,
-      ] = await Promise.all([
-        api.get("/courses", { params: { skip: 0, limit: 200 } }),
-        courseService.listAssignments(),
-        api.get("/schedules", { params: { skip: 0, limit: 200 } }),
-        api.get("/students", { params: { skip: 0, limit: 1 } }),
-        api.get("/teachers", { params: { skip: 0, limit: 1 } }),
-        api.get("/departments", { params: { skip: 0, limit: 1 } }),
-        api.get("/classes", { params: { skip: 0, limit: 1 } }),
-      ]);
-
-      const schedules = schedulesRes.data?.items ?? [];
+      const [summary, coursesRes, assignmentsRes, schedulesRes] =
+        await Promise.all([
+          facultyService.getSummary(),
+          facultyService.getCourses(),
+          facultyService.listAssignments(),
+          facultyService.listSchedules(),
+        ]);
 
       set({
-        courses: (coursesRes.data?.items ?? []).map(mapCourse),
-        assignments: (assignmentsRes ?? []).map(mapAssignment),
-        schedules: schedules.map(mapSchedule),
+        courses: (coursesRes.items ?? []).map(mapCourse),
+        assignments: (assignmentsRes.items ?? []).map(mapAssignment),
+        schedules: (schedulesRes.items ?? []).map(mapSchedule),
         stats: {
-          totalStudents: studentsRes.data?.total ?? 0,
-          totalTeachers: teachersRes.data?.total ?? 0,
-          totalDepartments: departmentsRes.data?.total ?? 0,
-          totalClasses: classesRes.data?.total ?? 0,
-          totalCourses: coursesRes.data?.total ?? 0,
+          totalStudents: Number(summary.totalStudents ?? 0),
+          totalTeachers: Number(summary.totalTeachers ?? 0),
+          totalDepartments: Number(summary.totalDepartments ?? 0),
+          totalClasses: Number(summary.totalClasses ?? 0),
+          totalCourses: Number(summary.totalCourses ?? coursesRes.total ?? 0),
         },
         isLoading: false,
       });
-    } catch {
-      set({ isLoading: false });
+    } catch (error) {
+      set({
+        isLoading: false,
+        error:
+          error instanceof Error
+            ? error.message
+            : "Failed to load faculty data",
+      });
     }
   },
 
   addAssignment: async (data) => {
-    const assignment = await courseService.assignTeacher({
-      course_id: Number(data.courseId),
-      teacher_id: Number(data.teacherId),
-      is_primary: data.status !== "inactive",
-    });
-    set((state) => ({
-      assignments: [
-        ...state.assignments,
-        {
-          id: String(assignment?.id),
-          courseId: data.courseId,
-          teacherId: data.teacherId,
-          isPrimary: data.status !== "inactive",
-          createdAt: new Date().toISOString(),
-        },
-      ],
-    }));
+    try {
+      await facultyService.createAssignment({
+        course_id: Number(data.courseId),
+        teacher_id: Number(data.teacherId),
+        is_primary: data.status !== "inactive",
+      });
+      await get().fetchData();
+    } catch (error) {
+      set({
+        error:
+          error instanceof Error
+            ? error.message
+            : "Failed to create assignment",
+      });
+      throw error;
+    }
   },
   updateAssignment: async (id, data) => {
-    const assignment = await courseService.updateAssignment(id, {
-      teacher_id: data.teacherId ? Number(data.teacherId) : undefined,
-      is_primary:
-        data.status !== undefined ? data.status !== "inactive" : undefined,
-    });
-    set((state) => ({
-      assignments: state.assignments.map((a) =>
-        a.id === id ? mapAssignment(assignment) : a,
-      ),
-    }));
+    try {
+      await facultyService.updateAssignment(id, {
+        teacher_id: data.teacherId ? Number(data.teacherId) : undefined,
+        is_primary:
+          data.status !== undefined ? data.status !== "inactive" : undefined,
+      });
+      await get().fetchData();
+    } catch (error) {
+      set({
+        error:
+          error instanceof Error
+            ? error.message
+            : "Failed to update assignment",
+      });
+      throw error;
+    }
   },
   deleteAssignment: async (id) => {
-    await courseService.deleteAssignment(id);
-    set((state) => ({
-      assignments: state.assignments.filter((a) => a.id !== id),
-    }));
+    try {
+      await facultyService.deleteAssignment(id);
+      await get().fetchData();
+    } catch (error) {
+      set({
+        error:
+          error instanceof Error
+            ? error.message
+            : "Failed to delete assignment",
+      });
+      throw error;
+    }
   },
 
   addSchedule: async (data) => {
-    const schedule = await api.post("/schedules", {
-      course_id: Number(data.courseId),
-      weekday: data.weekdays,
-      start_time: data.startTime,
-      end_time: data.endTime,
-      grace_period_minutes: Number(data.gracePeriod),
-    });
-    set((state) => ({
-      schedules: [...state.schedules, mapSchedule(schedule.data)],
-    }));
+    try {
+      console.log("STORE RECEIVED:", data);
+
+      await facultyService.createSchedule(data);
+
+      await get().fetchData();
+    } catch (error) {
+      set({
+        error:
+          error instanceof Error ? error.message : "Failed to create schedule",
+      });
+      throw error;
+    }
   },
   updateSchedule: async (id, data) => {
     const payload: Record<string, unknown> = {};
     if (data.courseId !== undefined) payload.course_id = Number(data.courseId);
     if (data.weekdays !== undefined) payload.weekday = data.weekdays;
-    if (data.startTime !== undefined) payload.start_time = data.startTime;
-    if (data.endTime !== undefined) payload.end_time = data.endTime;
+    // Ensure seconds are always included — backend expects "HH:MM:SS"
+    if (data.startTime !== undefined)
+      payload.start_time = data.startTime.length === 5 ? `${data.startTime}:00` : data.startTime;
+    if (data.endTime !== undefined)
+      payload.end_time = data.endTime.length === 5 ? `${data.endTime}:00` : data.endTime;
     if (data.gracePeriod !== undefined) {
       payload.grace_period_minutes = Number(data.gracePeriod);
     }
 
-    const schedule = await api.put(`/schedules/${id}`, payload);
-    set((state) => ({
-      schedules: state.schedules.map((s) =>
-        s.id === id ? mapSchedule(schedule.data) : s,
-      ),
-    }));
+    try {
+      await facultyService.updateSchedule(id, payload as any);
+      await get().fetchData();
+    } catch (error) {
+      set({
+        error:
+          error instanceof Error ? error.message : "Failed to update schedule",
+      });
+      throw error;
+    }
   },
   deleteSchedule: async (id) => {
-    await api.delete(`/schedules/${id}`);
-    set((state) => ({ schedules: state.schedules.filter((s) => s.id !== id) }));
+    try {
+      await facultyService.deleteSchedule(id);
+      await get().fetchData();
+    } catch (error) {
+      set({
+        error:
+          error instanceof Error ? error.message : "Failed to delete schedule",
+      });
+      throw error;
+    }
   },
 }));

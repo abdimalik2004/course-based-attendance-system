@@ -11,14 +11,19 @@ from app.db.faculty_scope import enforce_faculty_scope, get_optional_faculty_sco
 from app.db.models import (
     AttendanceRecord,
     AttendanceSession,
+    ClassBatch,
     AttendanceStatus,
     Course,
     Student,
+    StudentAdmissionStatus,
     Teacher,
     Faculty,
     Department,
 )
 from app.db.role_scoped import get_role_scoped_db
+from app.core.security import get_current_user
+from app.db.models import User
+from app.utils.activity_logger import log_activity
 
 
 router = APIRouter(prefix="/reports", tags=["reports"])
@@ -38,21 +43,52 @@ def _course_faculty_id(db: Session, course_id: int) -> int:
 
 
 @router.get("/summary", dependencies=[report_access_dependency])
-def report_summary(db: Session = Depends(get_role_scoped_db)):
-    total_students = db.query(func.count(Student.id)).scalar() or 0
-    total_teachers = db.query(func.count(Teacher.id)).scalar() or 0
+def report_summary(
+    db: Session = Depends(get_role_scoped_db),
+    faculty_scope = Depends(get_optional_faculty_scope_context),
+    current_user: User = Depends(get_current_user),
+):
+    student_query = db.query(Student)
+    teacher_query = db.query(Teacher)
+    department_query = db.query(Department)
+    class_query = db.query(ClassBatch)
+    course_query = db.query(Course)
+    attendance_query = db.query(AttendanceRecord)
+
+    if faculty_scope is not None:
+        student_query = student_query.filter(Student.faculty_id == faculty_scope.faculty_id)
+        teacher_query = teacher_query.filter(Teacher.faculty_id == faculty_scope.faculty_id)
+        department_query = department_query.filter(Department.faculty_id == faculty_scope.faculty_id)
+        class_query = class_query.filter(ClassBatch.faculty_id == faculty_scope.faculty_id)
+        course_query = course_query.filter(Course.faculty_id == faculty_scope.faculty_id)
+        attendance_query = attendance_query.join(Course, Course.id == AttendanceRecord.course_id).filter(
+            Course.faculty_id == faculty_scope.faculty_id
+        )
+
+    total_students = student_query.count()
+    total_teachers = teacher_query.count()
+    total_departments = department_query.count()
+    total_classes = class_query.count()
+    total_courses = course_query.count()
     total_faculties = db.query(func.count(Faculty.id)).scalar() or 0
-    attendance_total = db.query(func.count(AttendanceRecord.id)).scalar() or 0
-    attendance_present = (
-        db.query(func.count(AttendanceRecord.id))
-        .filter(AttendanceRecord.status.in_([AttendanceStatus.PRESENT, AttendanceStatus.LATE]))
-        .scalar() or 0
-    )
+    attendance_total = attendance_query.count()
+    attendance_present = attendance_query.filter(
+        AttendanceRecord.status.in_([AttendanceStatus.PRESENT, AttendanceStatus.LATE])
+    ).count()
     attendance_rate = round((attendance_present / attendance_total) * 100, 1) if attendance_total else 0.0
+
+    log_activity(
+        action="Report Generated - System Report",
+        user=current_user,
+        db=db,
+    )
 
     return {
         "totalStudents": total_students,
         "totalTeachers": total_teachers,
+        "totalDepartments": total_departments,
+        "totalClasses": total_classes,
+        "totalCourses": total_courses,
         "totalFaculties": total_faculties,
         "totalAttendanceRecords": attendance_total,
         "attendanceRate": attendance_rate,
@@ -68,6 +104,8 @@ def absence_ranking(
     faculty: str | None = None,
     department: str | None = None,
     course: str | None = None,
+    start_date: date | None = None,
+    end_date: date | None = None,
     db: Session = Depends(get_role_scoped_db),
 ):
     query = (
@@ -76,6 +114,11 @@ def absence_ranking(
         .join(Course, Course.id == AttendanceRecord.course_id)
         .join(AttendanceSession, AttendanceSession.id == AttendanceRecord.session_id)
     )
+
+    if start_date:
+        query = query.filter(AttendanceSession.session_date >= start_date)
+    if end_date:
+        query = query.filter(AttendanceSession.session_date <= end_date)
 
     if search:
         pattern = f"%{search.strip()}%"
@@ -160,11 +203,11 @@ def absence_ranking(
                 "totalAbsences": item["totalAbsences"],
                 "attendancePercentage": attendance_percentage,
                 "status": (
-                    "High"
-                    if item["totalAbsences"] >= 10
-                    else "Medium"
-                    if item["totalAbsences"] >= 5
-                    else "Low"
+                    "Low"
+                    if attendance_percentage < 50
+                    else "Normal"
+                    if attendance_percentage < 75
+                    else "Good"
                 ),
             }
         )

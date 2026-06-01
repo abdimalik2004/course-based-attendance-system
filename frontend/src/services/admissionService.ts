@@ -151,6 +151,43 @@ export const admissionService = {
     return response.data;
   },
 
+  uploadStudentCapturedImages: async (payload: {
+    faculty_code: string;
+    student_number: string;
+    images: string[];
+    overwrite?: boolean;
+  }): Promise<{ saved: number; job_id?: string; student_number: string }> => {
+    const response = await api.post<{
+      saved: number;
+      job_id?: string;
+      student_number: string;
+    }>(`/students/capture`, payload);
+    return response.data;
+  },
+
+  getTrainingJob: async (
+    jobId: string,
+  ): Promise<{
+    id: string;
+    status: "queued" | "running" | "succeeded" | "failed";
+    meta?: Record<string, unknown>;
+    created_at?: string;
+    started_at?: string;
+    finished_at?: string;
+    error?: string;
+  }> => {
+    const response = await api.get(`/training/${jobId}`);
+    return response.data;
+  },
+
+  detectFaces: async (imageDataUrl: string): Promise<{ face_count: number; embedding: number[] | null }> => {
+    const response = await api.post<{ face_count: number; embedding: number[] | null }>(
+      "/students/detect",
+      { image: imageDataUrl },
+    );
+    return response.data;
+  },
+
   listRecentStudents: async (params?: { skip?: number; limit?: number }) => {
     const data = await admissionService.listStudents(params);
     return {

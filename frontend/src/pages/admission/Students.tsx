@@ -27,6 +27,7 @@ import {
 import { Select } from "@/components/ui/Select";
 import { useAdmissionStore } from "@/store/useAdmissionStore";
 import type { Student } from "@/store/useAdmissionStore";
+import admissionService from "@/services/admissionService";
 import { ViewButton } from "@/components/ui/ViewButton";
 import { ViewModal } from "@/components/ui/ViewModal";
 
@@ -57,12 +58,18 @@ export default function Students() {
     searchParams.get("status") || "All",
   );
 
+  // Sync status filter when URL params change (e.g. clicking stat cards on dashboard)
+  useEffect(() => {
+    setStatusFilter(searchParams.get("status") || "All");
+  }, [searchParams]);
+
   // Modal states
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [isViewModalOpen, setIsViewModalOpen] = useState(false);
   const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
   const [selectedStudent, setSelectedStudent] = useState<Student | null>(null);
+  const [viewImageCount, setViewImageCount] = useState<number | null>(null);
 
   const {
     register,
@@ -144,7 +151,12 @@ export default function Students() {
 
   const openViewModal = (student: Student) => {
     setSelectedStudent(student);
+    setViewImageCount(null); // reset while loading
     setIsViewModalOpen(true);
+    admissionService
+      .getStudentCapturedImages(Number(student.id))
+      .then((res) => setViewImageCount(res.image_count))
+      .catch(() => setViewImageCount(0));
   };
 
   const openDeleteModal = (student: Student) => {
@@ -166,6 +178,7 @@ export default function Students() {
     setIsViewModalOpen(false);
     setIsDeleteModalOpen(false);
     setSelectedStudent(null);
+    setViewImageCount(null);
     reset();
   };
 
@@ -497,9 +510,11 @@ export default function Students() {
                 {
                   label: "Images Captured",
                   value:
-                    selectedStudent.imagesCaptured !== undefined
-                      ? `${selectedStudent.imagesCaptured} Images`
-                      : "None",
+                    viewImageCount === null
+                      ? "Loading..."
+                      : viewImageCount > 0
+                        ? `${viewImageCount} image${viewImageCount !== 1 ? "s" : ""}`
+                        : "None",
                 },
                 {
                   label: "Status",

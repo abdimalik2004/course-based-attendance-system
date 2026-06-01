@@ -74,6 +74,7 @@ class AppConfig:
     quality_max_brightness: float
     confidence_threshold: float
     embedding_min_similarity: float
+    embedding_margin_gap: float
     min_face_size: int
     required_matches: int
     process_every_n_frames: int
@@ -93,6 +94,8 @@ class AppConfig:
     capture_pad_right: float
     log_dir: Path
     log_file: Path
+    train_max_images_per_student: int
+    train_batch_size: int
 
 
 def load_config(base_dir=None):
@@ -151,6 +154,7 @@ def load_config(base_dir=None):
         quality_max_brightness=_env_float("ATTENDANCE_QUALITY_MAX_BRIGHTNESS", 210.0),
         confidence_threshold=_env_float("ATTENDANCE_CONFIDENCE_THRESHOLD", 60.0),
         embedding_min_similarity=_env_float("ATTENDANCE_EMBEDDING_MIN_SIMILARITY", 0.6),
+        embedding_margin_gap=_env_float("ATTENDANCE_EMBEDDING_MARGIN_GAP", 0.0),
         min_face_size=_env_int("ATTENDANCE_MIN_FACE_SIZE", 60),
         required_matches=_env_int("ATTENDANCE_REQUIRED_MATCHES", 5),
         process_every_n_frames=_env_int("ATTENDANCE_PROCESS_EVERY_N_FRAMES", 2),
@@ -170,4 +174,6 @@ def load_config(base_dir=None):
         capture_pad_right=_env_float("ATTENDANCE_CAPTURE_PAD_RIGHT", 0.15),
         log_dir=Path(os.getenv("ATTENDANCE_LOG_DIR", base_dir / "logs")),
         log_file=Path(os.getenv("ATTENDANCE_LOG_FILE", base_dir / "logs" / "attendance.log")),
+        train_max_images_per_student=_env_int("ATTENDANCE_TRAIN_MAX_IMAGES_PER_STUDENT", 20),
+        train_batch_size=_env_int("ATTENDANCE_TRAIN_BATCH_SIZE", 32),
     )

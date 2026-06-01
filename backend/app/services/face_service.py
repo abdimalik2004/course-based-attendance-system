@@ -74,6 +74,71 @@ class FaceService:
         if self._recognizer is None or self._model_signature != current_signature:
             self._load_models_locked()
 
+    def _ensure_detect_recognizer(self):
+        """
+        Return a recognizer suitable for detection + embedding extraction only.
+        Deliberately skips load_model() so it works even before any student is trained.
+        Uses a module-level cache so we don't re-initialise on every call.
+        """
+        if getattr(self, "_detect_recognizer", None) is not None:
+            return self._detect_recognizer
+        try:
+            from face_recognition.embedding_recognizer import FaceEmbeddingRecognizer  # noqa: WPS433
+            from utils.config import load_config  # noqa: WPS433
+
+            cfg = load_config(base_dir=_ROOT)
+            rec = FaceEmbeddingRecognizer(cfg)
+            # Do NOT call rec.load_model() — we only need the detector + facenet backbone
+            self._detect_recognizer = rec
+        except Exception:
+            self._detect_recognizer = None
+        return self._detect_recognizer
+
+    def detect_faces(self, frame) -> dict:
+        """
+        Detect faces in a frame and extract an embedding for the largest face.
+        Works without trained student data — used during image capture for live
+        face-count validation and person-identity tracking.
+
+        Returns:
+            {
+                "face_count": int,
+                "embedding": list[float] | None  # 512-d unit vector of the largest face
+            }
+        """
+        import numpy as np
+        import torch
+
+        # Prefer the main recognizer (already loaded from attendance sessions)
+        with self._lock:
+            recognizer = self._recognizer
+
+        # Fallback to the detect-only recognizer when no model is trained yet
+        if recognizer is None:
+            recognizer = self._ensure_detect_recognizer()
+
+        if recognizer is None:
+            return {"face_count": 0, "embedding": None}
+
+        try:
+            _, detections = recognizer.detector.detect_with_keypoints(frame)
+            face_count = len(detections)
+
+            embedding = None
+            if face_count > 0:
+                # Use the largest face (most likely the main subject)
+                largest = max(detections, key=lambda d: d["bbox"][2] * d["bbox"][3])
+                face_tensor = recognizer._extract_face_tensor(frame, largest["bbox"])
+                if face_tensor is not None:
+                    with torch.no_grad():
+                        emb = recognizer.model(face_tensor.to(recognizer.device)).cpu().numpy()[0]
+                    emb = emb / (np.linalg.norm(emb) + 1e-12)
+                    embedding = emb.tolist()
+
+            return {"face_count": face_count, "embedding": embedding}
+        except Exception:
+            return {"face_count": 0, "embedding": None}
+
     def recognize_student(self, frame):
         with self._lock:
             self._ensure_current_models()
@@ -86,15 +151,24 @@ class FaceService:
         results = recognizer.recognize_frame(frame)
         duration = time.perf_counter() - start
 
+        # No face at all detected in the frame
+        if not results:
+            return {"matched": False, "reason": "no_face", "processing_time": duration}
+
         known = [r for r in results if r.get("is_known")]
         if not known:
-            return {"matched": False, "processing_time": duration}
+            # At least one face was detected by the detector but it was not matched
+            # to any enrolled student. This commonly happens when the face is partially
+            # occluded (mask, sunglasses, hand over face).
+            return {"matched": False, "reason": "not_recognized", "processing_time": duration}
 
         best = max(known, key=lambda x: x.get("confidence", 0.0))
         if duration > settings.face_timeout_seconds:
             return {"matched": False, "reason": "timeout", "processing_time": duration}
 
         if best["confidence"] < settings.face_confidence_threshold:
+            # Face matched but confidence too low — often means the face is partially
+            # occluded or the image quality is too poor for a reliable embedding.
             return {
                 "matched": False,
                 "reason": "below_threshold",

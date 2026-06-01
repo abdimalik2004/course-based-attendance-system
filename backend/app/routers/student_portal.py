@@ -3,7 +3,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
-from app.core.security import get_current_user
+from app.core.security import get_current_user, require_roles
 from app.db.models import User
 from app.db.role_scoped import get_role_scoped_db
 from app.schemas.student_portal import AttendanceCreate, AttendanceResponse, ScheduleCreate, ScheduleResponse
@@ -12,6 +12,40 @@ from app.services.student_portal_service import student_portal_service
 
 router = APIRouter(tags=["student-portal"])
 
+_STUDENT_ALLOWED_ROLES = ("STUDENT", "SUPER_ADMIN", "ACADEMIA", "FACULTY", "FACULTY_ADMIN", "ADMISSIONS", "TEACHER")
+
+
+# ------------------------------------------------------------------
+# /me/ endpoints — live data for the currently logged-in student
+# ------------------------------------------------------------------
+
+@router.get(
+    "/student-portal/me/attendance",
+    dependencies=[Depends(require_roles(*_STUDENT_ALLOWED_ROLES))],
+)
+async def get_my_attendance(
+    db: Session = Depends(get_role_scoped_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Return per-course attendance summary for the logged-in student."""
+    return student_portal_service.get_my_attendance(db, current_user)
+
+
+@router.get(
+    "/student-portal/me/schedule",
+    dependencies=[Depends(require_roles(*_STUDENT_ALLOWED_ROLES))],
+)
+async def get_my_schedule(
+    db: Session = Depends(get_role_scoped_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Return the class schedule for the logged-in student."""
+    return student_portal_service.get_my_schedule(db, current_user)
+
+
+# ------------------------------------------------------------------
+# Legacy ID-scoped helpers (kept for backward compatibility)
+# ------------------------------------------------------------------
 
 def _is_staff(user: User) -> bool:
     staff_roles = {"SUPER_ADMIN", "ACADEMIA", "FACULTY", "FACULTY_ADMIN", "ADMISSIONS", "TEACHER"}

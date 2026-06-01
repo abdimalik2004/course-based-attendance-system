@@ -1,51 +1,111 @@
-import { useState, useRef } from "react";
-import { motion } from "framer-motion";
-import { Camera, X } from "lucide-react";
+import { useState, useRef, useEffect } from "react";
+import { Camera, AlertCircle, CheckCircle } from "lucide-react";
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
 import { Modal } from "@/components/ui/Modal";
 import { useAuthStore } from "@/store/useAuthStore";
 import { useUIStore } from "@/store/useUIStore";
-import { fileService } from "@/services/fileService";
+import { api } from "@/services/api";
+
+const API_URL = import.meta.env.VITE_API_URL ?? "";
+
+function resolveUrl(url: string | null | undefined): string | null {
+  if (!url) return null;
+  return url.startsWith("http") ? url : `${API_URL}${url}`;
+}
 
 export function EditProfileModal() {
-  const { user } = useAuthStore();
+  const { user, updateProfileImage, login } = useAuthStore();
   const { isEditProfileOpen, closeEditProfile } = useUIStore();
+
+  const [username, setUsername] = useState("");
+  const [email, setEmail] = useState("");
   const [isSaving, setIsSaving] = useState(false);
-  const [profileImage, setProfileImage] = useState<string | null>(null);
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [error, setError] = useState("");
+  const [success, setSuccess] = useState("");
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (file) {
-      const reader = new FileReader();
-      reader.onloadend = () => {
-        setProfileImage(reader.result as string);
-      };
-      reader.readAsDataURL(file);
+  // Sync fields whenever the modal opens or user changes
+  useEffect(() => {
+    if (isEditProfileOpen && user) {
+      setUsername(user.username ?? "");
+      setEmail(user.email ?? "");
+      setPreviewUrl(resolveUrl(user.profile_image_url));
+      setError("");
+      setSuccess("");
     }
+  }, [isEditProfileOpen, user]);
+
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onloadend = () => setPreviewUrl(reader.result as string);
+    reader.readAsDataURL(file);
+    setError("");
+    setSuccess("");
   };
 
   const handleSave = async () => {
     setIsSaving(true);
+    setError("");
+    setSuccess("");
     try {
-      if (
-        fileInputRef.current?.files &&
-        fileInputRef.current.files.length > 0
-      ) {
+      let changed = false;
+
+      // Upload new profile picture if selected
+      if (fileInputRef.current?.files?.length) {
         const file = fileInputRef.current.files[0];
-        await fileService.uploadProfileImage(file);
+        const formData = new FormData();
+        formData.append("file", file);
+        const res = await api.post("/users/me/profile-image", formData, {
+          headers: { "Content-Type": "multipart/form-data" },
+        });
+        const newUrl: string = res.data.profile_image_url;
+        updateProfileImage(newUrl);
+        setPreviewUrl(resolveUrl(newUrl));
+        if (fileInputRef.current) fileInputRef.current.value = "";
+        changed = true;
       }
-      closeEditProfile();
-    } catch (err) {
-      console.error("Failed to upload profile image", err);
-      alert("Failed to upload profile image.");
+
+      // Save username / email changes if they differ
+      const trimmedUsername = username.trim();
+      const trimmedEmail = email.trim();
+      const usernameChanged = trimmedUsername && trimmedUsername !== user?.username;
+      const emailChanged = trimmedEmail !== (user?.email ?? "");
+
+      if (usernameChanged || emailChanged) {
+        const payload: Record<string, string> = {};
+        if (usernameChanged) payload.username = trimmedUsername;
+        if (emailChanged) payload.email = trimmedEmail;
+        const res = await api.patch("/users/me", payload);
+        // Re-sync auth store with returned user data
+        login(res.data);
+        changed = true;
+      }
+
+      if (changed) {
+        setSuccess("Profile updated successfully.");
+        setTimeout(() => closeEditProfile(), 900);
+      } else {
+        closeEditProfile();
+      }
+    } catch (err: any) {
+      const detail = err?.response?.data?.detail;
+      setError(
+        typeof detail === "string"
+          ? detail
+          : "Failed to save changes. Please try again.",
+      );
     } finally {
       setIsSaving(false);
     }
   };
 
   if (!user) return null;
+
+  const initial = user.username?.charAt(0)?.toUpperCase() ?? "?";
 
   return (
     <Modal
@@ -55,25 +115,28 @@ export function EditProfileModal() {
       className="max-w-md"
     >
       <div className="space-y-6 pt-4">
-        {/* Profile Photo Upload */}
-        <div className="flex flex-col items-center gap-4">
+        {/* Profile Photo */}
+        <div className="flex flex-col items-center gap-3">
           <div className="relative group">
             <div className="w-24 h-24 rounded-full overflow-hidden bg-gray-100 dark:bg-white/5 border-2 border-dashed border-gray-300 dark:border-white/20 flex items-center justify-center">
-              {profileImage ? (
+              {previewUrl ? (
                 <img
-                  src={profileImage}
+                  src={previewUrl}
                   alt="Profile"
                   className="w-full h-full object-cover"
+                  onError={() => setPreviewUrl(null)}
                 />
               ) : (
-                <span className="text-3xl text-gray-400 font-bold">
-                  {user.username?.charAt(0)?.toUpperCase()}
+                <span className="text-3xl text-gray-400 dark:text-gray-500 font-bold select-none">
+                  {initial}
                 </span>
               )}
             </div>
             <button
+              type="button"
               onClick={() => fileInputRef.current?.click()}
-              className="absolute bottom-0 right-0 p-2 bg-primary text-white rounded-full hover:bg-primary-hover shadow-lg transition-transform transform group-hover:scale-110"
+              className="absolute bottom-0 right-0 p-2 bg-primary text-white rounded-full hover:bg-primary/90 shadow-lg transition-transform transform group-hover:scale-110"
+              title="Change profile picture"
             >
               <Camera size={16} />
             </button>
@@ -82,63 +145,67 @@ export function EditProfileModal() {
               ref={fileInputRef}
               className="hidden"
               accept="image/*"
-              onChange={handleImageUpload}
+              onChange={handleFileChange}
             />
           </div>
           <p className="text-xs text-gray-500 dark:text-gray-400">
-            Click the camera icon to update photo
+            Click the camera icon to change your photo
           </p>
         </div>
 
-        {/* Form Fields (Read-Only) */}
+        {/* Status messages */}
+        {error && (
+          <div className="flex items-center gap-2 text-sm text-red-400">
+            <AlertCircle size={14} className="shrink-0" /> {error}
+          </div>
+        )}
+        {success && (
+          <div className="flex items-center gap-2 text-sm text-emerald-400">
+            <CheckCircle size={14} className="shrink-0" /> {success}
+          </div>
+        )}
+
+        {/* Editable fields */}
         <div className="space-y-4">
           <div className="space-y-1.5">
-            <label className="text-sm font-medium text-gray-700 dark:text-gray-300 ml-1">
-              Username / Name
+            <label className="text-sm font-medium text-gray-700 dark:text-gray-300">
+              Username
             </label>
             <Input
-              value={user.username}
-              readOnly
-              className="bg-gray-50 dark:bg-white/5 text-gray-500 cursor-not-allowed border-gray-200 dark:border-white/10"
+              value={username}
+              onChange={(e) => setUsername(e.target.value)}
+              placeholder="Username"
+              className="glass-input"
             />
           </div>
 
           <div className="space-y-1.5">
-            <label className="text-sm font-medium text-gray-700 dark:text-gray-300 ml-1">
+            <label className="text-sm font-medium text-gray-700 dark:text-gray-300">
               Email
             </label>
             <Input
-              value={`${user.username?.toLowerCase().replace(/\s+/g, "")}@heegan.edu.so`}
-              readOnly
-              className="bg-gray-50 dark:bg-white/5 text-gray-500 cursor-not-allowed border-gray-200 dark:border-white/10"
+              type="email"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              placeholder="Email address"
+              className="glass-input"
             />
           </div>
 
-          <div className="space-y-1.5">
-            <label className="text-sm font-medium text-gray-700 dark:text-gray-300 ml-1">
-              Password
-            </label>
-            <Input
-              type="password"
-              value="••••••••••••"
-              readOnly
-              className="bg-gray-50 dark:bg-white/5 text-gray-500 cursor-not-allowed border-gray-200 dark:border-white/10"
-            />
-            <p className="text-xs text-gray-500 dark:text-gray-400 ml-1">
-              Password changes are disabled in this demo.
-            </p>
+          {/* Role — read-only */}
+          <div className="flex justify-between items-center py-2 border-b border-gray-100 dark:border-white/5">
+            <span className="text-sm text-gray-500 dark:text-gray-400">Role</span>
+            <span className="text-sm font-medium text-gray-900 dark:text-white">
+              {user.role ?? "—"}
+            </span>
           </div>
         </div>
 
-        <div className="flex items-center justify-end gap-3 pt-4 border-t border-gray-100 dark:border-white/10">
-          <Button
-            variant="ghost"
-            onClick={closeEditProfile}
-            disabled={isSaving}
-          >
+        <div className="flex items-center justify-end gap-3 pt-2 border-t border-gray-100 dark:border-white/10">
+          <Button variant="ghost" onClick={closeEditProfile} disabled={isSaving}>
             Cancel
           </Button>
-          <Button onClick={handleSave} isLoading={isSaving}>
+          <Button onClick={handleSave} isLoading={isSaving} disabled={isSaving}>
             Save Changes
           </Button>
         </div>

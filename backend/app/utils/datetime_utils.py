@@ -6,17 +6,40 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from app.core.config import settings
 
 
-_FIXED_TIMEZONE_FALLBACKS = {
+_FIXED_TIMEZONE_FALLBACKS: dict[str, timezone] = {
     "Africa/Mogadishu": timezone(timedelta(hours=3)),
-    "EAT": timezone(timedelta(hours=3)),
+    "Africa/Nairobi":   timezone(timedelta(hours=3)),
+    "Africa/Djibouti":  timezone(timedelta(hours=3)),
+    "Asia/Riyadh":      timezone(timedelta(hours=3)),
+    "Asia/Kuwait":      timezone(timedelta(hours=3)),
+    "Asia/Aden":        timezone(timedelta(hours=3)),
+    "Asia/Dubai":       timezone(timedelta(hours=4)),
+    "Asia/Muscat":      timezone(timedelta(hours=4)),
+    "EAT":              timezone(timedelta(hours=3)),
 }
+
+# Runtime override — set at startup (from DB) and on PUT /settings.
+# Takes priority over the .env APP_TIMEZONE value.
+_runtime_timezone: str | None = None
+
+
+def set_runtime_timezone(tz_name: str) -> None:
+    """Override the active timezone at runtime (no restart needed)."""
+    global _runtime_timezone
+    _runtime_timezone = tz_name.strip() if tz_name else None
+
+
+def get_runtime_timezone() -> str:
+    """Return the currently active IANA timezone name."""
+    return _runtime_timezone or settings.app_timezone
 
 
 def _resolve_timezone():
+    tz_name = get_runtime_timezone()
     try:
-        return ZoneInfo(settings.app_timezone)
+        return ZoneInfo(tz_name)
     except ZoneInfoNotFoundError:
-        fallback = _FIXED_TIMEZONE_FALLBACKS.get(settings.app_timezone)
+        fallback = _FIXED_TIMEZONE_FALLBACKS.get(tz_name)
         if fallback is None:
             return timezone.utc
         return fallback

@@ -3,6 +3,7 @@ import { Menu, Bell, User, LogOut, UserCog, KeyRound, FileText } from 'lucide-re
 import { useSidebarStore } from '@/store/useSidebarStore';
 import { useAuthStore } from '@/store/useAuthStore';
 import { ThemeToggle } from '@/components/ui/ThemeToggle';
+import { UserAvatar } from '@/components/ui/UserAvatar';
 import { useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 
@@ -12,7 +13,7 @@ interface TopbarProps {
 
 export function Topbar({ title = 'Dashboard' }: TopbarProps) {
   const { toggleSidebar } = useSidebarStore();
-  const { logout } = useAuthStore();
+  const { logout, user } = useAuthStore();
   const navigate = useNavigate();
   
   const [dropdownOpen, setDropdownOpen] = useState(false);
@@ -110,17 +111,17 @@ export function Topbar({ title = 'Dashboard' }: TopbarProps) {
         </div>
 
         <div className="relative flex items-center gap-2 pl-2 sm:border-l sm:border-gray-200 sm:dark:border-white/10" ref={dropdownRef}>
-          <button 
+          <button
             onClick={() => {
               setDropdownOpen(!dropdownOpen);
               setNotificationOpen(false);
             }}
-            className="flex h-9 w-9 items-center justify-center rounded-full bg-gray-100 dark:bg-white/10 text-gray-600 dark:text-gray-300 transition-colors hover:bg-gray-200 dark:hover:bg-white/20 focus:outline-none focus:ring-2 focus:ring-primary/50"
+            className="flex h-9 w-9 items-center justify-center rounded-full bg-gray-100 dark:bg-white/10 text-gray-600 dark:text-gray-300 transition-colors hover:bg-gray-200 dark:hover:bg-white/20 focus:outline-none focus:ring-2 focus:ring-primary/50 overflow-hidden"
           >
-            <User size={18} />
+            <UserAvatar imageUrl={user?.profile_image_url} username={user?.username} size={36} />
           </button>
           <span className="hidden text-sm font-medium text-gray-700 dark:text-gray-200 sm:block">
-            Admin
+            {user?.username || 'Admin'}
           </span>
 
           {/* Profile Dropdown */}
@@ -134,8 +135,8 @@ export function Topbar({ title = 'Dashboard' }: TopbarProps) {
                 className="absolute right-0 top-12 w-48 rounded-xl border border-gray-200 dark:border-white/10 bg-white dark:bg-dark-card p-1.5 shadow-xl glass-card overflow-hidden z-50"
               >
                 <div className="px-3 py-2 border-b border-gray-100 dark:border-white/5 mb-1">
-                  <p className="text-sm font-medium text-gray-900 dark:text-white">Admin User</p>
-                  <p className="text-xs text-gray-500 dark:text-gray-400 truncate">admin@heegan.edu</p>
+                  <p className="text-sm font-medium text-gray-900 dark:text-white">{user?.username || 'Admin'}</p>
+                  <p className="text-xs text-gray-500 dark:text-gray-400 truncate">{user?.email || 'admin@heegan.edu'}</p>
                 </div>
                 
                 <button

@@ -87,3 +87,21 @@ def assert_department_schema_is_ready() -> None:
                 )
 
 
+def assert_activity_logs_schema_is_ready() -> None:
+    with engine.connect() as conn:
+        inspector = inspect(conn)
+        if "activity_logs" not in inspector.get_table_names():
+            raise RuntimeError(
+                "Outdated schema detected: activity_logs table not found. "
+                "Run: python -m alembic upgrade head"
+            )
+        columns = {column.get("name") for column in inspector.get_columns("activity_logs")}
+        required_columns = {"id", "user_id", "username", "action", "status", "created_at"}
+        missing_columns = required_columns - columns
+        if missing_columns:
+            raise RuntimeError(
+                f"Outdated schema detected: activity_logs missing columns {sorted(missing_columns)}. "
+                "Run: python -m alembic upgrade head"
+            )
+
+

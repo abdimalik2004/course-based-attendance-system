@@ -8,59 +8,204 @@ import {
   ChevronRight,
 } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
-import attendanceService from "@/services/attendanceService";
+import { useLocation } from "react-router-dom";
+import facultyService from "@/services/facultyService";
 import courseService from "@/services/courseService";
+import attendanceService from "@/services/attendanceService";
+import { useAuthStore } from "@/store/useAuthStore";
+
+// Weekday code → JS getDay() (0=Sun … 6=Sat)
+const WD_TO_DAY: Record<string, number> = {
+  sat: 6, sun: 0, mon: 1, tue: 2, wed: 3, thu: 4, fri: 5,
+  saturday: 6, sunday: 0, monday: 1, tuesday: 2, wednesday: 3, thursday: 4, friday: 5,
+};
+
+function formatTime(timeStr: string): string {
+  if (!timeStr || timeStr === "TBA") return "TBA";
+  const [hh, mm] = timeStr.split(":").map(Number);
+  if (isNaN(hh)) return timeStr;
+  const period = hh >= 12 ? "PM" : "AM";
+  const h = hh % 12 || 12;
+  return `${h}:${String(mm ?? 0).padStart(2, "0")} ${period}`;
+}
 
 export default function TeacherSchedule() {
+  const location = useLocation();
+  const initialFilter = (location.state as any)?.filter ?? "All";
   const [searchTerm, setSearchTerm] = useState("");
-  const [filterDate, setFilterDate] = useState("All");
+  const [filterDate, setFilterDate] = useState<string>(initialFilter);
+
+  const { user } = useAuthStore();
+  const teacherId = Number(user?.teacherId ?? user?.id ?? 0);
+
   const schedulesQuery = useQuery({
-    queryKey: ["teacherSchedules"],
-    queryFn: () => attendanceService.listSessions({ skip: 0, limit: 200 }),
+    queryKey: ["teacherSchedules", teacherId],
+    queryFn: () => facultyService.listSchedules(),
+    enabled: !!teacherId,
   });
+
+  // Poll active sessions every 10 s so "Ongoing Now" appears/disappears
+  // as soon as a teacher or admin starts/ends a session.
+  const activeSessionsQuery = useQuery({
+    queryKey: ["teacherScheduleActiveSessions"],
+    queryFn: () => attendanceService.listActiveSessions(),
+    refetchInterval: 10_000,
+    staleTime: 5_000,
+  });
+
   const coursesQuery = useQuery({
-    queryKey: ["teacherScheduleCourses"],
-    queryFn: () => courseService.listCourses({ skip: 0, limit: 200 }),
+    queryKey: ["teacherScheduleCourses", teacherId],
+    queryFn: () =>
+      courseService.listAssignments({ teacher_id: teacherId, skip: 0, limit: 200 }),
+    enabled: !!teacherId,
+    retry: false,
   });
 
   const scheduleData = useMemo(() => {
-    const scheduleResponse =
+    const scheduleResponse: any[] =
       schedulesQuery.data?.items ?? schedulesQuery.data ?? [];
-    const courses = coursesQuery.data?.items ?? coursesQuery.data ?? [];
-    const courseNames = new Map(
-      courses.map((course: any) => [
-        String(course.id),
-        course.title ?? course.name ?? `Course ${course.id}`,
-      ]),
+    const assignments: any[] =
+      coursesQuery.data?.items ?? coursesQuery.data ?? [];
+
+    // Build a set of course IDs that currently have an active session.
+    const activeSessions: any[] =
+      activeSessionsQuery.data?.items ?? activeSessionsQuery.data ?? [];
+    const activeSessionCourseIds = new Set(
+      activeSessions.map((s: any) => String(s.course_id)),
     );
 
-    return scheduleResponse.map((schedule: any, index: number) => {
-      const weekdays = Array.isArray(schedule.weekday)
-        ? schedule.weekday.join(", ")
-        : (schedule.weekday_summary ?? "Scheduled");
-      return {
-        id: schedule.id ?? index,
-        course:
-          courseNames.get(String(schedule.course_id)) ??
-          `Course ${schedule.course_id}`,
-        class_section: weekdays,
-        start: schedule.start_time ?? "TBA",
-        end: schedule.end_time ?? "TBA",
-        grace: schedule.grace_period_minutes ?? 0,
-        date: weekdays,
-        isNext: schedule.weekday_count === 1,
-        isCurrent: schedule.weekday_count > 1,
-      };
+    // Build a map: course_id → course title
+    const courseNames = new Map<string, string>();
+    assignments.forEach((a: any) => {
+      if (a.course_id) {
+        courseNames.set(
+          String(a.course_id),
+          a.course_title ?? `Course ${a.course_id}`,
+        );
+      }
     });
-  }, [coursesQuery.data, schedulesQuery.data]);
 
-  const filteredSchedule = scheduleData.filter((item) => {
-    const matchesSearch =
-      item.course.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      item.class_section.toLowerCase().includes(searchTerm.toLowerCase());
-    const matchesDate = filterDate === "All" || item.date === filterDate;
-    return matchesSearch && matchesDate;
-  });
+    // Teacher's assigned course IDs
+    const teacherCourseIds = new Set(assignments.map((a: any) => String(a.course_id)));
+
+    if (teacherCourseIds.size === 0) return [];
+
+    // Filter schedules to only those belonging to teacher's courses
+    const teacherSchedules = scheduleResponse.filter((s: any) =>
+      teacherCourseIds.has(String(s.course_id)),
+    );
+
+    // Week bounds (Sat–Fri)
+    const now = new Date();
+    const day = now.getDay();
+    const daysFromSat = day === 6 ? 0 : day + 1;
+    const weekStart = new Date(now);
+    weekStart.setDate(now.getDate() - daysFromSat);
+    weekStart.setHours(0, 0, 0, 0);
+
+    const rows: any[] = [];
+    teacherSchedules.forEach((schedule: any) => {
+      const weekdays: string[] = Array.isArray(schedule.weekday)
+        ? schedule.weekday
+        : schedule.weekday_summary
+          ? schedule.weekday_summary.split(",")
+          : [];
+
+      weekdays.forEach((wdRaw: string) => {
+        const wd = wdRaw.trim().toLowerCase();
+        const dayNum = WD_TO_DAY[wd];
+        if (dayNum === undefined) return;
+
+        // offset from Saturday
+        const offset = (dayNum + 1) % 7;
+        const occurrence = new Date(weekStart);
+        occurrence.setDate(weekStart.getDate() + offset);
+        occurrence.setHours(0, 0, 0, 0);
+
+        const startTimeStr = schedule.start_time ?? "TBA";
+        const endTimeStr = schedule.end_time ?? "TBA";
+
+        // Determine if "Ongoing Now"
+        let startDateTime = new Date(occurrence);
+        if (startTimeStr && startTimeStr !== "TBA") {
+          const [hh, mm] = startTimeStr.split(":").map((p: string) => Number(p));
+          if (!isNaN(hh)) startDateTime.setHours(hh, mm || 0, 0, 0);
+        }
+        let endDateTime = new Date(occurrence);
+        if (endTimeStr && endTimeStr !== "TBA") {
+          const [hh, mm] = endTimeStr.split(":").map((p: string) => Number(p));
+          if (!isNaN(hh)) endDateTime.setHours(hh, mm || 0, 0, 0);
+        }
+
+        // "Ongoing Now" only when a teacher/admin has actually started the session —
+        // not just because the clock falls inside the scheduled time window.
+        const isCurrent = activeSessionCourseIds.has(String(schedule.course_id));
+        const isNext =
+          !isCurrent &&
+          startDateTime > now &&
+          startDateTime.getTime() - now.getTime() < 1000 * 60 * 60 * 24 * 3;
+
+        rows.push({
+          id: `${schedule.id}-${wd}`,
+          scheduleId: schedule.id,
+          course:
+            courseNames.get(String(schedule.course_id)) ??
+            `Course ${schedule.course_id}`,
+          class_section: wd.charAt(0).toUpperCase() + wd.slice(1),
+          date: occurrence.toLocaleDateString(),
+          occurrenceDate: occurrence,
+          start: startTimeStr,
+          end: endTimeStr,
+          grace: schedule.grace_period_minutes ?? 0,
+          isCurrent,
+          isNext,
+        });
+      });
+    });
+
+    // Sort by occurrence date then start time
+    rows.sort((a, b) => {
+      const dateDiff = a.occurrenceDate.getTime() - b.occurrenceDate.getTime();
+      if (dateDiff !== 0) return dateDiff;
+      return (a.start ?? "").localeCompare(b.start ?? "");
+    });
+
+    return rows;
+  }, [schedulesQuery.data, coursesQuery.data, activeSessionsQuery.data]);
+
+  // Date filter helpers
+  const todayDate = useMemo(() => {
+    const d = new Date();
+    d.setHours(0, 0, 0, 0);
+    return d;
+  }, []);
+  const tomorrowDate = useMemo(() => {
+    const d = new Date(todayDate);
+    d.setDate(d.getDate() + 1);
+    return d;
+  }, [todayDate]);
+
+  const filteredSchedule = useMemo(() => {
+    return scheduleData.filter((item) => {
+      const matchesSearch =
+        item.course.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        item.class_section.toLowerCase().includes(searchTerm.toLowerCase());
+
+      let matchesDate = true;
+      if (filterDate === "Today") {
+        matchesDate =
+          item.occurrenceDate.toDateString() === todayDate.toDateString();
+      } else if (filterDate === "Tomorrow") {
+        matchesDate =
+          item.occurrenceDate.toDateString() === tomorrowDate.toDateString();
+      } else if (filterDate === "This Week") {
+        // already showing this week's rows by default, so same as All in weekly view
+        matchesDate = true;
+      }
+
+      return matchesSearch && matchesDate;
+    });
+  }, [scheduleData, searchTerm, filterDate, todayDate, tomorrowDate]);
 
   return (
     <div className="space-y-6">
@@ -70,7 +215,7 @@ export default function TeacherSchedule() {
             My Schedule
           </h2>
           <p className="text-gray-500 dark:text-gray-400 text-sm mt-1">
-            View and manage your upcoming classes and lab sessions.
+            Your weekly class schedule based on assigned courses.
           </p>
         </div>
 
@@ -92,34 +237,22 @@ export default function TeacherSchedule() {
             <select
               value={filterDate}
               onChange={(e) => setFilterDate(e.target.value)}
-              className="appearance-none pl-10 pr-8 py-2 rounded-xl glass-input text-sm text-gray-700 dark:text-gray-200 focus:outline-none focus:ring-2 focus:ring-primary/50 bg-transparent cursor-pointer bg-no-repeat bg-[right_0.5rem_center] bg-[length:1em_1em]"
+              className="appearance-none pl-10 pr-8 py-2 rounded-xl glass-input text-sm text-gray-700 dark:text-gray-200 focus:outline-none focus:ring-2 focus:ring-primary/50 bg-transparent cursor-pointer"
               style={{
                 backgroundImage: `url("data:image/svg+xml;charset=US-ASCII,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%2224%22%20height%3D%2224%22%20viewBox%3D%220%200%2024%2024%22%20fill%3D%22none%22%20stroke%3D%22%236B7280%22%20stroke-width%3D%222%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%3E%3Cpolyline%20points%3D%226%209%2012%2015%2018%209%22%3E%3C%2Fpolyline%3E%3C%2Fsvg%3E")`,
+                backgroundRepeat: "no-repeat",
+                backgroundPosition: "right 0.5rem center",
+                backgroundSize: "1em 1em",
               }}
             >
-              <option
-                value="All"
-                className="bg-white dark:bg-dark-bg text-gray-900 dark:text-white"
-              >
-                All Dates
+              <option value="All" className="bg-white dark:bg-dark-bg text-gray-900 dark:text-white">
+                All (This Week)
               </option>
-              <option
-                value="Today"
-                className="bg-white dark:bg-dark-bg text-gray-900 dark:text-white"
-              >
+              <option value="Today" className="bg-white dark:bg-dark-bg text-gray-900 dark:text-white">
                 Today
               </option>
-              <option
-                value="Tomorrow"
-                className="bg-white dark:bg-dark-bg text-gray-900 dark:text-white"
-              >
+              <option value="Tomorrow" className="bg-white dark:bg-dark-bg text-gray-900 dark:text-white">
                 Tomorrow
-              </option>
-              <option
-                value="Next Week"
-                className="bg-white dark:bg-dark-bg text-gray-900 dark:text-white"
-              >
-                Next Week
               </option>
             </select>
             <Filter
@@ -130,11 +263,11 @@ export default function TeacherSchedule() {
         </div>
       </div>
 
-      {schedulesQuery.error || coursesQuery.error ? (
+      {(schedulesQuery.isError || coursesQuery.isError) && (
         <div className="rounded-2xl border border-rose-200 dark:border-rose-500/20 bg-rose-50 dark:bg-rose-500/10 p-4 text-sm text-rose-700 dark:text-rose-200">
-          Failed to load live schedule data.
+          Failed to load schedule data. Please try refreshing.
         </div>
-      ) : null}
+      )}
 
       <motion.div
         initial={{ opacity: 0, y: 20 }}
@@ -147,7 +280,7 @@ export default function TeacherSchedule() {
             <thead className="bg-gray-50/80 dark:bg-white/5 text-xs uppercase text-gray-600 dark:text-gray-300 border-b border-gray-200 dark:border-white/10">
               <tr>
                 <th className="px-6 py-4 font-semibold">Course Name</th>
-                <th className="px-6 py-4 font-semibold">Class / Section</th>
+                <th className="px-6 py-4 font-semibold">Day</th>
                 <th className="px-6 py-4 font-semibold">Date</th>
                 <th className="px-6 py-4 font-semibold">Start Time</th>
                 <th className="px-6 py-4 font-semibold">End Time</th>
@@ -161,7 +294,7 @@ export default function TeacherSchedule() {
                     colSpan={6}
                     className="px-6 py-10 text-center text-sm text-gray-500 dark:text-gray-400"
                   >
-                    Loading schedule...
+                    Loading schedule…
                   </td>
                 </tr>
               ) : filteredSchedule.length === 0 ? (
@@ -170,18 +303,19 @@ export default function TeacherSchedule() {
                     colSpan={6}
                     className="px-6 py-10 text-center text-sm text-gray-500 dark:text-gray-400"
                   >
-                    No live schedule rows found in the database.
+                    {scheduleData.length === 0
+                      ? "No schedule found. Make sure your courses have schedules assigned by faculty."
+                      : "No results for the selected filter."}
                   </td>
                 </tr>
               ) : (
                 filteredSchedule.map((item) => (
                   <tr
                     key={item.id}
-                    className={`
-                    hover:bg-gray-50 dark:hover:bg-white/5 transition-colors group
-                    ${item.isCurrent ? "bg-primary/5 dark:bg-primary/10 relative" : ""}
-                    ${item.isNext ? "bg-blue-50/50 dark:bg-blue-500/5" : ""}
-                  `}
+                    className={`hover:bg-gray-50 dark:hover:bg-white/5 transition-colors group
+                      ${item.isCurrent ? "bg-primary/5 dark:bg-primary/10 relative" : ""}
+                      ${item.isNext && !item.isCurrent ? "bg-blue-50/50 dark:bg-blue-500/5" : ""}
+                    `}
                   >
                     <td className="px-6 py-4 relative">
                       {item.isCurrent && (
@@ -220,10 +354,10 @@ export default function TeacherSchedule() {
                       {item.date}
                     </td>
                     <td className="px-6 py-4 font-medium text-gray-900 dark:text-gray-100">
-                      {item.start}
+                      {formatTime(item.start)}
                     </td>
                     <td className="px-6 py-4 text-gray-600 dark:text-gray-300">
-                      {item.end}
+                      {formatTime(item.end)}
                     </td>
                     <td className="px-6 py-4">
                       <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-800 dark:bg-white/10 dark:text-gray-300">
@@ -237,12 +371,10 @@ export default function TeacherSchedule() {
           </table>
         </div>
 
-        {/* Pagination */}
+        {/* Pagination info */}
         <div className="px-6 py-4 border-t border-gray-200 dark:border-white/10 flex items-center justify-between">
           <p className="text-sm text-gray-500 dark:text-gray-400">
             Showing{" "}
-            <span className="font-medium text-gray-900 dark:text-white">1</span>{" "}
-            to{" "}
             <span className="font-medium text-gray-900 dark:text-white">
               {filteredSchedule.length}
             </span>{" "}
@@ -250,7 +382,7 @@ export default function TeacherSchedule() {
             <span className="font-medium text-gray-900 dark:text-white">
               {scheduleData.length}
             </span>{" "}
-            results
+            classes this week
           </p>
           <div className="flex items-center gap-2">
             <button
@@ -259,7 +391,7 @@ export default function TeacherSchedule() {
             >
               <ChevronLeft size={16} />
             </button>
-            <button className="p-2 rounded-lg border border-gray-200 dark:border-white/10 text-gray-500 hover:bg-gray-50 dark:hover:bg-white/5 transition-colors">
+            <button className="p-2 rounded-lg border border-gray-200 dark:border-white/10 text-gray-500 hover:bg-gray-50 dark:hover:bg-white/5 disabled:opacity-50 transition-colors" disabled>
               <ChevronRight size={16} />
             </button>
           </div>

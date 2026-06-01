@@ -4,7 +4,7 @@ import {
   Search,
   Filter,
   Calendar as CalendarIcon,
-  Edit,
+  ShieldCheck,
   AlertCircle,
 } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/Card";
@@ -36,6 +36,7 @@ export default function AttendanceList() {
   const [courseFilter, setCourseFilter] = useState("All");
   const [statusFilter, setStatusFilter] = useState("All");
   const [isSaving, setIsSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
 
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [selectedRecord, setSelectedRecord] = useState<any>(null);
@@ -46,6 +47,7 @@ export default function AttendanceList() {
 
   const handleEditClick = (record: any) => {
     setSelectedRecord(record);
+    setSaveError(null);
     setIsEditModalOpen(true);
   };
 
@@ -54,6 +56,7 @@ export default function AttendanceList() {
     if (!selectedRecord) return;
 
     setIsSaving(true);
+    setSaveError(null);
     try {
       await attendanceService.updateAttendanceStatus(
         selectedRecord.id,
@@ -67,8 +70,13 @@ export default function AttendanceList() {
       queryClient.invalidateQueries(attendanceKeys.all);
       setIsEditModalOpen(false);
       setSelectedRecord(null);
-    } catch (error) {
-      console.error("Failed to update attendance status", error);
+    } catch (err: any) {
+      const detail =
+        err?.response?.data?.detail ||
+        err?.message ||
+        "Failed to update attendance status. Please try again.";
+      setSaveError(typeof detail === "string" ? detail : JSON.stringify(detail));
+      console.error("Failed to update attendance status", err);
     } finally {
       setIsSaving(false);
     }
@@ -315,22 +323,8 @@ export default function AttendanceList() {
                           {record.status}
                         </Badge>
                       </TableCell>
-                      <TableCell>
-                        {record.confidence ? (
-                          <div className="flex items-center gap-3">
-                            <div className="w-16 h-1.5 rounded-full bg-gray-200 dark:bg-gray-800 overflow-hidden">
-                              <div
-                                className="h-full bg-primary rounded-full transition-all duration-500"
-                                style={{ width: `${record.confidence}%` }}
-                              />
-                            </div>
-                            <span className="text-sm font-medium text-gray-600 dark:text-gray-400">
-                              {record.confidence}%
-                            </span>
-                          </div>
-                        ) : (
-                          <span className="text-sm text-gray-400 pl-4">-</span>
-                        )}
+                      <TableCell className="text-sm font-medium text-gray-600 dark:text-gray-400">
+                        {record.confidence != null ? record.confidence : <span className="text-gray-400">-</span>}
                       </TableCell>
                       <TableCell>
                         <div className="flex items-center gap-2 text-sm text-gray-500 dark:text-gray-400">
@@ -356,23 +350,22 @@ export default function AttendanceList() {
                         </div>
                       </TableCell>
                       <TableCell className="text-right">
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          className={`h-8 w-8 p-0 ${record.status === "Absent" ? "text-yellow-500 hover:text-yellow-600 hover:bg-yellow-50 dark:text-yellow-400 dark:hover:text-yellow-300 dark:hover:bg-yellow-500/10" : "text-gray-300 dark:text-gray-600 cursor-not-allowed"}`}
-                          onClick={() =>
-                            record.status === "Absent" &&
-                            handleEditClick(record)
-                          }
-                          disabled={record.status !== "Absent"}
-                          title={
-                            record.status !== "Absent"
-                              ? "Only Absent status can be edited"
-                              : "Edit Status"
-                          }
-                        >
-                          <Edit size={16} />
-                        </Button>
+                        {record.status === "Absent" ? (
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="h-8 px-3 gap-1.5 text-xs font-semibold text-amber-600 hover:text-amber-700 hover:bg-amber-50 dark:text-amber-400 dark:hover:text-amber-300 dark:hover:bg-amber-500/10 border border-amber-200 dark:border-amber-500/30 rounded-lg"
+                            onClick={() => handleEditClick(record)}
+                            title="Mark as Excused"
+                          >
+                            <ShieldCheck size={14} />
+                            Excuse
+                          </Button>
+                        ) : (
+                          <span className="text-xs text-gray-300 dark:text-gray-600 select-none px-2">
+                            —
+                          </span>
+                        )}
                       </TableCell>
                     </TableRow>
                   ))
@@ -447,6 +440,13 @@ export default function AttendanceList() {
               </select>
             </div>
           </div>
+
+          {saveError && (
+            <div className="flex items-start gap-2 p-3 bg-rose-50 dark:bg-rose-500/10 border border-rose-200 dark:border-rose-500/20 rounded-lg text-sm text-rose-700 dark:text-rose-300">
+              <AlertCircle size={16} className="shrink-0 mt-0.5" />
+              <span>{saveError}</span>
+            </div>
+          )}
 
           <div className="pt-4 flex justify-end gap-3 border-t border-gray-100 dark:border-white/10 mt-6">
             <Button

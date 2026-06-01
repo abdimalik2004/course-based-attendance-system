@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { useForm, Controller } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import * as z from "zod";
@@ -21,12 +21,21 @@ const scheduleSchema = z.object({
 
 type ScheduleForm = z.infer<typeof scheduleSchema>;
 
+// Strip seconds from "HH:MM:SS" → "HH:MM" for HTML time inputs
+const toTimeInput = (t: string | undefined): string => {
+  if (!t) return "";
+  const parts = t.split(":");
+  return parts.length >= 2 ? `${parts[0]}:${parts[1]}` : t;
+};
+
 export function ScheduleModal() {
-  const { scheduleModal, closeModal, updateSchedule, courses, fetchData } =
+  const { scheduleModal, closeModal, updateSchedule, courses } =
     useFacultyStore();
 
   const { isOpen, mode, record } = scheduleModal;
   const isViewMode = mode === "view";
+
+  const [submitError, setSubmitError] = useState<string | null>(null);
 
   const {
     register,
@@ -40,32 +49,38 @@ export function ScheduleModal() {
 
   useEffect(() => {
     if (isOpen && record) {
+      setSubmitError(null);
       reset({
         courseId: record.courseId,
         weekdays: record.weekdays,
-        startTime: record.startTime,
-        endTime: record.endTime,
+        startTime: toTimeInput(record.startTime),
+        endTime: toTimeInput(record.endTime),
         gracePeriod: record.gracePeriod,
       });
     }
   }, [isOpen, record, reset]);
 
   const onSubmit = async (data: ScheduleForm) => {
+    setSubmitError(null);
     try {
       if (mode === "edit" && record) {
         await updateSchedule(record.id, data);
-        await fetchData();
       }
       closeModal("schedule");
-    } catch (error) {
-      console.error("Failed to save schedule:", error);
+    } catch (error: any) {
+      const msg =
+        error?.response?.data?.error?.message ??
+        error?.response?.data?.detail ??
+        error?.message ??
+        "Failed to save schedule. Please try again.";
+      setSubmitError(msg);
     }
   };
 
-  const courseOptions = courses.map((c) => ({
-    value: c.id,
-    label: `${c.code} - ${c.title}`,
-  }));
+  const courseOptions = [
+    { value: "", label: "Select Course..." },
+    ...courses.map((c) => ({ value: c.id, label: `${c.code} - ${c.title}` })),
+  ];
 
   if (mode === "create") return null;
 
@@ -173,6 +188,12 @@ export function ScheduleModal() {
             {...register("gracePeriod", { valueAsNumber: true })}
           />
         </div>
+
+        {submitError && (
+          <div className="rounded-lg border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-400">
+            {submitError}
+          </div>
+        )}
 
         <div className="flex justify-end gap-3 pt-6 border-t border-gray-200 dark:border-gray-800">
           <Button

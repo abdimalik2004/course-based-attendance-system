@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/Button";
 import { Select } from "@/components/ui/Select";
 import { useFacultyStore } from "@/store/useFacultyStore";
 import { useHrStore } from "@/store/useHrStore";
+import { useAuthStore } from "@/store/useAuthStore";
 
 const assignSchema = z.object({
   courseId: z.string().min(1, "Course is required"),
@@ -17,9 +18,16 @@ const assignSchema = z.object({
 type AssignForm = z.infer<typeof assignSchema>;
 
 export function AssignTeacherModal() {
-  const { assignModal, closeModal, addAssignment, updateAssignment, courses } =
+  const { assignModal, closeModal, addAssignment, updateAssignment, courses, assignments } =
     useFacultyStore();
   const { teachers, fetchTeachers } = useHrStore();
+  const { user } = useAuthStore();
+  const facultyId = user?.facultyId ? String(user.facultyId) : null;
+
+  // Only show teachers that belong to this faculty
+  const facultyTeachers = facultyId
+    ? teachers.filter((t) => String(t.facultyId) === facultyId)
+    : teachers;
 
   const { isOpen, mode, record } = assignModal;
   const isViewMode = mode === "view";
@@ -32,6 +40,8 @@ export function AssignTeacherModal() {
   } = useForm<AssignForm>({
     resolver: zodResolver(assignSchema),
     defaultValues: {
+      courseId: "",
+      teacherId: "",
       status: "active",
     },
   });
@@ -69,11 +79,25 @@ export function AssignTeacherModal() {
     }
   };
 
-  const courseOptions = courses.map((c) => ({
-    value: c.id,
-    label: `${c.code} - ${c.title}`,
-  }));
-  const teacherOptions = teachers.map((t) => ({
+  // Courses that already have a teacher assigned — exclude the one currently
+  // being edited so it remains selectable in edit mode.
+  const assignedCourseIds = new Set(
+    assignments
+      .filter((a) => mode !== "edit" || a.id !== record?.id)
+      .map((a) => a.courseId),
+  );
+
+  const courseOptions = courses.map((c) => {
+    const alreadyAssigned = assignedCourseIds.has(c.id);
+    return {
+      value: c.id,
+      label: alreadyAssigned
+        ? `${c.code} - ${c.title} (already assigned)`
+        : `${c.code} - ${c.title}`,
+      disabled: alreadyAssigned,
+    };
+  });
+  const teacherOptions = facultyTeachers.map((t) => ({
     value: t.id,
     label: t.fullName,
   }));
@@ -97,6 +121,7 @@ export function AssignTeacherModal() {
               Course
             </label>
             <Select
+              placeholder="Select Course"
               options={courseOptions}
               error={errors.courseId?.message}
               disabled={isViewMode}
@@ -109,6 +134,7 @@ export function AssignTeacherModal() {
               Teacher
             </label>
             <Select
+              placeholder="Select Teacher"
               options={teacherOptions}
               error={errors.teacherId?.message}
               disabled={isViewMode}

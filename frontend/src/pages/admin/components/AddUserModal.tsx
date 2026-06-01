@@ -103,22 +103,23 @@ export function AddUserModal() {
   const { students, fetchAdmissionData } = useAdmissionStore();
   const [showPassword, setShowPassword] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState<string | null>(null);
 
   const {
     register,
     handleSubmit,
     watch,
+    setValue,
     formState: { errors },
     reset,
   } = useForm<UserFormData>({
     resolver: zodResolver(userSchema),
     defaultValues: {
       role: "",
+      facultyId: "",
+      teacherId: "",
+      studentId: "",
     },
-  });
-  const { setValue } = useForm<UserFormData>({
-    resolver: zodResolver(userSchema),
-    defaultValues: { role: "" },
   });
 
   const selectedRole = watch("role");
@@ -128,27 +129,13 @@ export function AddUserModal() {
   const isStudentRole = normalizedRole === "STUDENT";
   const visibleRoles = roles.filter((role) => allowedRoles.includes(role.name));
 
-  // Reset/show placeholder for dependent ID fields whenever the role changes
+  // Reset dependent ID fields to empty string whenever the role changes so the
+  // placeholder option is always shown first when a new role is selected.
   useEffect(() => {
-    // set empty string so the Select placeholder option is shown
-    if (isFacultyRole) {
-      setValue("facultyId", "");
-    } else {
-      setValue("facultyId", "");
-    }
-
-    if (isTeacherRole) {
-      setValue("teacherId", "");
-    } else {
-      setValue("teacherId", "");
-    }
-
-    if (isStudentRole) {
-      setValue("studentId", "");
-    } else {
-      setValue("studentId", "");
-    }
-  }, [normalizedRole, isFacultyRole, isTeacherRole, isStudentRole, setValue]);
+    setValue("facultyId", "");
+    setValue("teacherId", "");
+    setValue("studentId", "");
+  }, [normalizedRole, setValue]);
 
   useEffect(() => {
     if (isModalOpen) {
@@ -156,11 +143,13 @@ export function AddUserModal() {
       fetchTeachers();
       fetchAdmissionData();
       reset();
+      setSubmitError(null);
     }
   }, [isModalOpen, fetchRolesAndFaculties, fetchTeachers, fetchAdmissionData, reset]);
 
   const onSubmit = async (data: UserFormData) => {
     setIsSubmitting(true);
+    setSubmitError(null);
     try {
       await addUser({
         ...data,
@@ -170,9 +159,8 @@ export function AddUserModal() {
       });
       setModalOpen(false);
       reset();
-    } catch (error) {
-      console.error(error);
-      // Would normally show toast here
+    } catch (error: any) {
+      setSubmitError(error?.message ?? "Failed to create user");
     } finally {
       setIsSubmitting(false);
     }
@@ -306,6 +294,12 @@ export function AddUserModal() {
               error={errors.studentId?.message}
             />
           </motion.div>
+        )}
+
+        {submitError && (
+          <div className="rounded-lg bg-red-50 dark:bg-red-500/10 border border-red-200 dark:border-red-500/30 px-4 py-3 text-sm text-red-700 dark:text-red-400">
+            {submitError}
+          </div>
         )}
 
         <div className="flex items-center justify-end gap-3 pt-6 border-t border-gray-100 dark:border-white/5 mt-6">

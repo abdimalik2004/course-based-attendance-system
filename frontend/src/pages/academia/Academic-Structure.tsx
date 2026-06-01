@@ -229,11 +229,7 @@ export default function AcademicStructure() {
                               tooltip="View"
                             />
                             <button
-                              onClick={() =>
-                                alert(
-                                  "Edit Term functionality under development.",
-                                )
-                              }
+                              onClick={() => openModal("structure", "edit", struct)}
                               className="p-1.5 rounded-lg text-amber-500 hover:text-amber-600 hover:bg-amber-50 dark:hover:bg-amber-500/10 transition-colors"
                               title="Edit"
                             >

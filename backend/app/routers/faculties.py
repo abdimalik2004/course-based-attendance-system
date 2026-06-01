@@ -5,7 +5,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import or_
 from sqlalchemy.exc import IntegrityError
 
-from app.core.security import require_roles
+from app.core.security import get_current_user, require_roles
 from app.db.models import (
     AttendanceRecord,
     AttendanceSession,
@@ -22,6 +22,7 @@ from app.db.models import (
 )
 from app.db.session import get_db
 from app.schemas.faculty import FacultyCreate, FacultyRead, FacultyUpdate, PaginatedFacultyRead
+from app.utils.activity_logger import log_activity
 
 
 router = APIRouter(prefix="/faculties", tags=["faculties"])
@@ -101,11 +102,19 @@ def _force_delete_faculty(db: Session, faculty_id: int) -> dict[str, int]:
 
 
 @router.post("", response_model=FacultyRead, dependencies=[Depends(require_roles("ACADEMIA"))])
-def create_faculty(payload: FacultyCreate, db: Session = Depends(get_db)):
+def create_faculty(
+    payload: FacultyCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
     faculty = Faculty(name=payload.name, code=payload.code, years=payload.years)
     db.add(faculty)
     try:
-        db.commit()
+        log_activity(
+            action=f"Faculty Created - {payload.name}",
+            user=current_user,
+            db=db,
+        )
     except IntegrityError as exc:
         db.rollback()
         raise HTTPException(status_code=409, detail="Faculty with same name/code already exists") from exc

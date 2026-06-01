@@ -15,21 +15,17 @@ export const dashboardService = {
     };
   },
 
-  facultyOverview: async (facultyId?: number) =>
-    api
-      .get("/reports", { params: { faculty_id: facultyId } })
-      .then((response) => response.data),
+  facultyOverview: async () =>
+    api.get("/reports/summary").then((response) => response.data),
 
-  studentOverview: async (studentId?: number) => {
-    if (!studentId) return null;
-
+  studentOverview: async () => {
     const [attendanceRes, scheduleRes] = await Promise.all([
       api
-        .get(`/student-portal/students/${studentId}/attendance`)
+        .get("/student-portal/me/attendance")
         .then((response) => response.data)
         .catch(() => []),
       api
-        .get(`/student-portal/students/${studentId}/schedule`)
+        .get("/student-portal/me/schedule")
         .then((response) => response.data)
         .catch(() => []),
     ]);

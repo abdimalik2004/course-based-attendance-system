@@ -146,8 +146,14 @@ def _to_read_model(obj: CourseSchedule) -> CourseScheduleRead:
     )
 
 
-def _sync_schedule_weekdays(schedule: CourseSchedule, weekdays: list[int]) -> None:
+def _sync_schedule_weekdays(schedule: CourseSchedule, weekdays: list[int], db: Session | None = None) -> None:
     schedule.weekday = encode_weekday_storage(weekdays)
+    # Clear existing rows and flush deletes to the DB *before* inserting new ones.
+    # Without the flush, SQLAlchemy may INSERT new rows before DELETing the old ones,
+    # which violates the unique constraint on (schedule_id, weekday).
+    schedule.weekday_rows.clear()
+    if db is not None:
+        db.flush()
     schedule.weekday_rows = [CourseScheduleWeekday(weekday=weekday) for weekday in weekdays]
 
 
@@ -282,7 +288,7 @@ def update_schedule(
             value = next_weekday_storage
         setattr(obj, field, value)
 
-    _sync_schedule_weekdays(obj, parsed_weekdays)
+    _sync_schedule_weekdays(obj, parsed_weekdays, db=db)
 
     db.add(obj)
     try:

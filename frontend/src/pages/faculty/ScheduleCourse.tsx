@@ -32,7 +32,6 @@ const scheduleSchema = z.object({
   endTime: z.string().min(1, "End time is required"),
   gracePeriod: z.number().min(0, "Grace period must be positive"),
 });
-
 type ScheduleForm = z.infer<typeof scheduleSchema>;
 
 export default function ScheduleCourse() {
@@ -40,6 +39,7 @@ export default function ScheduleCourse() {
     schedules,
     courses,
     isLoading,
+    error,
     fetchData,
     openModal,
     addSchedule,
@@ -87,8 +87,18 @@ export default function ScheduleCourse() {
 
   const onSubmit = async (data: ScheduleForm) => {
     try {
-      await addSchedule(data);
-      await fetchData();
+      const payload = {
+        course_id: Number(data.courseId),
+        weekday: data.weekdays,
+        start_time: data.startTime + ":00",
+        end_time: data.endTime + ":00",
+        grace_period_minutes: Number(data.gracePeriod),
+      };
+
+      console.log("SENDING PAYLOAD:", payload);
+
+      await addSchedule(payload);
+
       reset({
         courseId: "",
         weekdays: [],
@@ -101,10 +111,25 @@ export default function ScheduleCourse() {
     }
   };
 
-  const courseOptions = courses.map((c) => ({
-    value: c.id,
-    label: `${c.code} - ${c.title}`,
-  }));
+  // Collect the set of course IDs that already have at least one schedule entry.
+  const scheduledCourseIds = useMemo(
+    () => new Set(schedules.map((s) => s.courseId)),
+    [schedules],
+  );
+
+  const courseOptions = [
+    { value: "", label: "Select Course..." },
+    ...courses.map((c) => {
+      const alreadyScheduled = scheduledCourseIds.has(c.id);
+      return {
+        value: c.id,
+        label: alreadyScheduled
+          ? `${c.code} - ${c.title} (already scheduled)`
+          : `${c.code} - ${c.title}`,
+        disabled: alreadyScheduled,
+      };
+    }),
+  ];
 
   return (
     <div className="space-y-6 max-w-7xl mx-auto">
@@ -119,6 +144,12 @@ export default function ScheduleCourse() {
           </p>
         </div>
       </div>
+
+      {error ? (
+        <div className="rounded-2xl border border-rose-200 dark:border-rose-500/20 bg-rose-50 dark:bg-rose-500/10 p-4 text-sm text-rose-700 dark:text-rose-200">
+          {error}
+        </div>
+      ) : null}
 
       {/* Inline Form Section */}
       <Card className="glass-panel overflow-visible">

@@ -1,6 +1,7 @@
 import { useEffect, useMemo } from 'react';
 import { motion } from 'framer-motion';
 import { Users, UserCheck, UserX, UserMinus, Activity } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
 import { useHrStore } from '@/store/useHrStore';
 import { 
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, 
@@ -8,6 +9,7 @@ import {
 } from 'recharts';
 
 export default function Dashboard() {
+  const navigate = useNavigate();
   const { teachers, faculties, departments, fetchTeachers, fetchFaculties, fetchDepartments, isLoading, error } = useHrStore();
 
   useEffect(() => {
@@ -22,10 +24,10 @@ export default function Dashboard() {
   const inactiveTeachers = teachers.filter((teacher) => teacher.status === 'Inactive').length;
 
   const stats = [
-    { label: 'Total Teachers', value: totalTeachers, icon: Users, color: 'text-white', bg: 'bg-gradient-to-br from-primary to-primary-accent shadow-lg shadow-primary/30' },
-    { label: 'Active', value: activeTeachers, icon: UserCheck, color: 'text-white', bg: 'bg-gradient-to-br from-green-500 to-emerald-400 shadow-lg shadow-green-500/30' },
-    { label: 'On Leave', value: onLeaveTeachers, icon: UserMinus, color: 'text-white', bg: 'bg-gradient-to-br from-amber-500 to-orange-400 shadow-lg shadow-amber-500/30' },
-    { label: 'Inactive', value: inactiveTeachers, icon: UserX, color: 'text-white', bg: 'bg-gradient-to-br from-red-500 to-rose-400 shadow-lg shadow-red-500/30' },
+    { label: 'Total Teachers', value: totalTeachers, icon: Users, color: 'text-white', bg: 'bg-gradient-to-br from-primary to-primary-accent shadow-lg shadow-primary/30', statusParam: '' },
+    { label: 'Active', value: activeTeachers, icon: UserCheck, color: 'text-white', bg: 'bg-gradient-to-br from-green-500 to-emerald-400 shadow-lg shadow-green-500/30', statusParam: 'Active' },
+    { label: 'On Leave', value: onLeaveTeachers, icon: UserMinus, color: 'text-white', bg: 'bg-gradient-to-br from-amber-500 to-orange-400 shadow-lg shadow-amber-500/30', statusParam: 'On Leave' },
+    { label: 'Inactive', value: inactiveTeachers, icon: UserX, color: 'text-white', bg: 'bg-gradient-to-br from-red-500 to-rose-400 shadow-lg shadow-red-500/30', statusParam: 'Inactive' },
   ];
 
   const facultyDistribution = useMemo(() => {
@@ -74,14 +76,15 @@ export default function Dashboard() {
                 initial={{ opacity: 0, y: 20 }}
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ delay: index * 0.1, duration: 0.4 }}
-                className="glass-card p-6 rounded-2xl border border-gray-200 dark:border-white/10"
+                onClick={() => navigate(stat.statusParam ? `/hr/teachers?status=${encodeURIComponent(stat.statusParam)}` : '/hr/teachers')}
+                className="glass-card p-6 rounded-2xl border border-gray-200 dark:border-white/10 cursor-pointer hover:-translate-y-1 hover:shadow-lg transition-all duration-300 active:scale-[0.98] group"
               >
                 <div className="flex items-center justify-between">
                   <div>
                     <p className="text-sm font-medium text-gray-500 dark:text-gray-400">{stat.label}</p>
                     <p className="text-3xl font-bold text-gray-900 dark:text-white mt-2">{stat.value}</p>
                   </div>
-                  <div className={`p-3 rounded-xl ${stat.bg}`}>
+                  <div className={`p-3 rounded-xl ${stat.bg} group-hover:scale-110 transition-transform duration-300`}>
                     <stat.icon className={`h-6 w-6 ${stat.color}`} />
                   </div>
                 </div>

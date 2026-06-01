@@ -2,7 +2,6 @@ import { useMemo, useState } from 'react';
 import { motion } from 'framer-motion';
 import { Search, Filter, Calendar as CalendarIcon, ChevronLeft, ChevronRight, Clock, MapPin } from 'lucide-react';
 import { useQuery } from '@tanstack/react-query';
-import { useAuthStore } from '@/store/useAuthStore';
 import { Card, CardContent } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import { cn } from '@/utils/cn';
@@ -11,18 +10,15 @@ import dashboardService from '@/services/dashboardService';
 const daysOfWeek = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 
 export default function StudentSchedule() {
-  const { user } = useAuthStore();
-  const studentId = user?.id as number | undefined;
   const [searchTerm, setSearchTerm] = useState('');
   const [filterDay, setFilterDay] = useState('All');
 
   const { data, isLoading, error } = useQuery({
-    queryKey: ['studentSchedule', studentId],
+    queryKey: ['studentSchedule'],
     queryFn: async () => {
-      const overview = await dashboardService.studentOverview(studentId);
+      const overview = await dashboardService.studentOverview();
       return overview?.schedule ?? [];
     },
-    enabled: Boolean(studentId),
     staleTime: 1000 * 60 * 2,
   });
 
@@ -31,13 +27,13 @@ export default function StudentSchedule() {
       const weekdays = Array.isArray(item.weekdays) ? item.weekdays : [];
       return {
         id: item.id ?? index,
-        course: item.course_name ?? item.course || `Course ${index + 1}`,
+        course: item.course_name ?? (item.course || `Course ${index + 1}`),
         code: item.course_code ?? 'TBA',
         days: weekdays,
         start: item.start_time ?? 'TBA',
         end: item.end_time ?? 'TBA',
         grace: `${item.grace_period_minutes ?? 0} Mins`,
-        room: item.room_name ?? item.location ?? 'TBA',
+        className: item.class_name ?? null,
       };
     });
   }, [data]);
@@ -112,7 +108,7 @@ export default function StudentSchedule() {
                     <th className="px-6 py-4">Code</th>
                     <th className="px-6 py-4 min-w-[200px]">Weekdays</th>
                     <th className="px-6 py-4">Timing</th>
-                    <th className="px-6 py-4">Room</th>
+                    <th className="px-6 py-4">Class</th>
                     <th className="px-6 py-4 text-center">Grace Period</th>
                   </tr>
                 </thead>
@@ -169,7 +165,7 @@ export default function StudentSchedule() {
                         <td className="px-6 py-4">
                           <div className="flex items-center gap-2 text-gray-600 dark:text-gray-400">
                             <MapPin size={16} className="text-gray-400" />
-                            <span>{schedule.room}</span>
+                            <span>{schedule.className ?? <span className="text-gray-400 italic">N/A</span>}</span>
                           </div>
                         </td>
                         <td className="px-6 py-4 text-center">

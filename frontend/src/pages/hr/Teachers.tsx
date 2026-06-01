@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Plus, Search, Edit2, Trash2 } from 'lucide-react';
+import { useSearchParams } from 'react-router-dom';
 import { useHrStore } from '@/store/useHrStore';
 import type { Teacher } from '@/services/hrService';
 import { Button } from '@/components/ui/Button';
@@ -22,8 +23,15 @@ export default function Teachers() {
     isOpen: false,
     record: null
   });
+  const [searchParams] = useSearchParams();
   const [searchQuery, setSearchQuery] = useState('');
+  const [statusFilter, setStatusFilter] = useState<string>(searchParams.get('status') ?? 'All');
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
+
+  // Sync status filter if URL param changes (e.g. back-navigate from dashboard)
+  useEffect(() => {
+    setStatusFilter(searchParams.get('status') ?? 'All');
+  }, [searchParams]);
 
   useEffect(() => {
     fetchTeachers();
@@ -31,10 +39,13 @@ export default function Teachers() {
     fetchDepartments();
   }, [fetchTeachers, fetchFaculties, fetchDepartments]);
 
-  const filteredTeachers = teachers.filter(t => 
-    t.fullName.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    t.id.toLowerCase().includes(searchQuery.toLowerCase())
-  );
+  const filteredTeachers = teachers.filter(t => {
+    const matchesSearch =
+      t.fullName.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      t.teacherNumber.toLowerCase().includes(searchQuery.toLowerCase());
+    const matchesStatus = statusFilter === 'All' || t.status === statusFilter;
+    return matchesSearch && matchesStatus;
+  });
 
   const getFacultyName = (id: string) => faculties.find(f => f.id === id)?.name || id;
   const getDepartmentName = (id: string) => departments.find(d => d.id === id)?.name || id;
@@ -62,18 +73,31 @@ export default function Teachers() {
       <Card className="glass-card shadow-2xl shadow-primary/5">
         {/* Table Toolbar */}
         <div className="p-4 border-b border-gray-200 dark:border-white/10 flex flex-col sm:flex-row gap-4 justify-between items-center bg-gray-50/50 dark:bg-white/5">
-          <div className="relative w-full sm:w-80">
-            <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-gray-500">
-              <Search size={16} />
+          <div className="flex flex-col sm:flex-row gap-3 w-full sm:w-auto">
+            <div className="relative w-full sm:w-72">
+              <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-gray-500">
+                <Search size={16} />
+              </div>
+              <Input
+                type="text"
+                placeholder="Search by name or T-NO..."
+                className="pl-9 bg-white dark:bg-dark-card"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+              />
             </div>
-            <Input
-              type="text"
-              placeholder="Search teachers..."
-              className="pl-9 bg-white dark:bg-dark-card"
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-            />
+            <select
+              value={statusFilter}
+              onChange={(e) => setStatusFilter(e.target.value)}
+              className="w-full sm:w-44 rounded-xl border border-gray-300 dark:border-white/10 bg-white dark:bg-dark-card px-3 py-2 text-sm text-gray-900 dark:text-white focus:border-primary focus:ring-2 focus:ring-primary/20 outline-none"
+            >
+              <option value="All">All Statuses</option>
+              <option value="Active">Active</option>
+              <option value="On Leave">On Leave</option>
+              <option value="Inactive">Inactive</option>
+            </select>
           </div>
+          <span className="text-xs text-gray-400 shrink-0">{filteredTeachers.length} teacher{filteredTeachers.length !== 1 ? 's' : ''}</span>
         </div>
 
         {/* Table Wrapper */}
@@ -113,8 +137,8 @@ export default function Teachers() {
                 ) : (
                   filteredTeachers.map((teacher) => (
                     <TableRow key={teacher.id}>
-                      <TableCell className="font-medium text-gray-900 dark:text-white">
-                        {teacher.id}
+                      <TableCell className="font-medium text-gray-900 dark:text-white font-mono">
+                        {teacher.teacherNumber || teacher.id}
                       </TableCell>
                       <TableCell>
                         {teacher.fullName}
@@ -185,7 +209,7 @@ export default function Teachers() {
         onClose={() => setViewModalState(prev => ({ ...prev, isOpen: false }))}
         title="Teacher Details"
         data={viewModalState.record ? [
-          { label: 'T-NO', value: viewModalState.record.id },
+          { label: 'T-NO', value: viewModalState.record.teacherNumber || viewModalState.record.id },
           { label: 'Name', value: viewModalState.record.fullName },
           { label: 'Faculty', value: getFacultyName(viewModalState.record.facultyId) },
           { label: 'Department', value: getDepartmentName(viewModalState.record.departmentId) },

@@ -6,7 +6,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
-from app.core.rate_limit import rate_limit_dependency
+from app.core.rate_limit import login_attempt_tracker, rate_limit_dependency
 from app.core.security import (
     create_access_token,
     create_refresh_token,
@@ -22,6 +22,7 @@ from app.db.models import Role, User
 from app.db.session import get_db
 from app.db.reset_database import reset_database_to_clean_state
 from app.schemas.auth import (
+    ChangePasswordRequest,
     ResetDatabaseRequest,
     RoleCreate,
     RoleRead,
@@ -30,6 +31,7 @@ from app.schemas.auth import (
     UserRead,
 )
 from app.services.user_service import create_user
+from app.utils.activity_logger import log_activity
 
 
 router = APIRouter(prefix="/auth", tags=["auth"])
@@ -84,7 +86,7 @@ def create_role(payload: RoleCreate, db: Session = Depends(get_db)):
         403: {"description": "Forbidden"},
     },
 )
-def register_user(payload: UserCreate, db: Session = Depends(get_db)):
+def register_user(payload: UserCreate, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     normalized_roles = {role_name.strip().upper() for role_name in payload.role_names if role_name.strip()}
     faculty_id = payload.faculty_id
     if "FACULTY" in normalized_roles:
@@ -108,6 +110,17 @@ def register_user(payload: UserCreate, db: Session = Depends(get_db)):
     )
     db.commit()
     db.refresh(user)
+
+    # Log user creation
+    roles_str = ", ".join(payload.role_names) if payload.role_names else "No Role"
+    log_activity(
+        action=f"User Registered - {user.username} ({roles_str})",
+        user=current_user,
+        status="Success",
+        db=db,
+    )
+    db.commit()
+
     return user
 
 
@@ -123,18 +136,41 @@ def login_for_access_token(
     form_data: OAuth2PasswordRequestForm = Depends(),
     db: Session = Depends(get_db),
 ):
+    # Reject immediately if this username is currently locked out
+    login_attempt_tracker.check_locked(form_data.username)
+
     user = db.query(User).filter(User.username == form_data.username).first()
     if not user or not verify_password(form_data.password, user.hashed_password):
+        log_activity(
+            action=f"Login Failed - {form_data.username}",
+            username=form_data.username,
+            status="Failed",
+            db=db,
+        )
+        db.commit()
+        # Count the failure — raises 429 automatically on the 3rd consecutive miss
+        login_attempt_tracker.record_failure(form_data.username)
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Incorrect username or password",
             headers={"WWW-Authenticate": "Bearer"},
         )
 
+    # Successful login — reset failure counter
+    login_attempt_tracker.record_success(form_data.username)
+
     if pwd_context.needs_update(user.hashed_password):
         user.hashed_password = get_password_hash(form_data.password)
         db.add(user)
-        db.commit()
+
+    role_names = ", ".join(r.name for r in user.roles) if user.roles else "No Role"
+    log_activity(
+        action=f"User Login - {user.username} ({role_names})",
+        user=user,
+        status="Success",
+        db=db,
+    )
+    db.commit()
 
     access_token = create_access_token(subject=user.username)
     refresh_token = create_refresh_token(subject=user.username)
@@ -193,7 +229,13 @@ def refresh_tokens(request: Request, response: Response, db: Session = Depends(g
 
 
 @router.post("/logout")
-def logout(response: Response):
+def logout(response: Response, current_user: User = Depends(get_current_user)):
+    # Log the logout action
+    log_activity(
+        action=f"User Logout - {current_user.username}",
+        user=current_user,
+        status="Success",
+    )
     # Clear the refresh token cookie
     response.delete_cookie("refresh_token", path="/")
     return {"ok": True}
@@ -219,3 +261,32 @@ def reset_database(payload: ResetDatabaseRequest):
 
     summary = reset_database_to_clean_state()
     return {"ok": True, "summary": summary}
+
+
+@router.post(
+    "/change-password",
+    responses={
+        400: {"description": "New password same as current or invalid"},
+        401: {"description": "Current password is incorrect"},
+    },
+)
+def change_password(
+    payload: ChangePasswordRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    if not verify_password(payload.current_password, current_user.hashed_password):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Current password is incorrect",
+        )
+
+    if payload.current_password == payload.new_password:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="New password must be different from current password",
+        )
+
+    current_user.hashed_password = get_password_hash(payload.new_password)
+    db.commit()
+    return {"ok": True, "message": "Password updated successfully"}

@@ -157,3 +157,48 @@ def upload_profile_image(file: UploadFile = File(...), user: User = Depends(get_
     db.refresh(user)
 
     return JSONResponse(status_code=status.HTTP_200_OK, content={"profile_image_url": relative_url})
+
+
+class UpdateMeRequest(BaseModel):
+    username: str | None = None
+    email: str | None = None
+
+
+@router.patch("/me")
+def update_me(
+    payload: UpdateMeRequest,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Allow the currently authenticated user to update their own username or email.
+    Role cannot be changed via this endpoint.
+    """
+    from sqlalchemy.exc import IntegrityError
+    from app.schemas.auth import UserRead
+
+    if payload.username is not None:
+        new_username = payload.username.strip()
+        if not new_username:
+            raise HTTPException(status_code=400, detail="Username cannot be empty")
+        if new_username != user.username:
+            existing = db.query(User).filter(User.username == new_username).first()
+            if existing:
+                raise HTTPException(status_code=409, detail="Username is already taken")
+            user.username = new_username
+
+    if payload.email is not None:
+        new_email = payload.email.strip() or None
+        if new_email and new_email != user.email:
+            existing = db.query(User).filter(User.email == new_email).first()
+            if existing:
+                raise HTTPException(status_code=409, detail="Email is already in use")
+        user.email = new_email
+
+    db.add(user)
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(status_code=409, detail="Username or email already in use")
+    db.refresh(user)
+    return UserRead.model_validate(user)

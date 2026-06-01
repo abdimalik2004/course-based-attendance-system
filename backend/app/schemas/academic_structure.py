@@ -42,6 +42,25 @@ class AcademicYearBase(BaseModel):
         return self
 
 
+class AcademicYearUpdate(BaseModel):
+    """All fields are optional so callers only send what changed."""
+    academic_year: str | None = None
+    term_name: str | None = None
+    start_date: date | None = None
+    end_date: date | None = None
+    status: AcademicYearStatus | None = None
+
+    @field_validator("academic_year")
+    @classmethod
+    def normalize_academic_year(cls, value: str | None) -> str | None:
+        return _normalize_text(value) if value is not None else None
+
+    @field_validator("term_name")
+    @classmethod
+    def normalize_term_name(cls, value: str | None) -> str | None:
+        return _normalize_text(value) if value is not None else None
+
+
 class AcademicYearCreate(AcademicYearBase):
     model_config = ConfigDict(
         extra="forbid",
@@ -92,10 +111,16 @@ class CourseSemesterAssignmentCreate(CourseSemesterAssignmentBase):
     )
 
 
+class CourseSemesterAssignmentUpdate(BaseModel):
+    """Only semester (i.e. academic_year_id) is updatable on an existing assignment."""
+    semester: int = Field(gt=0)
+
+
 class CourseSemesterAssignmentRead(CourseSemesterAssignmentBase):
     model_config = ConfigDict(from_attributes=True)
 
     id: int
+    academic_year_id: int
     created_at: datetime | None = None
 
 

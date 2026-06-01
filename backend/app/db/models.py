@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import enum
+from typing import Optional
 from datetime import date, datetime, time
 
 from sqlalchemy import (
@@ -37,7 +38,7 @@ _POSITIVE_ID_FIELDS: dict[str, tuple[str, ...]] = {
     "academic_years": ("id",),
     "departments": ("id", "faculty_id"),
     "class_batches": ("id", "faculty_id", "department_id"),
-    "users": ("id", "faculty_id"),
+    "users": ("id", "faculty_id", "student_id"),
     "students": ("id", "faculty_id", "department_id"),
     "teachers": ("id", "faculty_id", "department_id", "user_id"),
     "courses": ("id", "faculty_id"),
@@ -47,7 +48,7 @@ _POSITIVE_ID_FIELDS: dict[str, tuple[str, ...]] = {
     "enrollments": ("id", "student_id", "course_id"),
     "course_schedules": ("id", "course_id"),
     "course_schedule_weekdays": ("id", "schedule_id", "weekday"),
-    "attendance_sessions": ("id", "course_id", "instructor_id", "schedule_id"),
+    "attendance_sessions": ("id", "course_id", "teacher_id", "admin_id", "schedule_id"),
     "attendance_records": ("id", "student_id", "course_id", "session_id"),
     "student_attendance": ("id", "student_id"),
     "student_schedule": ("id", "student_id"),
@@ -80,6 +81,12 @@ class AttendanceSummaryStatus(str, enum.Enum):
 class SessionStatus(str, enum.Enum):
     ACTIVE = "ACTIVE"
     CLOSED = "CLOSED"
+
+
+class SessionType(str, enum.Enum):
+    LECTURE = "Lecture"
+    LAB = "Lab"
+    TUTORIAL = "Tutorial"
 
 
 class AcademicYearStatus(str, enum.Enum):
@@ -192,7 +199,7 @@ class Department(Base):
 
 class ClassBatch(Base):
     __tablename__ = "class_batches"
-    __table_args__ = (UniqueConstraint("department_id", "name", name="uq_class_batch_department_name"),)
+    __table_args__ = (UniqueConstraint("faculty_id", "name", name="uq_class_batch_faculty_name"),)
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True, autoincrement=True)
     faculty_id: Mapped[int] = mapped_column(ForeignKey("faculties.id", ondelete="CASCADE"), nullable=False)
@@ -215,15 +222,34 @@ class User(Base):
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     profile_image_url: Mapped[str | None] = mapped_column(String(255), nullable=True)
     faculty_id: Mapped[int | None] = mapped_column(ForeignKey("faculties.id"), nullable=True)
+    student_id: Mapped[int | None] = mapped_column(ForeignKey("students.id", ondelete="SET NULL"), nullable=True, index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), nullable=False)
 
     roles: Mapped[list[Role]] = relationship(secondary="user_role_links", back_populates="users", lazy="selectin")
     attendance_entries: Mapped[list["StudentAttendance"]] = relationship(back_populates="student")
     schedule_entries: Mapped[list["StudentSchedule"]] = relationship(back_populates="student")
+    teacher: Mapped[Optional["Teacher"]] = relationship(back_populates="user", uselist=False)
+    linked_student: Mapped[Optional["Student"]] = relationship(foreign_keys=[student_id], uselist=False)
 
     @property
     def role_names(self) -> list[str]:
         return [role.name for role in self.roles]
+
+    @property
+    def teacher_id(self) -> int | None:
+        return self.teacher.id if self.teacher is not None else None
+
+    @property
+    def student_number(self) -> str | None:
+        return self.linked_student.student_number if self.linked_student is not None else None
+
+    @property
+    def full_name(self) -> str | None:
+        if self.teacher is not None:
+            return self.teacher.full_name
+        if self.linked_student is not None:
+            return self.linked_student.full_name
+        return None
 
 
 class Student(Base):
@@ -250,7 +276,7 @@ class Student(Base):
     faculty: Mapped[Faculty] = relationship(back_populates="students")
     department: Mapped[Department] = relationship(back_populates="students")
     enrollments: Mapped[list["Enrollment"]] = relationship(back_populates="student", cascade="all, delete-orphan")
-    attendance_records: Mapped[list["AttendanceRecord"]] = relationship(back_populates="student")
+    attendance_records: Mapped[list["AttendanceRecord"]] = relationship(back_populates="student", cascade="all, delete-orphan")
 
 
 class Teacher(Base):
@@ -284,6 +310,7 @@ class Teacher(Base):
     faculty: Mapped[Faculty] = relationship(back_populates="teachers")
     department: Mapped[Department] = relationship(back_populates="teachers")
     course_assignments: Mapped[list["CourseAssignment"]] = relationship(back_populates="teacher")
+    user: Mapped[Optional["User"]] = relationship(back_populates="teacher", foreign_keys=[user_id])
 
 
 class Course(Base):
@@ -313,7 +340,7 @@ class Course(Base):
 class AcademicYear(Base):
     __tablename__ = "academic_years"
     __table_args__ = (
-        UniqueConstraint("academic_year", name="uq_academic_years_academic_year"),
+        UniqueConstraint("academic_year", "term_name", name="uq_academic_years_year_term"),
         CheckConstraint("end_date > start_date", name="ck_academic_years_date_order"),
     )
 
@@ -614,17 +641,40 @@ class AttendanceSession(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True, autoincrement=True)
     course_id: Mapped[int] = mapped_column(ForeignKey("courses.id", ondelete="CASCADE"), nullable=False)
-    instructor_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    teacher_id: Mapped[int | None] = mapped_column(ForeignKey("teachers.id", ondelete="SET NULL"), nullable=True)
+    admin_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     schedule_id: Mapped[int] = mapped_column(ForeignKey("course_schedules.id", ondelete="CASCADE"), nullable=False)
     session_date: Mapped[date] = mapped_column(Date, nullable=False)
     start_time: Mapped[datetime] = mapped_column(DateTime, nullable=False)
     end_time: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    session_type: Mapped[SessionType] = mapped_column(
+        Enum(
+            SessionType,
+            name="session_type",
+            values_callable=lambda enum_cls: [member.value for member in enum_cls],
+        ),
+        default=SessionType.LECTURE,
+        nullable=False,
+    )
     status: Mapped[SessionStatus] = mapped_column(Enum(SessionStatus), default=SessionStatus.ACTIVE, nullable=False)
 
     course: Mapped[Course] = relationship(back_populates="sessions")
-    instructor: Mapped[User | None] = relationship()
+    teacher: Mapped[Teacher | None] = relationship(foreign_keys=[teacher_id])
+    admin: Mapped[User | None] = relationship(foreign_keys=[admin_id])
     schedule: Mapped[CourseSchedule] = relationship(back_populates="sessions")
     records: Mapped[list["AttendanceRecord"]] = relationship(back_populates="session", cascade="all, delete-orphan")
+
+    @property
+    def course_name(self) -> str | None:
+        return self.course.title if self.course is not None else None
+
+    @property
+    def course_code(self) -> str | None:
+        return self.course.code if self.course is not None else None
+
+    @property
+    def grace_period_minutes(self) -> int | None:
+        return self.schedule.grace_period_minutes if self.schedule is not None else None
 
 
 class AttendanceRecord(Base):
@@ -644,6 +694,51 @@ class AttendanceRecord(Base):
 
     student: Mapped[Student] = relationship(back_populates="attendance_records")
     session: Mapped[AttendanceSession] = relationship(back_populates="records")
+
+
+class ActivityLogStatus(str, enum.Enum):
+    SUCCESS = "Success"
+    FAILED = "Failed"
+    PENDING = "Pending"
+
+
+class ActivityLog(Base):
+    __tablename__ = "activity_logs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True, autoincrement=True)
+    user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
+    username: Mapped[str] = mapped_column(String(128), nullable=False, default="System")
+    action: Mapped[str] = mapped_column(String(255), nullable=False)
+    status: Mapped[ActivityLogStatus] = mapped_column(
+        # values_callable tells SQLAlchemy to use the enum VALUES ("Success",
+        # "Failed", "Pending") for storage and lookup — not the enum names
+        # ("SUCCESS", "FAILED", "PENDING") which is the SQLAlchemy 2.x default.
+        # This matches what is already stored in the database.
+        Enum(
+            ActivityLogStatus,
+            name="activity_log_status",
+            native_enum=False,
+            values_callable=lambda obj: [e.value for e in obj],
+        ),
+        nullable=False,
+        default=ActivityLogStatus.SUCCESS,
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), nullable=False, index=True)
+
+    user: Mapped[Optional["User"]] = relationship(foreign_keys=[user_id])
+
+
+class SystemSetting(Base):
+    """Key-value store for system-wide configuration settings."""
+
+    __tablename__ = "system_settings"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    key: Mapped[str] = mapped_column(String(128), unique=True, nullable=False, index=True)
+    value: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, server_default=func.now(), onupdate=func.now(), nullable=False
+    )
 
 
 @event.listens_for(StudentAttendance, "before_insert")

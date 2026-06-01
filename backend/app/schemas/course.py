@@ -63,10 +63,14 @@ class CourseAssignmentUpdate(BaseModel):
 
 
 class CourseAssignmentRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
     id: int
     course_id: int = Field(gt=0)
     teacher_id: int = Field(gt=0)
     is_primary: bool
+    course_title: str | None = None
+    course_code: str | None = None
 
 
 class PaginatedCourseAssignmentRead(BaseModel):

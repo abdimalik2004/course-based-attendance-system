@@ -9,6 +9,7 @@ import {
   AlertTriangle,
   Play,
   X,
+  UserX,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
@@ -19,6 +20,15 @@ import { useAdmissionStore } from "@/store/useAdmissionStore";
 import admissionService, { type FacultyDto } from "@/services/admissionService";
 import { cn } from "@/utils/cn";
 
+// Minimum cosine similarity to consider a face the same person as the anchor
+const PERSON_TRACKING_THRESHOLD = 0.72;
+
+function cosineSimilarity(a: number[], b: number[]): number {
+  let dot = 0;
+  for (let i = 0; i < a.length; i++) dot += a[i] * b[i];
+  return dot; // vectors are already unit-normalised by the backend
+}
+
 type CaptureStatus =
   | "ready"
   | "initializing"
@@ -26,6 +36,12 @@ type CaptureStatus =
   | "capturing"
   | "paused"
   | "completed";
+
+// Person tracking state:
+//  "none"         — no anchor set yet (before first face)
+//  "anchor_set"   — anchor person is in the frame (OK to capture)
+//  "wrong_person" — anchor person left; a different person is now alone in the frame
+type PersonTracking = "none" | "anchor_set" | "wrong_person";
 
 export default function FaceRegistration() {
   const { fetchAdmissionData } = useAdmissionStore();
@@ -60,6 +76,17 @@ export default function FaceRegistration() {
   const [status, setStatus] = useState<CaptureStatus>("ready");
   const [capturedImages, setCapturedImages] = useState<string[]>([]);
   const [capturedCount, setCapturedCount] = useState(0);
+  const [isUploading, setIsUploading] = useState(false);
+
+  // Save & Train result state
+  const [formError, setFormError] = useState<string | null>(null);
+  const [trainingJobId, setTrainingJobId] = useState<string | null>(null);
+  const [trainingStatus, setTrainingStatus] = useState<
+    "queued" | "running" | "succeeded" | "failed" | null
+  >(null);
+  const [trainingError, setTrainingError] = useState<string | null>(null);
+  // Set to true when backend returns 409 (student already has images)
+  const [needsOverwrite, setNeedsOverwrite] = useState(false);
 
   // Video & Capture Refs
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -67,35 +94,78 @@ export default function FaceRegistration() {
   const streamRef = useRef<MediaStream | null>(null);
   const imagesRef = useRef<string[]>([]);
 
-  // Face Tracking Simulation State
+  // Face Detection State (driven by real backend calls)
   const [multipleFaces, setMultipleFaces] = useState(false);
-  const [faceDetected, setFaceDetected] = useState(true);
-  const [boxPosition, setBoxPosition] = useState({
-    x: 30,
-    y: 20,
-    w: 40,
-    h: 60,
-  });
+  const [faceDetected, setFaceDetected] = useState(false);
+  const [personTracking, setPersonTracking] = useState<PersonTracking>("none");
+
+  // Refs for person-identity tracking (must survive re-renders without triggering effects)
+  const anchorEmbeddingRef = useRef<number[] | null>(null);
+  const hadMultipleFacesRef = useRef(false);       // true while 2+ faces were in frame
+  const detectInFlightRef = useRef(false);         // guard against overlapping API calls
+  // Mirror of personTracking state as a ref so runFaceDetection stays stable (no deps churn)
+  const personTrackingRef = useRef<PersonTracking>("none");
+  // Ref mirrors of face-detection booleans — used in captureFrame to avoid stale closures
+  const multipleFacesRef = useRef(false);
+  const faceDetectedRef = useRef(false);
+  // "No Face Detected" is only shown after 10 s of continuous no-face (avoids flashing at start)
+  const noFaceStartTimeRef = useRef<number | null>(null);
+  const [noFaceOverlayVisible, setNoFaceOverlayVisible] = useState(false);
+
+  // Poll training job status until it reaches a terminal state
+  useEffect(() => {
+    if (!trainingJobId) return;
+
+    const poll = setInterval(async () => {
+      try {
+        const job = await admissionService.getTrainingJob(trainingJobId);
+        setTrainingStatus(job.status);
+        if (job.status === "succeeded" || job.status === "failed") {
+          clearInterval(poll);
+          if (job.status === "failed") {
+            setTrainingError(job.error ?? "Training failed for an unknown reason.");
+          }
+        }
+      } catch {
+        // Swallow polling errors — next tick will retry
+      }
+    }, 3000);
+
+    return () => clearInterval(poll);
+  }, [trainingJobId]);
 
   // Handle WebRTC Stream
   const startCamera = async () => {
     try {
-      const devices = await navigator.mediaDevices.enumerateDevices();
-      const videoDevices = devices.filter((d) => d.kind === "videoinput");
+      let videoConstraint: MediaTrackConstraints | boolean = true;
 
-      const deviceId = videoDevices[cameraIndex]?.deviceId;
+      if (cameraIndex > 0) {
+        // enumerateDevices() only returns real deviceIds after the browser has been
+        // granted camera permission. Open a temporary stream first to unlock the
+        // permission gate, then enumerate to find the right deviceId.
+        try {
+          const permStream = await navigator.mediaDevices.getUserMedia({ video: true });
+          permStream.getTracks().forEach((t) => t.stop());
 
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: deviceId ? { deviceId: { exact: deviceId } } : true,
-      });
+          const devices = await navigator.mediaDevices.enumerateDevices();
+          const videoDevices = devices.filter((d) => d.kind === "videoinput");
+          const deviceId = videoDevices[cameraIndex]?.deviceId;
+          if (deviceId) {
+            videoConstraint = { deviceId: { exact: deviceId } };
+          }
+        } catch {
+          // Permission or enumeration failed — fall back to default camera
+        }
+      }
 
+      const stream = await navigator.mediaDevices.getUserMedia({ video: videoConstraint });
       streamRef.current = stream;
       if (videoRef.current) {
         videoRef.current.srcObject = stream;
       }
     } catch (err) {
       console.error("Error accessing camera:", err);
-      alert("Could not access camera. Please check permissions.");
+      setFormError("Could not access camera. Please check browser permissions and try again.");
       handleStopCapture();
     }
   };
@@ -111,13 +181,17 @@ export default function FaceRegistration() {
   }, []);
 
   // Capture Logic
+  // Reads detection state from refs (not state) so the callback never has stale values —
+  // this means auto-resume works the moment the original person returns, and multiple-face
+  // detection stops a capture within the same tick it is detected.
   const captureFrame = useCallback(() => {
     if (
       videoRef.current &&
       canvasRef.current &&
       status === "capturing" &&
-      !multipleFaces &&
-      faceDetected
+      !multipleFacesRef.current &&        // always fresh — no stale closure
+      faceDetectedRef.current &&          // always fresh
+      personTrackingRef.current !== "wrong_person"  // always fresh
     ) {
       const video = videoRef.current;
       const canvas = canvasRef.current;
@@ -136,43 +210,139 @@ export default function FaceRegistration() {
         }
       }
     }
-  }, [status, multipleFaces, faceDetected, photoCount]);
+  }, [status, photoCount]); // only status/photoCount can change the logic; face state is ref-driven
 
-  // Main capture loop and mock face detection simulation
+  // Stable setters — keep both state (for UI renders) and ref (for capture reads) in sync
+  const updatePersonTracking = useCallback((next: PersonTracking) => {
+    personTrackingRef.current = next;
+    setPersonTracking(next);
+  }, []);
+
+  const updateFaceDetected = useCallback((val: boolean) => {
+    faceDetectedRef.current = val;
+    setFaceDetected(val);
+  }, []);
+
+  const updateMultipleFaces = useCallback((val: boolean) => {
+    multipleFacesRef.current = val;
+    setMultipleFaces(val);
+  }, []);
+
+  // Real face detection via backend — runs every 200ms while camera is live.
+  // Uses personTrackingRef (not state) so the callback stays stable and the
+  // detection interval is never torn-down/recreated on state changes.
+  const runFaceDetection = useCallback(async () => {
+    if (detectInFlightRef.current) return; // skip if previous call still in-flight
+    if (!videoRef.current || !canvasRef.current) return;
+
+    const video = videoRef.current;
+    if (video.readyState < 2 || video.videoWidth === 0) return; // stream not ready
+
+    const canvas = canvasRef.current;
+    canvas.width = video.videoWidth;
+    canvas.height = video.videoHeight;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+
+    // Draw raw (unmirrored) frame — the backend model doesn't need the CSS mirror
+    ctx.drawImage(video, 0, 0);
+
+    // Higher quality for more reliable face detection
+    const imageData = canvas.toDataURL("image/jpeg", 0.75);
+
+    detectInFlightRef.current = true;
+    try {
+      const { face_count, embedding } = await admissionService.detectFaces(imageData);
+
+      if (face_count === 0) {
+        // ── No face in frame ──────────────────────────────────────────────────
+        updateFaceDetected(false);
+        updateMultipleFaces(false);
+        // Start (or continue) the 10-second no-face timer
+        if (noFaceStartTimeRef.current === null) {
+          noFaceStartTimeRef.current = Date.now();
+        } else if (Date.now() - noFaceStartTimeRef.current >= 10_000) {
+          setNoFaceOverlayVisible(true);
+        }
+        // Don't touch personTracking — a blink / brief look-away shouldn't reset the anchor
+
+      } else {
+        // Face(s) present → cancel the no-face timer and hide the overlay immediately
+        noFaceStartTimeRef.current = null;
+        setNoFaceOverlayVisible(false);
+
+        if (face_count > 1) {
+          // ── Multiple faces ────────────────────────────────────────────────────
+          // Update ref FIRST so captureFrame blocks on the very next tick
+          updateFaceDetected(true);
+          updateMultipleFaces(true);
+          hadMultipleFacesRef.current = true;
+
+        } else {
+          // ── Exactly one face ──────────────────────────────────────────────────
+          updateMultipleFaces(false);
+          updateFaceDetected(true);
+
+          if (anchorEmbeddingRef.current === null) {
+            // First face ever — make them the anchor
+            if (embedding) {
+              anchorEmbeddingRef.current = embedding;
+              updatePersonTracking("anchor_set");
+            }
+          } else if (embedding) {
+            const similarity = cosineSimilarity(anchorEmbeddingRef.current, embedding);
+            const current = personTrackingRef.current;
+
+            if (hadMultipleFacesRef.current) {
+              // Returning from multi-face: verify it's the anchor before clearing the flag
+              if (similarity >= PERSON_TRACKING_THRESHOLD) {
+                hadMultipleFacesRef.current = false;
+                updatePersonTracking("anchor_set"); // ← resumes capture automatically
+              } else {
+                updatePersonTracking("wrong_person");
+              }
+            } else if (current === "wrong_person") {
+              // Waiting for anchor to return — only clear when similarity is high enough
+              if (similarity >= PERSON_TRACKING_THRESHOLD) {
+                updatePersonTracking("anchor_set"); // ← resumes capture automatically
+              }
+            } else {
+              // Normal single-face tracking
+              if (similarity >= PERSON_TRACKING_THRESHOLD) {
+                updatePersonTracking("anchor_set");
+              } else {
+                // Quick swap without a multi-face interval
+                updatePersonTracking("wrong_person");
+              }
+            }
+          }
+        }
+      }
+    } catch {
+      // Silently ignore detection errors — last known state is kept
+    } finally {
+      detectInFlightRef.current = false;
+    }
+  }, [updatePersonTracking, updateFaceDetected, updateMultipleFaces]);
+
+  // Main capture loop + detection loop
   useEffect(() => {
     let captureInterval: ReturnType<typeof setInterval>;
-    let mockDetectionInterval: ReturnType<typeof setInterval>;
+    let detectionInterval: ReturnType<typeof setInterval>;
 
     if (status === "capturing") {
       captureInterval = setInterval(() => {
         captureFrame();
-      }, 800); // 800ms interval takes ~24 seconds for 30 photos
+      }, 800); // 800 ms interval ≈ 24 s for 30 photos
     }
 
     if (status === "camera_ready" || status === "capturing") {
-      // Simulate highly realistic face detection tracking
-      mockDetectionInterval = setInterval(() => {
-        const hasMultiple = Math.random() < 0.05;
-        const noFace = Math.random() < 0.08; // 8% chance to temporarily lose face
-
-        setMultipleFaces(hasMultiple);
-        setFaceDetected(!noFace);
-
-        if (!noFace) {
-          // Smoothly drift box to track simulated face
-          setBoxPosition((prev) => {
-            const dx = (Math.random() - 0.5) * 8;
-            const dy = (Math.random() - 0.5) * 8;
-            const dw = (Math.random() - 0.5) * 4; // slight size breathing
-            return {
-              x: Math.max(10, Math.min(50, prev.x + dx)),
-              y: Math.max(10, Math.min(40, prev.y + dy)),
-              w: Math.max(30, Math.min(50, prev.w + dw)),
-              h: Math.max(45, Math.min(70, prev.h + dw * 1.5)),
-            };
-          });
-        }
-      }, 500);
+      // Poll backend for face detection every 100 ms — as fast as the backend can respond.
+      // detectInFlightRef prevents overlapping calls, so the effective rate is
+      // max(100ms, backend latency). Multiple-face detection blocks the next capture tick.
+      detectionInterval = setInterval(() => {
+        void runFaceDetection();
+      }, 100);
     }
 
     if (status === "completed") {
@@ -184,24 +354,46 @@ export default function FaceRegistration() {
 
     return () => {
       clearInterval(captureInterval);
-      clearInterval(mockDetectionInterval);
+      clearInterval(detectionInterval);
     };
-  }, [status, captureFrame, stopCamera]);
+  }, [status, captureFrame, stopCamera, runFaceDetection]);
+
+  const resetDetectionState = () => {
+    faceDetectedRef.current = false;
+    setFaceDetected(false);
+    multipleFacesRef.current = false;
+    setMultipleFaces(false);
+    personTrackingRef.current = "none";
+    setPersonTracking("none");
+    anchorEmbeddingRef.current = null;
+    hadMultipleFacesRef.current = false;
+    detectInFlightRef.current = false;
+    noFaceStartTimeRef.current = null;
+    setNoFaceOverlayVisible(false);
+  };
 
   const handleStartCapture = () => {
     if (!faculty || !studentId) {
-      alert("Please select faculty and enter student ID.");
+      setFormError("Please select a faculty code and enter the student ID before starting.");
       return;
     }
+    setFormError(null);
+    // Reset any previous Save & Train state so a fresh capture starts clean
+    setTrainingJobId(null);
+    setTrainingStatus(null);
+    setTrainingError(null);
+    setNeedsOverwrite(false);
     imagesRef.current = [];
     setCapturedCount(0);
     setCapturedImages([]);
+    resetDetectionState();
     setStatus("initializing");
     setIsCaptureModalOpen(true);
     startCamera();
   };
 
   const handleStopCapture = () => {
+    resetDetectionState();
     setStatus("ready");
     stopCamera();
     setIsCaptureModalOpen(false);
@@ -212,26 +404,62 @@ export default function FaceRegistration() {
     imagesRef.current = [];
     setCapturedCount(0);
     setCapturedImages([]);
+    resetDetectionState();
     setStatus("ready");
+    setTrainingJobId(null);
+    setTrainingStatus(null);
+    setTrainingError(null);
+    setNeedsOverwrite(false);
   };
 
-  const handleSaveAndTrain = async () => {
-    setStatus("ready");
-    setIsReviewModalOpen(false);
-    imagesRef.current = [];
-    setCapturedCount(0);
-    setCapturedImages([]);
+  const handleSaveAndTrain = async (overwrite = false) => {
+    if (!faculty || !studentId) {
+      setFormError("Missing faculty code or student ID.");
+      return;
+    }
+    if (capturedImages.length === 0) {
+      setFormError("No captured images to save.");
+      return;
+    }
 
-    alert(
-      `Successfully saved ${photoCount} images and triggered training process for ${studentId}.`,
-    );
+    setIsUploading(true);
+    setFormError(null);
+    setTrainingJobId(null);
+    setTrainingStatus(null);
+    setTrainingError(null);
+    setNeedsOverwrite(false);
+
+    try {
+      const result = await admissionService.uploadStudentCapturedImages({
+        faculty_code: faculty,
+        student_number: studentId,
+        images: capturedImages,
+        overwrite,
+      });
+
+      void fetchAdmissionData();
+
+      // Images saved — now track the training job
+      if (result.job_id) {
+        setTrainingJobId(result.job_id);
+        setTrainingStatus("queued");
+      }
+    } catch (err: unknown) {
+      // 409 means the student already has images on disk — ask user to confirm overwrite
+      const status = (err as { response?: { status?: number } })?.response?.status;
+      if (status === 409) {
+        setNeedsOverwrite(true);
+      } else {
+        console.error("Save and train failed", err);
+        setFormError("Failed to save images or start training. Please try again.");
+      }
+    } finally {
+      setIsUploading(false);
+    }
   };
 
-  // SVG Paths for corners
-  const tl = `M ${boxPosition.x} ${boxPosition.y + 10} L ${boxPosition.x} ${boxPosition.y} L ${boxPosition.x + 10} ${boxPosition.y}`;
-  const tr = `M ${boxPosition.x + boxPosition.w - 10} ${boxPosition.y} L ${boxPosition.x + boxPosition.w} ${boxPosition.y} L ${boxPosition.x + boxPosition.w} ${boxPosition.y + 10}`;
-  const bl = `M ${boxPosition.x} ${boxPosition.y + boxPosition.h - 10} L ${boxPosition.x} ${boxPosition.y + boxPosition.h} L ${boxPosition.x + 10} ${boxPosition.y + boxPosition.h}`;
-  const br = `M ${boxPosition.x + boxPosition.w - 10} ${boxPosition.y + boxPosition.h} L ${boxPosition.x + boxPosition.w} ${boxPosition.y + boxPosition.h} L ${boxPosition.x + boxPosition.w} ${boxPosition.y + boxPosition.h - 10}`;
+  // Determine if capture is actively allowed
+  const captureAllowed = faceDetected && !multipleFaces && personTracking !== "wrong_person";
 
   return (
     <div className="space-y-6">
@@ -379,6 +607,14 @@ export default function FaceRegistration() {
                 </Button>
               </div>
             </div>
+
+            {/* Inline error message — replaces alert() */}
+            {formError && (
+              <div className="flex items-start gap-2 rounded-lg border border-red-200 bg-red-50 dark:border-red-500/30 dark:bg-red-500/10 px-4 py-3 text-sm text-red-700 dark:text-red-400">
+                <AlertTriangle size={16} className="shrink-0 mt-0.5" />
+                <span>{formError}</span>
+              </div>
+            )}
           </CardContent>
         </Card>
       </div>
@@ -424,111 +660,55 @@ export default function FaceRegistration() {
               </div>
             )}
 
-            {/* Smooth SVG Overlay for Bounding Box */}
-            <AnimatePresence>
-              {(status === "camera_ready" || status === "capturing") &&
-                faceDetected && (
-                  <motion.svg
-                    initial={{ opacity: 0 }}
-                    animate={{ opacity: 1 }}
-                    exit={{ opacity: 0 }}
-                    className="absolute inset-0 w-full h-full pointer-events-none z-10"
-                    viewBox="0 0 100 100"
-                    preserveAspectRatio="none"
-                  >
-                    <motion.rect
-                      animate={{
-                        x: boxPosition.x,
-                        y: boxPosition.y,
-                        width: boxPosition.w,
-                        height: boxPosition.h,
-                      }}
-                      transition={{
-                        type: "spring",
-                        damping: 20,
-                        stiffness: 100,
-                        mass: 0.8,
-                      }}
-                      fill="none"
-                      stroke={multipleFaces ? "#ef4444" : "#10b981"}
-                      strokeWidth="0.5"
-                      strokeDasharray="2,2"
-                    />
-                    {/* Corner brackets */}
-                    <motion.path
-                      animate={{ d: tl }}
-                      transition={{
-                        type: "spring",
-                        damping: 20,
-                        stiffness: 100,
-                        mass: 0.8,
-                      }}
-                      fill="none"
-                      stroke={multipleFaces ? "#ef4444" : "#10b981"}
-                      strokeWidth="1"
-                    />
-                    <motion.path
-                      animate={{ d: tr }}
-                      transition={{
-                        type: "spring",
-                        damping: 20,
-                        stiffness: 100,
-                        mass: 0.8,
-                      }}
-                      fill="none"
-                      stroke={multipleFaces ? "#ef4444" : "#10b981"}
-                      strokeWidth="1"
-                    />
-                    <motion.path
-                      animate={{ d: bl }}
-                      transition={{
-                        type: "spring",
-                        damping: 20,
-                        stiffness: 100,
-                        mass: 0.8,
-                      }}
-                      fill="none"
-                      stroke={multipleFaces ? "#ef4444" : "#10b981"}
-                      strokeWidth="1"
-                    />
-                    <motion.path
-                      animate={{ d: br }}
-                      transition={{
-                        type: "spring",
-                        damping: 20,
-                        stiffness: 100,
-                        mass: 0.8,
-                      }}
-                      fill="none"
-                      stroke={multipleFaces ? "#ef4444" : "#10b981"}
-                      strokeWidth="1"
-                    />
-                  </motion.svg>
+            {/* Capture-ready border ring — green when OK, red when blocked */}
+            {(status === "camera_ready" || status === "capturing") && (
+              <div
+                className={cn(
+                  "absolute inset-0 pointer-events-none z-10 rounded-2xl transition-colors duration-300",
+                  captureAllowed
+                    ? "ring-2 ring-inset ring-emerald-500/60"
+                    : "ring-2 ring-inset ring-red-500/60",
                 )}
-            </AnimatePresence>
+              />
+            )}
 
             <AnimatePresence>
-              {multipleFaces && (
+              {/* Multiple faces detected */}
+              {multipleFaces && status !== "initializing" && (
                 <motion.div
                   initial={{ opacity: 0, y: -20 }}
                   animate={{ opacity: 1, y: 0 }}
                   exit={{ opacity: 0, y: -20 }}
-                  className="absolute top-4 left-1/2 -translate-x-1/2 bg-red-500/90 text-white px-4 py-2 rounded-lg backdrop-blur flex items-center gap-2 text-sm font-medium z-20 shadow-xl"
+                  className="absolute top-4 left-1/2 -translate-x-1/2 bg-red-500/90 text-white px-4 py-2 rounded-lg backdrop-blur flex items-center gap-2 text-sm font-medium z-20 shadow-xl whitespace-nowrap"
                 >
                   <AlertTriangle size={16} />
-                  Multiple faces detected
+                  Multiple Faces Detected — please ask others to step away
                 </motion.div>
               )}
 
-              {!faceDetected && status !== "initializing" && (
+              {/* Wrong person in frame */}
+              {!multipleFaces && personTracking === "wrong_person" && status !== "initializing" && (
                 <motion.div
-                  initial={{ opacity: 0, scale: 0.9 }}
-                  animate={{ opacity: 1, scale: 1 }}
-                  exit={{ opacity: 0, scale: 0.9 }}
-                  className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 bg-amber-500/90 text-white px-6 py-3 rounded-2xl backdrop-blur flex flex-col items-center gap-2 text-sm font-medium z-20 shadow-2xl"
+                  initial={{ opacity: 0, y: -20 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: -20 }}
+                  className="absolute top-4 left-1/2 -translate-x-1/2 bg-orange-500/90 text-white px-4 py-2 rounded-lg backdrop-blur flex items-center gap-2 text-sm font-medium z-20 shadow-xl whitespace-nowrap"
                 >
-                  <AlertTriangle size={24} />
-                  No Face Detected
+                  <UserX size={16} />
+                  Original person must return to continue
+                </motion.div>
+              )}
+
+              {/* No face detected — only shown after 10 s of continuous no-face */}
+              {noFaceOverlayVisible && !multipleFaces && status !== "initializing" && (
+                <motion.div
+                  initial={{ opacity: 0, y: -20 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: -20 }}
+                  className="absolute top-4 left-1/2 -translate-x-1/2 bg-amber-500/90 text-white px-4 py-2 rounded-lg backdrop-blur flex items-center gap-2 text-sm font-medium z-20 shadow-xl whitespace-nowrap"
+                >
+                  <AlertTriangle size={16} />
+                  No Face Detected — please step in front of the camera
                 </motion.div>
               )}
             </AnimatePresence>
@@ -557,9 +737,7 @@ export default function FaceRegistration() {
                   <motion.div
                     className={cn(
                       "h-full transition-colors duration-300",
-                      multipleFaces || !faceDetected
-                        ? "bg-red-500"
-                        : "bg-primary",
+                      !captureAllowed ? "bg-red-500" : "bg-primary",
                     )}
                     initial={{ width: 0 }}
                     animate={{
@@ -577,13 +755,12 @@ export default function FaceRegistration() {
                   <li className="flex items-start gap-2">
                     <CheckCircle2
                       size={16}
-                      className={
-                        faceDetected
-                          ? "text-emerald-500 shrink-0 mt-0.5"
-                          : "text-gray-400 shrink-0 mt-0.5"
-                      }
+                      className={cn(
+                        "shrink-0 mt-0.5",
+                        faceDetected ? "text-emerald-500" : "text-gray-400",
+                      )}
                     />
-                    Keep face centered in the box
+                    Face visible in frame
                   </li>
                   <li className="flex items-start gap-2">
                     <CheckCircle2
@@ -595,13 +772,24 @@ export default function FaceRegistration() {
                   <li className="flex items-start gap-2">
                     <CheckCircle2
                       size={16}
-                      className={
-                        !multipleFaces
-                          ? "text-emerald-500 shrink-0 mt-0.5"
-                          : "text-gray-400 shrink-0 mt-0.5"
-                      }
+                      className={cn(
+                        "shrink-0 mt-0.5",
+                        !multipleFaces ? "text-emerald-500" : "text-red-500",
+                      )}
                     />
-                    One person in frame
+                    One person in frame only
+                  </li>
+                  <li className="flex items-start gap-2">
+                    <CheckCircle2
+                      size={16}
+                      className={cn(
+                        "shrink-0 mt-0.5",
+                        personTracking !== "wrong_person"
+                          ? "text-emerald-500"
+                          : "text-orange-500",
+                      )}
+                    />
+                    Same person throughout
                   </li>
                 </ul>
               </div>
@@ -666,38 +854,141 @@ export default function FaceRegistration() {
             ))}
           </div>
 
-          <div className="flex flex-col sm:flex-row items-center justify-between gap-4 pt-4 border-t border-gray-200 dark:border-white/10">
-            <div className="bg-gray-50 dark:bg-white/5 px-4 py-2 rounded-lg border border-gray-200 dark:border-white/10">
-              <p className="text-sm text-gray-600 dark:text-gray-300">
-                Total Images:{" "}
-                <span className="font-bold text-gray-900 dark:text-white">
-                  {capturedImages.length}
-                </span>
-              </p>
-              <p className="text-sm text-gray-600 dark:text-gray-300">
-                Valid Faces:{" "}
-                <span className="font-bold text-emerald-500">
-                  {capturedImages.length} / {photoCount}
-                </span>
-              </p>
-            </div>
+          <div className="flex flex-col gap-4 pt-4 border-t border-gray-200 dark:border-white/10">
 
-            <div className="flex gap-3 w-full sm:w-auto">
-              <Button
-                variant="secondary"
-                className="flex-1 sm:flex-none"
-                onClick={handleRetake}
+            {/* Overwrite confirmation — shown when backend returns 409 */}
+            {needsOverwrite && (
+              <div className="rounded-lg border border-amber-200 bg-amber-50 dark:border-amber-500/30 dark:bg-amber-500/10 px-4 py-3 space-y-2">
+                <p className="text-sm font-semibold text-amber-800 dark:text-amber-300 flex items-center gap-2">
+                  <AlertTriangle size={16} />
+                  Student already has registered images
+                </p>
+                <p className="text-sm text-amber-700 dark:text-amber-400">
+                  This student already has face data saved. Do you want to replace the existing images with the new capture?
+                </p>
+                <div className="flex gap-3 pt-1">
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    onClick={() => setNeedsOverwrite(false)}
+                  >
+                    Cancel
+                  </Button>
+                  <Button
+                    size="sm"
+                    className="bg-amber-500 hover:bg-amber-600 text-white border-transparent"
+                    onClick={() => void handleSaveAndTrain(true)}
+                    disabled={isUploading}
+                  >
+                    {isUploading ? "Replacing..." : "Yes, Replace & Retrain"}
+                  </Button>
+                </div>
+              </div>
+            )}
+
+            {/* Training progress — shown after images are saved */}
+            {trainingJobId && !needsOverwrite && (
+              <div
+                className={cn(
+                  "rounded-lg border px-4 py-3 space-y-1",
+                  trainingStatus === "succeeded"
+                    ? "border-emerald-200 bg-emerald-50 dark:border-emerald-500/30 dark:bg-emerald-500/10"
+                    : trainingStatus === "failed"
+                    ? "border-red-200 bg-red-50 dark:border-red-500/30 dark:bg-red-500/10"
+                    : "border-blue-200 bg-blue-50 dark:border-blue-500/30 dark:bg-blue-500/10",
+                )}
               >
-                <RefreshCw size={18} className="mr-2" />
-                Retake
-              </Button>
-              <Button
-                className="flex-1 sm:flex-none bg-emerald-500 hover:bg-emerald-600 text-white border-transparent"
-                onClick={handleSaveAndTrain}
-              >
-                <Save size={18} className="mr-2" />
-                Save & Train
-              </Button>
+                <p
+                  className={cn(
+                    "text-sm font-semibold flex items-center gap-2",
+                    trainingStatus === "succeeded"
+                      ? "text-emerald-700 dark:text-emerald-400"
+                      : trainingStatus === "failed"
+                      ? "text-red-700 dark:text-red-400"
+                      : "text-blue-700 dark:text-blue-400",
+                  )}
+                >
+                  {trainingStatus === "succeeded" ? (
+                    <CheckCircle2 size={16} />
+                  ) : trainingStatus === "failed" ? (
+                    <AlertTriangle size={16} />
+                  ) : (
+                    <RefreshCw size={16} className="animate-spin" />
+                  )}
+                  {trainingStatus === "queued" && "Training queued — waiting to start…"}
+                  {trainingStatus === "running" && "Training in progress — building face model…"}
+                  {trainingStatus === "succeeded" && `Training complete! ${studentId} can now be recognised in attendance sessions.`}
+                  {trainingStatus === "failed" && "Training failed"}
+                </p>
+                {trainingStatus === "failed" && trainingError && (
+                  <p className="text-xs text-red-600 dark:text-red-400">{trainingError}</p>
+                )}
+                {trainingStatus === "succeeded" && (
+                  <p className="text-xs text-emerald-600 dark:text-emerald-400">
+                    Job ID: {trainingJobId}
+                  </p>
+                )}
+              </div>
+            )}
+
+            {/* Bottom action row */}
+            <div className="flex flex-col sm:flex-row items-center justify-between gap-4">
+              <div className="bg-gray-50 dark:bg-white/5 px-4 py-2 rounded-lg border border-gray-200 dark:border-white/10">
+                <p className="text-sm text-gray-600 dark:text-gray-300">
+                  Total Images:{" "}
+                  <span className="font-bold text-gray-900 dark:text-white">
+                    {capturedImages.length}
+                  </span>
+                </p>
+                <p className="text-sm text-gray-600 dark:text-gray-300">
+                  Valid Faces:{" "}
+                  <span className="font-bold text-emerald-500">
+                    {capturedImages.length} / {photoCount}
+                  </span>
+                </p>
+              </div>
+
+              <div className="flex gap-3 w-full sm:w-auto">
+                <Button
+                  variant="secondary"
+                  className="flex-1 sm:flex-none"
+                  onClick={handleRetake}
+                  disabled={isUploading || trainingStatus === "running" || trainingStatus === "queued"}
+                >
+                  <RefreshCw size={18} className="mr-2" />
+                  Retake
+                </Button>
+                {/* Hide Save & Train once training has started */}
+                {!trainingJobId && (
+                  <Button
+                    className="flex-1 sm:flex-none bg-emerald-500 hover:bg-emerald-600 text-white border-transparent"
+                    onClick={() => void handleSaveAndTrain(false)}
+                    disabled={isUploading || needsOverwrite}
+                  >
+                    <Save size={18} className="mr-2" />
+                    {isUploading ? "Saving..." : "Save & Train"}
+                  </Button>
+                )}
+                {/* Close button shown after terminal state */}
+                {(trainingStatus === "succeeded" || trainingStatus === "failed") && (
+                  <Button
+                    className="flex-1 sm:flex-none"
+                    onClick={() => {
+                      setIsReviewModalOpen(false);
+                      setStatus("ready");
+                      imagesRef.current = [];
+                      setCapturedCount(0);
+                      setCapturedImages([]);
+                      setTrainingJobId(null);
+                      setTrainingStatus(null);
+                      setTrainingError(null);
+                    }}
+                  >
+                    <CheckCircle2 size={18} className="mr-2" />
+                    Done
+                  </Button>
+                )}
+              </div>
             </div>
           </div>
         </div>

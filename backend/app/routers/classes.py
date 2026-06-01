@@ -8,10 +8,11 @@ from sqlalchemy import func, or_
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from app.core.security import require_roles
+from app.core.security import get_current_user, require_roles
 from app.db.faculty_scope import FacultyScopeContext, enforce_faculty_scope, get_optional_faculty_scope_context
-from app.db.models import ClassBatch
+from app.db.models import ClassBatch, ClassCourseAssignment, User
 from app.db.role_scoped import get_role_scoped_db
+from app.utils.activity_logger import log_activity
 from app.schemas.classbatch import (
     ClassBatchCreate,
     ClassBatchRead,
@@ -51,13 +52,13 @@ def _resolve_create_faculty_id(
 def _class_batch_duplicate_exists(
     db: Session,
     *,
-    department_id: int,
+    faculty_id: int,
     name: str,
     exclude_id: int | None = None,
 ) -> bool:
     normalized_name = name.strip().lower()
     query = db.query(ClassBatch.id).filter(
-        ClassBatch.department_id == department_id,
+        ClassBatch.faculty_id == faculty_id,
         func.lower(func.trim(ClassBatch.name)) == normalized_name,
     )
     if exclude_id is not None:
@@ -71,24 +72,23 @@ def _class_batch_integrity_detail(exc: IntegrityError) -> str:
         return "Class batch references missing faculty/department metadata"
     if error_kind == "duplicate" and integrity_error_mentions(
         exc,
-        "uq_class_batch_department_name",
         "uq_class_batch_faculty_name",
-        "class_batches.department_id, class_batches.name",
         "class_batches.faculty_id, class_batches.name",
     ):
-        return "Class batch already exists for this department"
-    return "Class batch already exists for this department"
+        return "Class batch with this name already exists in the faculty"
+    return "Class batch with this name already exists in the faculty"
 
 
 def _generate_class_batch_name(
     db: Session,
     *,
     faculty_code: str,
-    department_id: int,
+    faculty_id: int,
 ) -> str:
+    # Scan ALL classes in the faculty so numbering is globally unique per faculty
     existing_names = (
         db.query(ClassBatch.name)
-        .filter(ClassBatch.department_id == department_id)
+        .filter(ClassBatch.faculty_id == faculty_id)
         .all()
     )
 
@@ -119,6 +119,7 @@ def create_class_batch(
     payload: ClassBatchCreate,
     db: Session = Depends(get_role_scoped_db),
     faculty_scope = Depends(get_optional_faculty_scope_context),
+    current_user: User = Depends(get_current_user),
 ):
     faculty_id = _resolve_create_faculty_id(
         payload_faculty_id=payload.faculty_id,
@@ -147,15 +148,15 @@ def create_class_batch(
     class_name = _generate_class_batch_name(
         db,
         faculty_code=faculty_code_for_generation,
-        department_id=payload.department_id,
+        faculty_id=faculty_id,
     )
 
     if _class_batch_duplicate_exists(
         db,
-        department_id=payload.department_id,
+        faculty_id=faculty_id,
         name=class_name,
     ):
-        raise HTTPException(status_code=409, detail="Class batch already exists for this department")
+        raise HTTPException(status_code=409, detail="Class batch with this name already exists in the faculty")
 
     obj = ClassBatch(
         faculty_id=faculty_id,
@@ -171,7 +172,7 @@ def create_class_batch(
         detail = _class_batch_integrity_detail(exc)
         if classify_integrity_error(exc) == "duplicate" and _class_batch_duplicate_exists(
             db,
-            department_id=payload.department_id,
+            faculty_id=faculty_id,
             name=class_name,
         ):
             logger.warning(
@@ -186,6 +187,7 @@ def create_class_batch(
         logger.exception("Unexpected integrity error while creating class batch")
         raise HTTPException(status_code=400, detail="Class batch could not be created due to invalid data") from exc
     db.refresh(obj)
+    log_activity(action=f"Class Created - {obj.name}", user=current_user, db=db)
     return obj
 
 
@@ -196,6 +198,7 @@ def list_class_batches(
     limit: int = Query(default=50, ge=1, le=200, description="Page size", examples=[20]),
     faculty_id: int | None = Query(default=None, description="Filter by faculty id", examples=[1]),
     department_id: int | None = Query(default=None, description="Filter by department id", examples=[1]),
+    course_id: int | None = Query(default=None, description="Filter by course id — returns only classes assigned to that course", examples=[1]),
     search: str | None = Query(default=None, description="Search class name", examples=["CIS"]),
     faculty_scope = Depends(get_optional_faculty_scope_context),
 ):
@@ -209,6 +212,12 @@ def list_class_batches(
         query = query.filter(ClassBatch.faculty_id == faculty_id)
     if department_id is not None:
         query = query.filter(ClassBatch.department_id == department_id)
+    if course_id is not None:
+        # Return only class batches that are linked to this course via ClassCourseAssignment
+        query = query.join(
+            ClassCourseAssignment,
+            ClassCourseAssignment.class_id == ClassBatch.id,
+        ).filter(ClassCourseAssignment.course_id == course_id)
     if search:
         pattern = f"%{search.strip()}%"
         query = query.filter(or_(ClassBatch.name.ilike(pattern)))
@@ -248,11 +257,11 @@ def update_class_batch(
 
     if _class_batch_duplicate_exists(
         db,
-        department_id=obj.department_id,
+        faculty_id=obj.faculty_id,
         name=obj.name,
         exclude_id=obj.id,
     ):
-        raise HTTPException(status_code=409, detail="Class batch already exists for this department")
+        raise HTTPException(status_code=409, detail="Class batch with this name already exists in the faculty")
 
     db.add(obj)
     try:

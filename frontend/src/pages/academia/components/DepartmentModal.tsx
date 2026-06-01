@@ -19,6 +19,7 @@ type DepartmentFormData = z.infer<typeof departmentSchema>;
 export function DepartmentModal() {
   const { departmentModal, closeModal, addDepartment, updateDepartment, faculties } = useAcademiaStore();
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState<string | null>(null);
 
   const { isOpen, mode, record } = departmentModal;
   const isViewMode = mode === 'view';
@@ -29,6 +30,7 @@ export function DepartmentModal() {
 
   useEffect(() => {
     if (isOpen) {
+      setSubmitError(null);
       if (record) {
         reset({ facultyId: record.facultyId, name: record.name, code: record.code });
       } else {
@@ -40,6 +42,7 @@ export function DepartmentModal() {
   const onSubmit = async (data: DepartmentFormData) => {
     if (isViewMode) return;
     setIsSubmitting(true);
+    setSubmitError(null);
     try {
       if (mode === 'edit' && record) {
         await updateDepartment(record.id, data);
@@ -47,8 +50,13 @@ export function DepartmentModal() {
         await addDepartment(data);
       }
       closeModal('department');
-    } catch (error) {
-      console.error(error);
+    } catch (error: any) {
+      const msg =
+        error?.response?.data?.detail ??
+        error?.response?.data?.error?.message ??
+        error?.message ??
+        'Failed to save department. Please try again.';
+      setSubmitError(msg);
     } finally {
       setIsSubmitting(false);
     }
@@ -63,6 +71,11 @@ export function DepartmentModal() {
   return (
     <Modal isOpen={isOpen} onClose={() => closeModal('department')} title={titles[mode]} className="md:max-w-md">
       <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
+        {submitError && (
+          <div className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700 dark:border-rose-500/20 dark:bg-rose-500/10 dark:text-rose-200">
+            {submitError}
+          </div>
+        )}
         <div>
           <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5 ml-1">Faculty Name</label>
           <Select 

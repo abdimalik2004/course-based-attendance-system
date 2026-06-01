@@ -88,6 +88,11 @@ class RoleRead(BaseModel):
     name: str
 
 
+class ChangePasswordRequest(BaseModel):
+    current_password: str = Field(min_length=1)
+    new_password: str = Field(min_length=8, description="New password must be at least 8 characters")
+
+
 class ResetDatabaseRequest(BaseModel):
     model_config = ConfigDict(
         json_schema_extra={
@@ -108,4 +113,9 @@ class UserRead(BaseModel):
     email: str | None
     is_active: bool
     faculty_id: int | None
+    teacher_id: int | None = None
+    student_id: int | None = None
+    student_number: str | None = None
     role_names: list[str]
+    profile_image_url: str | None = None
+    full_name: str | None = None

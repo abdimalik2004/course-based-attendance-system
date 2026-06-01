@@ -49,6 +49,8 @@ export interface CourseAssignment {
   facultyId: string;
   departmentId: string;
   semester: number;
+  /** The AcademicYear (semester row) id this course is assigned to */
+  academicYearId: string;
   createdAt: string;
 }
 

@@ -5,17 +5,19 @@ import { useSidebarStore } from '@/store/useSidebarStore';
 import { cn } from '@/utils/cn';
 import { ThemeToggle } from '@/components/ui/ThemeToggle';
 import { LogOut, User, UserCog, Bell, Menu, FileText } from 'lucide-react';
+import { KeyRound } from 'lucide-react';
 import { useAuthStore } from '@/store/useAuthStore';
+import { UserAvatar } from '@/components/ui/UserAvatar';
 import { useUIStore } from '@/store/useUIStore';
 import { motion, AnimatePresence } from 'framer-motion';
 import logoUrl from '@/assets/logo.png';
 import lightLogoUrl from '@/assets/light-logo.png';
 
 function AdmissionTopbar() {
-  const { logout } = useAuthStore();
+  const { logout, user } = useAuthStore();
   const navigate = useNavigate();
   const { toggleSidebar } = useSidebarStore();
-  const { openEditProfile } = useUIStore();
+  const { openEditProfile, openChangePassword } = useUIStore();
   
   const [profileDropdownOpen, setProfileDropdownOpen] = useState(false);
   const [notificationDropdownOpen, setNotificationDropdownOpen] = useState(false);
@@ -122,17 +124,17 @@ function AdmissionTopbar() {
         
         {/* Profile Dropdown */}
         <div className="relative flex items-center gap-2 pl-2 sm:border-l sm:border-gray-200 sm:dark:border-white/10" ref={profileRef}>
-          <button 
+          <button
             onClick={() => {
-                setProfileDropdownOpen(!profileDropdownOpen);
-                setNotificationDropdownOpen(false);
+              setProfileDropdownOpen(!profileDropdownOpen);
+              setNotificationDropdownOpen(false);
             }}
-            className="flex h-9 w-9 items-center justify-center rounded-full bg-gray-100 dark:bg-white/10 text-gray-600 dark:text-gray-300 transition-colors hover:bg-gray-200 dark:hover:bg-white/20 focus:outline-none focus:ring-2 focus:ring-primary/50"
+            className="flex h-9 w-9 items-center justify-center rounded-full bg-gray-100 dark:bg-white/10 text-gray-600 dark:text-gray-300 transition-colors hover:bg-gray-200 dark:hover:bg-white/20 focus:outline-none focus:ring-2 focus:ring-primary/50 overflow-hidden"
           >
-            <User size={18} />
+            <UserAvatar imageUrl={user?.profile_image_url} username={user?.username} size={36} />
           </button>
           <span className="hidden text-sm font-medium text-gray-700 dark:text-gray-200 sm:block">
-            Admission Officer
+            {user?.username || 'Admission Officer'}
           </span>
 
           <AnimatePresence>
@@ -145,8 +147,8 @@ function AdmissionTopbar() {
                 className="absolute right-0 top-12 w-48 rounded-xl border border-gray-200 dark:border-white/10 bg-white dark:bg-dark-card p-1.5 shadow-xl glass-card overflow-hidden z-50"
               >
                 <div className="px-3 py-2 border-b border-gray-100 dark:border-white/5 mb-1">
-                  <p className="text-sm font-medium text-gray-900 dark:text-white">Admission Dept</p>
-                  <p className="text-xs text-gray-500 dark:text-gray-400 truncate">admission@heegan.edu</p>
+                  <p className="text-sm font-medium text-gray-900 dark:text-white">{user?.username || 'Admission Dept'}</p>
+                  <p className="text-xs text-gray-500 dark:text-gray-400 truncate">{user?.email || 'admission@heegan.edu'}</p>
                 </div>
                 
                 <button
@@ -158,6 +160,17 @@ function AdmissionTopbar() {
                 >
                   <UserCog size={16} />
                   <span>Edit Profile</span>
+                </button>
+
+                <button
+                  onClick={() => {
+                    setProfileDropdownOpen(false);
+                    openChangePassword();
+                  }}
+                  className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm text-gray-600 hover:bg-gray-100 hover:text-gray-900 dark:text-gray-300 dark:hover:bg-white/10 dark:hover:text-white transition-colors text-left"
+                >
+                  <KeyRound size={16} />
+                  <span>Change Password</span>
                 </button>
 
                 <div className="my-1 border-t border-gray-100 dark:border-white/5"></div>

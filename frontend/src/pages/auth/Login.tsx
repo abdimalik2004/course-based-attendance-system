@@ -1,9 +1,9 @@
-import { useState } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import * as z from "zod";
 import { motion } from "framer-motion";
-import { User, Lock, Eye, EyeOff } from "lucide-react";
+import { User, Lock, Eye, EyeOff, ShieldAlert, Timer } from "lucide-react";
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
 import { useAuthStore } from "@/store/useAuthStore";
@@ -22,22 +22,52 @@ type LoginForm = z.infer<typeof loginSchema>;
 export default function Login() {
   const [isLoading, setIsLoading] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
+  const [lockoutSeconds, setLockoutSeconds] = useState(0);
+  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const { login } = useAuthStore();
 
   const {
     register,
     handleSubmit,
     setError,
+    clearErrors,
     formState: { errors },
   } = useForm<LoginForm>({
     resolver: zodResolver(loginSchema),
   });
 
+  // Countdown timer: tick every second until lockout expires
+  useEffect(() => {
+    if (lockoutSeconds <= 0) {
+      if (timerRef.current) {
+        clearInterval(timerRef.current);
+        timerRef.current = null;
+      }
+      return;
+    }
+
+    timerRef.current = setInterval(() => {
+      setLockoutSeconds((s) => {
+        if (s <= 1) {
+          clearErrors("root");
+          return 0;
+        }
+        return s - 1;
+      });
+    }, 1000);
+
+    return () => {
+      if (timerRef.current) clearInterval(timerRef.current);
+    };
+  }, [lockoutSeconds > 0]); // only re-run when transitioning between locked/unlocked
+
+  const isLocked = lockoutSeconds > 0;
+
   const onSubmit = async (data: LoginForm) => {
+    if (isLocked) return;
     setIsLoading(true);
     try {
       const user = await authService.login(data.username, data.password);
-      // user.role may be uppercase; normalize for routing
       const roleSource =
         Array.isArray(user.role_names) && user.role_names.length > 0
           ? user.role_names[0]
@@ -71,13 +101,27 @@ export default function Login() {
         default:
           destination = "/";
       }
-
-      // Hard redirect so the dashboard loads cleanly after auth state updates.
       window.location.replace(destination);
     } catch (err: any) {
-      const message =
-        err?.response?.data?.detail || err.message || "Login failed";
-      setError("root", { type: "manual", message });
+      const status = err?.response?.status;
+      const details = err?.response?.data?.error?.details;
+
+      // 429 — lockout triggered by the server
+      if (status === 429) {
+        const retryAfter: number = details?.retry_after ?? 30;
+        setLockoutSeconds(retryAfter);
+        setError("root", {
+          type: "lockout",
+          message: details?.message ?? `Too many failed attempts. Please wait ${retryAfter} seconds.`,
+        });
+      } else {
+        const message =
+          err?.response?.data?.error?.message ||
+          err?.response?.data?.detail ||
+          err.message ||
+          "Login failed";
+        setError("root", { type: "manual", message });
+      }
     } finally {
       setIsLoading(false);
     }
@@ -140,6 +184,7 @@ export default function Login() {
                   placeholder="Enter your username"
                   className="pl-11 transition-all"
                   error={errors.username?.message}
+                  disabled={isLocked}
                 />
               </div>
             </div>
@@ -166,23 +211,43 @@ export default function Login() {
                   placeholder="Enter your password"
                   className="pl-11 pr-11 transition-all"
                   error={errors.password?.message}
+                  disabled={isLocked}
                 />
                 <button
                   type="button"
                   onClick={() => setShowPassword(!showPassword)}
                   className="absolute inset-y-0 right-0 pr-4 flex items-center text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 z-10 focus:outline-none transition-colors"
+                  tabIndex={-1}
                 >
                   {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
                 </button>
               </div>
             </div>
 
-            {/* Display root error from failed auth */}
+            {/* Error / lockout banner */}
             {errors.root && (
-              <div className="p-3 rounded-lg bg-red-500/10 border border-red-500/20 text-center">
-                <p className="text-sm font-medium text-red-500">
-                  {errors.root.message}
-                </p>
+              <div className={`p-3 rounded-lg border text-center space-y-1 ${
+                isLocked
+                  ? "bg-amber-500/10 border-amber-500/20"
+                  : "bg-red-500/10 border-red-500/20"
+              }`}>
+                <div className="flex items-center justify-center gap-2">
+                  {isLocked ? (
+                    <ShieldAlert size={15} className="text-amber-400 shrink-0" />
+                  ) : null}
+                  <p className={`text-sm font-medium ${isLocked ? "text-amber-400" : "text-red-500"}`}>
+                    {errors.root.message}
+                  </p>
+                </div>
+                {isLocked && (
+                  <div className="flex items-center justify-center gap-1.5 text-amber-300/80 text-xs">
+                    <Timer size={13} />
+                    <span>
+                      You can try again in{" "}
+                      <span className="font-bold tabular-nums">{lockoutSeconds}s</span>
+                    </span>
+                  </div>
+                )}
               </div>
             )}
 
@@ -191,8 +256,9 @@ export default function Login() {
               className="w-full mt-10 mb-2"
               size="lg"
               isLoading={isLoading}
+              disabled={isLocked || isLoading}
             >
-              Sign in to Heegan
+              {isLocked ? `Locked · ${lockoutSeconds}s` : "Sign in to Heegan"}
             </Button>
           </form>
         </div>

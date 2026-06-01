@@ -8,10 +8,11 @@ from sqlalchemy.orm import Session
 from sqlalchemy import or_, func
 from sqlalchemy.exc import IntegrityError
 
-from app.core.security import require_roles
+from app.core.security import get_current_user, require_roles
 from app.db.faculty_scope import enforce_faculty_scope, get_optional_faculty_scope_context
-from app.db.models import Student, StudentAdmissionStatus
+from app.db.models import Student, StudentAdmissionStatus, User
 from app.db.role_scoped import get_role_scoped_db
+from app.utils.activity_logger import log_activity
 from app.services.enrollment_service import auto_enroll_student_in_matching_courses
 from app.schemas.student import (
     StudentCreate,
@@ -29,6 +30,16 @@ from app.utils.organization import (
 )
 from app.utils.student_numbering import next_available_student_number
 from app.utils.student_numbering import student_dataset_dir as resolve_student_dataset_dir
+from pydantic import BaseModel, Field
+from fastapi import Body
+from utils.config import load_config
+from app.utils.image_decode import decode_base64_image
+from face_recognition.train import train_embeddings_from_dataset
+from app.services.face_service import face_service
+import cv2
+from pathlib import Path
+import re
+from fastapi import Response
 
 
 router = APIRouter(prefix="/students", tags=["students"])
@@ -157,6 +168,7 @@ def read_student_captured_image(
 def create_student(
     payload: StudentCreate,
     db: Session = Depends(get_role_scoped_db),
+    current_user: User = Depends(get_current_user),
     faculty_scope = Depends(get_optional_faculty_scope_context),
 ):
     if faculty_scope is None:
@@ -187,7 +199,38 @@ def create_student(
         db.rollback()
         raise HTTPException(status_code=409, detail="Student number already exists") from exc
     db.refresh(obj)
+    log_activity(
+        action=f"Student Registered - {obj.full_name} ({obj.student_number})",
+        user=current_user,
+        db=db,
+    )
     return obj
+
+
+class FaceDetectRequest(BaseModel):
+    image: str = Field(..., description="Base64-encoded image frame (data URI or raw base64)")
+
+
+@router.post(
+    "/detect",
+    dependencies=[Depends(require_roles("ADMISSIONS"))],
+    summary="Detect faces in a frame (for capture-time validation)",
+)
+def detect_faces_in_frame(payload: FaceDetectRequest):
+    """
+    Detect how many faces are present in the given frame and return an embedding
+    for the largest detected face.  Used by the face-capture UI to enforce the
+    single-person and same-person rules during image collection.
+
+    Works even before any student model has been trained.
+    """
+    try:
+        frame = decode_base64_image(payload.image)
+    except Exception:
+        return {"face_count": 0, "embedding": None}
+
+    result = face_service.detect_faces(frame)
+    return result
 
 
 @router.get("", response_model=PaginatedStudentRead, dependencies=[Depends(require_roles("ADMISSIONS", "FACULTY", "TEACHER", "ACADEMIA"))])
@@ -268,6 +311,13 @@ def delete_student(student_id: int, db: Session = Depends(get_role_scoped_db)):
     obj = db.query(Student).filter(Student.id == student_id).first()
     if not obj:
         raise HTTPException(status_code=404, detail="Student not found")
+    # Detach any user accounts that reference this student.
+    # The users.student_id FK has no ON DELETE rule so MySQL would block the
+    # delete otherwise.  Setting it to NULL preserves the user account but
+    # removes the student link.
+    db.query(User).filter(User.student_id == student_id).update(
+        {User.student_id: None}, synchronize_session="fetch"
+    )
     db.delete(obj)
     try:
         db.commit()
@@ -275,3 +325,147 @@ def delete_student(student_id: int, db: Session = Depends(get_role_scoped_db)):
         db.rollback()
         raise HTTPException(status_code=409, detail="Cannot delete student due to related records") from exc
     return {"deleted": True, "student_id": student_id}
+
+
+
+class CaptureRequest(BaseModel):
+    faculty_code: str = Field(..., min_length=2)
+    student_number: str = Field(..., min_length=3)
+    images: list[str] = Field(..., min_items=1)
+    overwrite: bool = Field(
+        False,
+        description="If True, clear existing images for this student before saving new ones.",
+    )
+
+
+@router.post(
+    "/capture",
+    dependencies=[Depends(require_roles("ADMISSIONS"))],
+)
+def capture_and_train(
+    payload: CaptureRequest = Body(...),
+    db: Session = Depends(get_role_scoped_db),
+):
+    # Basic validation and sanitization
+    faculty_code = payload.faculty_code.strip().upper()
+    student_number = payload.student_number.strip().upper()
+
+    if not re.match(r"^[A-Z0-9_-]+$", faculty_code):
+        raise HTTPException(status_code=400, detail="Invalid faculty code")
+    if not re.match(r"^[A-Z0-9_-]+$", student_number):
+        raise HTTPException(status_code=400, detail="Invalid student number")
+
+    # Resolve dataset root from config
+    cfg = load_config()
+    dataset_root = Path(cfg.dataset_dir)
+    faculty_dir = dataset_root / faculty_code
+    student_dir = faculty_dir / student_number
+
+    try:
+        faculty_dir.mkdir(parents=True, exist_ok=True)
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Failed to create faculty dir: {exc}") from exc
+
+    # Guard against accidentally overwriting existing images unless the caller explicitly requested it
+    if student_dir.exists() and any(student_dir.iterdir()):
+        if not payload.overwrite:
+            raise HTTPException(
+                status_code=409,
+                detail="Student dataset folder already exists. Send overwrite=true to replace existing images.",
+            )
+        # overwrite=True: remove existing image files before saving new ones
+        for old_img in list(student_dir.iterdir()):
+            if old_img.is_file() and old_img.suffix.lower() in _DATASET_IMAGE_SUFFIXES:
+                try:
+                    old_img.unlink()
+                except Exception:
+                    pass  # best effort
+
+    try:
+        student_dir.mkdir(parents=True, exist_ok=True)
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Failed to create student dir: {exc}") from exc
+
+    saved = 0
+    # Determine next image index
+    existing = sorted([p for p in student_dir.iterdir() if p.is_file()])
+    def _next_index():
+        idx = 1
+        for p in existing:
+            m = re.search(r"(\d+)", p.stem)
+            if m:
+                try:
+                    idx = max(idx, int(m.group(1)) + 1)
+                except Exception:
+                    pass
+        return idx
+
+    index = _next_index()
+    for img_b64 in payload.images:
+        try:
+            frame = decode_base64_image(img_b64)
+        except Exception as exc:
+            # Rollback saved files if any
+            for p in student_dir.iterdir():
+                try:
+                    p.unlink()
+                except Exception:
+                    pass
+            raise HTTPException(status_code=400, detail=f"Invalid image payload: {exc}") from exc
+
+        # write jpeg
+        file_name = f"img_{index:03d}.jpg"
+        dest = student_dir / file_name
+        success, encoded = cv2.imencode('.jpg', frame, [int(cv2.IMWRITE_JPEG_QUALITY), 90])
+        if not success:
+            for p in student_dir.iterdir():
+                try:
+                    p.unlink()
+                except Exception:
+                    pass
+            raise HTTPException(status_code=500, detail="Failed to encode image")
+        try:
+            with open(dest, 'wb') as f:
+                f.write(encoded.tobytes())
+        except Exception as exc:
+            for p in student_dir.iterdir():
+                try:
+                    p.unlink()
+                except Exception:
+                    pass
+            raise HTTPException(status_code=500, detail=f"Failed to write image file: {exc}") from exc
+
+        saved += 1
+        index += 1
+
+    # Enqueue embedding training as a background job
+    try:
+        from app.services.training_manager import enqueue_embeddings_training
+
+        def _train_wrapper():
+            cfg = load_config()
+            train_embeddings_from_dataset(cfg)
+            try:
+                face_service.reload_models()
+            except Exception:
+                # Non-fatal: model reload failure should not crash job
+                pass
+
+        job_id = enqueue_embeddings_training(_train_wrapper, meta={
+            "faculty_code": faculty_code,
+            "student_number": student_number,
+            "saved_images": saved,
+        })
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Failed to enqueue training job: {exc}") from exc
+
+    return {"saved": saved, "job_id": job_id, "student_number": student_number}
+
+
+
+
+
+@router.options("/capture")
+def capture_preflight():
+    # Explicitly allow preflight requests for clients that send CORS preflight
+    return Response(status_code=200)

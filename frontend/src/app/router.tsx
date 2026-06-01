@@ -1,7 +1,7 @@
 import { lazy } from 'react';
 import { createBrowserRouter, Navigate } from 'react-router-dom';
 const Login = lazy(() => import('@/pages/auth/Login'));
-import { ProtectedRoute } from '@/components/ProtectedRoute';
+import { ProtectedRoute, AccessDenied } from '@/components/ProtectedRoute';
 
 const AdminLayout = lazy(() => import('@/layouts/AdminLayout'));
 const AdminDashboard = lazy(() => import('@/pages/admin/Dashboard'));
@@ -11,6 +11,10 @@ const Attendance = lazy(() => import('@/pages/admin/Attendance'));
 const AdminAttendanceList = lazy(() => import('@/pages/admin/AttendanceList'));
 const RolesManagement = lazy(() => import('@/pages/admin/RolesManagement'));
 const SettingsLayout = lazy(() => import('@/pages/admin/settings/SettingsLayout'));
+// Admin cross-module views (reuse existing page components)
+const AdminStudents = lazy(() => import('@/pages/admission/Students'));
+const AdminTeachers = lazy(() => import('@/pages/hr/Teachers'));
+const AdminFaculties = lazy(() => import('@/pages/academia/Faculties'));
 
 // Academia Imports
 const AcademiaLayout = lazy(() => import('@/components/academia/Layout'));
@@ -41,6 +45,12 @@ const FacultyDashboard = lazy(() => import('@/pages/faculty/Dashboard'));
 const AssignTeacher = lazy(() => import('@/pages/faculty/AssignTeacher'));
 const ScheduleCourse = lazy(() => import('@/pages/faculty/ScheduleCourse'));
 const FacultyAttendanceList = lazy(() => import('@/pages/faculty/AttendanceList'));
+// Faculty scoped list views (clicked from dashboard stat cards)
+const FacultyStudents = lazy(() => import('@/pages/faculty/Students'));
+const FacultyTeachers = lazy(() => import('@/pages/faculty/Teachers'));
+const FacultyDepartments = lazy(() => import('@/pages/faculty/Departments'));
+const FacultyClasses = lazy(() => import('@/pages/faculty/Classes'));
+const FacultyCourses = lazy(() => import('@/pages/faculty/Courses'));
 
 // Teacher Imports
 const TeacherLayout = lazy(() => import('@/components/teacher/Layout'));
@@ -63,6 +73,7 @@ export const router = createBrowserRouter([
   {
     path: '/faculty',
     element: <ProtectedRoute allowedRole="faculty" />,
+    errorElement: <AccessDenied />,
     children: [
       {
         path: '',
@@ -88,6 +99,30 @@ export const router = createBrowserRouter([
             path: 'attendance-list',
             element: <FacultyAttendanceList />,
           },
+          {
+            path: 'students',
+            element: <FacultyStudents />,
+          },
+          {
+            path: 'teachers',
+            element: <FacultyTeachers />,
+          },
+          {
+            path: 'departments',
+            element: <FacultyDepartments />,
+          },
+          {
+            path: 'classes',
+            element: <FacultyClasses />,
+          },
+          {
+            path: 'courses',
+            element: <FacultyCourses />,
+          },
+          {
+            path: '*',
+            element: <AccessDenied />,
+          },
         ]
       }
     ],
@@ -95,6 +130,7 @@ export const router = createBrowserRouter([
   {
     path: '/admin',
     element: <ProtectedRoute allowedRole="admin" />,
+    errorElement: <AccessDenied />,
     children: [
       {
         path: '',
@@ -132,6 +168,23 @@ export const router = createBrowserRouter([
             path: 'settings',
             element: <SettingsLayout />,
           },
+          // Cross-module views — admin can browse any module's data
+          {
+            path: 'students',
+            element: <AdminStudents />,
+          },
+          {
+            path: 'teachers',
+            element: <AdminTeachers />,
+          },
+          {
+            path: 'faculties',
+            element: <AdminFaculties />,
+          },
+          {
+            path: '*',
+            element: <AccessDenied />,
+          },
         ]
       }
     ],
@@ -139,6 +192,7 @@ export const router = createBrowserRouter([
   {
     path: '/academia',
     element: <ProtectedRoute allowedRole="academia" />,
+    errorElement: <AccessDenied />,
     children: [
       {
         path: '',
@@ -172,6 +226,10 @@ export const router = createBrowserRouter([
             path: 'academic-structure',
             element: <AcademicStructure />,
           },
+          {
+            path: '*',
+            element: <AccessDenied />,
+          },
         ]
       }
     ],
@@ -184,6 +242,7 @@ export const router = createBrowserRouter([
   {
     path: '/hr',
     element: <ProtectedRoute allowedRole="hr" />,
+    errorElement: <AccessDenied />,
     children: [
       {
         path: '',
@@ -209,6 +268,10 @@ export const router = createBrowserRouter([
             path: 'settings',
             element: <HRSettings />,
           },
+          {
+            path: '*',
+            element: <AccessDenied />,
+          },
         ]
       }
     ],
@@ -216,6 +279,7 @@ export const router = createBrowserRouter([
   {
     path: '/admission',
     element: <ProtectedRoute allowedRole="admission" />,
+    errorElement: <AccessDenied />,
     children: [
       {
         path: '',
@@ -241,6 +305,10 @@ export const router = createBrowserRouter([
             path: 'face-registration',
             element: <AdmissionFaceRegistration />,
           },
+          {
+            path: '*',
+            element: <AccessDenied />,
+          },
         ]
       }
     ],
@@ -248,6 +316,7 @@ export const router = createBrowserRouter([
   {
     path: '/teacher',
     element: <ProtectedRoute allowedRole="teacher" />,
+    errorElement: <AccessDenied />,
     children: [
       {
         path: '',
@@ -273,6 +342,10 @@ export const router = createBrowserRouter([
             path: 'schedule',
             element: <TeacherSchedule />,
           },
+          {
+            path: '*',
+            element: <AccessDenied />,
+          },
         ]
       }
     ],
@@ -280,6 +353,7 @@ export const router = createBrowserRouter([
   {
     path: '/student',
     element: <ProtectedRoute allowedRole="student" />,
+    errorElement: <AccessDenied />,
     children: [
       {
         path: '',
@@ -301,8 +375,17 @@ export const router = createBrowserRouter([
             path: 'schedule',
             element: <StudentSchedule />,
           },
+          {
+            path: '*',
+            element: <AccessDenied />,
+          },
         ]
       }
     ],
+  },
+  // Global catch-all: any unrecognised URL shows the Access Denied screen
+  {
+    path: '*',
+    element: <AccessDenied />,
   },
 ]);

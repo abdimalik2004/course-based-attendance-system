@@ -28,7 +28,8 @@ export const usersService = {
   },
 
   createUser: async (data: CreateUserPayload) => {
-    const roleName = data.role?.toString?.().trim().toUpperCase() || "STAFF";
+    const roleName = data.role?.toString?.().trim().toUpperCase();
+    if (!roleName) throw new Error("Role is required");
     const payload: any = {
       username: data.username,
       email: data.email,

@@ -11,5 +11,6 @@ export function useAttendanceList(params?: { page?: number; limit?: number; sear
   return useQuery({
     queryKey: attendanceKeys.list(params),
     queryFn: () => attendanceService.getAttendanceList(params),
+    refetchInterval: 15_000,
   });
 }

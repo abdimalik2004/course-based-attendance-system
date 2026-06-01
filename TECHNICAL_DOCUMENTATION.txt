@@ -1,0 +1,480 @@
+Course-Based Attendance System - Technical Documentation
+
+1. Project Overview
+
+Project name: Course-Based Attendance System
+
+Main purpose: A role-based attendance management platform built to manage academic attendance by course and schedule, integrating face recognition for student presence validation.
+
+Problems the system solves:
+- Eliminates manual attendance marking and paper-based registers
+- Supports course-level and session-level attendance tracking
+- Enforces faculty-scoped access control
+- Provides automated absence marking after sessions end
+- Enables face-recognition based student validation
+
+Main features and capabilities:
+- JWT-based authentication with refresh token cookie flow
+- Role-based access control (SUPER_ADMIN, ACADEMIA, FACULTY, FACULTY_ADMIN, HR, ADMISSIONS, TEACHER, STUDENT)
+- CRUD APIs for faculties, departments, classes, courses, schedules, students, teachers
+- Course assignment and schedule management
+- Attendance session lifecycle: start / end / active session listing
+- Face-frame attendance processing and duplicate prevention
+- Attendance reports and record editing
+- Dataset, model training, and recognition tooling in desktop modules
+- Dockerized backend with MySQL support and health checks
+
+System architecture type:
+- Monolithic web application with modular separation
+- FastAPI backend API + React frontend SPA + Python desktop/CLI tooling
+- SQL database persistence via SQLAlchemy
+- AI/ML face recognition pipeline for attendance validation
+
+
+2. Technologies Used
+
+Frontend technologies:
+- React 19, TypeScript, Vite
+- React Router DOM v7
+- @tanstack/react-query (React Query)
+- Zustand for global state
+- React Hook Form + Zod
+- Tailwind CSS, Framer Motion, Lucide React icons
+- Recharts, jsPDF, axios
+
+Backend technologies:
+- FastAPI, Uvicorn
+- SQLAlchemy 2.x, Alembic
+- Pydantic v2
+- python-jose (JWT), passlib + bcrypt
+- python-dotenv
+
+Database technologies:
+- MySQL (production recommended), SQLite fallback
+- SQLAlchemy ORM
+- Alembic migrations
+
+Authentication/security technologies:
+- OAuth2PasswordBearer, JWT access tokens
+- HTTP-only refresh token cookie
+- Router-level RBAC dependencies
+- Rate limiting for auth and frame submission
+
+State management:
+- Zustand with persistence
+- React Query for server data fetching
+
+UI frameworks:
+- Tailwind CSS and custom component library
+
+API technologies:
+- FastAPI routers, Pydantic schemas
+- Axios with interceptors in frontend
+
+Deployment/dev tools:
+- Docker, Docker Compose, ESLint, Pytest, Vite
+
+AI/ML technologies:
+- OpenCV, InsightFace/SCRFD
+- ONNX Runtime (MiniFASNet anti-spoof)
+- facenet-pytorch, PyTorch, torchvision
+
+
+3. Frontend Analysis
+
+Folder structure:
+- frontend/src/
+  - app/router.tsx (route definitions)
+  - components/ (UI primitives and role-specific layouts)
+  - pages/ (admin, academia, faculty, teacher, student, admission, hr)
+  - services/ (api wrappers)
+  - store/ (Zustand stores)
+  - hooks/, types/, layouts/
+
+Routing system:
+- createBrowserRouter with lazy-loaded routes in `router.tsx`
+- Role-specific root paths and `ProtectedRoute` guard
+
+Pages and modules:
+- auth/Login, admin/*, academia/*, faculty/*, teacher/*, student/*, admission/*, hr/*
+
+Components:
+- Reusable UI components: Button, Input, Modal, Table, Card, Badge, etc.
+- Role-specific layouts and sidebars per domain
+
+State management:
+- `useAuthStore` for auth, `useAttendanceStore`, and others for domain state
+- React Query for server caching and fetching
+
+Services/API integration:
+- `api.ts` creates axios instance with `withCredentials: true`
+- Auth service uses `authClient` to avoid interceptor loops
+- Domain services map to backend endpoints (attendanceService, courseService, etc.)
+
+Authentication flow:
+- `POST /auth/token` returns access token and sets refresh cookie
+- Frontend stores access token in Zustand; refresh token is HttpOnly cookie
+- App initialization calls `/auth/refresh` then `/auth/me`
+- Axios interceptor retries requests after refresh on 401
+
+Dashboard structure:
+- Role-specific dashboards with cards and charts
+
+UI libraries:
+- Tailwind, Framer Motion, Lucide, Recharts
+
+Forms and validation:
+- react-hook-form + zodResolver; Zod schemas used per form
+
+Reusable components:
+- Primitive UI library in `components/ui`
+
+Frontend architecture pattern:
+- Component-driven React SPA with lazy routes and service layer
+
+Styling system:
+- Tailwind CSS, theme stored in `useThemeStore`, class on `html`
+
+Role-based UI behavior:
+- `ProtectedRoute` reads role from `useAuthStore` and redirects if unauthorized
+
+
+4. Backend Analysis
+
+Folder structure:
+- backend/app/
+  - core/ (config, security, logging, startup checks)
+  - db/ (models, session, seed, role scope)
+  - routers/ (auth, courses, students, attendance, sessions, reports, etc.)
+  - schemas/ (Pydantic models)
+  - services/ (attendance_service, face_service, schedule_service, etc.)
+  - utils/
+
+API architecture:
+- FastAPI app defined in `main.py`; routers included centrally; CORS middleware configured
+- Health endpoints: `/health`, `/health/ready`, `/health/live`, `/health/scheduler`
+
+Route organization:
+- Feature routers: auth, faculties, departments, classes, students, teachers, courses, schedules, sessions, attendance, reports, users, training
+
+Controllers/services/repositories:
+- Routers perform request validation and orchestration; services implement core business logic (e.g., `AttendanceService` handles frame processing and session lifecycle)
+
+Database connection setup:
+- SQLAlchemy engine and `SessionLocal` in `db/session.py`
+- `settings.database_url` selects MySQL or SQLite
+
+Authentication and authorization:
+- JWT access tokens and refresh tokens
+- `get_current_user` dependency retrieves user from token
+- `require_roles` dependency enforces RBAC
+- `get_optional_faculty_scope_context` scopes certain operations to faculty
+
+Middleware:
+- `CORSMiddleware` and global exception handlers
+
+Error handling:
+- `_error_payload` provides consistent error response
+- Handlers for HTTPException, RequestValidationError, and generic Exception
+
+Logging system:
+- JSON formatter via `app.core.logging_config.configure_logging()`
+
+Dependency injection:
+- FastAPI `Depends` used for db sessions, auth, role checks, rate limit
+
+Background jobs/tasks:
+- `ScheduleService` runs as an asyncio task during app lifespan; currently `_tick()` is a stub (scheduler automation disabled in current implementation)
+
+Security implementation:
+- Startup checks enforce presence of model files and strong SECRET_KEY
+- Rate limiting for auth and frame endpoints
+- Role/faculty scoping and input validation
+
+Backend architecture pattern:
+- Modular feature-based monolith with service layer and SQLAlchemy ORM
+
+
+5. Database Analysis
+
+Database type:
+- Configurable MySQL (production) and SQLite fallback
+
+ORM used:
+- SQLAlchemy 2.x
+
+Tables/models/entities (key ones):
+- users, roles, user_role_links
+- faculties, departments, class_batches
+- students, teachers
+- courses, course_schedules, course_schedule_weekdays
+- enrollments, course_assignments, class_course_assignments
+- attendance_sessions, attendance_records
+- student_attendance, student_schedule
+- activity_logs
+
+Relationships between tables:
+- User <-> Role many-to-many (user_role_links)
+- Faculty -> Departments, Courses, Students, Teachers
+- Course -> CourseSchedule, Sessions, Enrollments
+- AttendanceSession -> AttendanceRecord
+
+Primary/foreign keys and constraints:
+- Auto-increment integer PKs
+- Many unique constraints (faculty-scoped codes/titles)
+- Check constraints for attendance totals and faculty duration
+
+Migrations:
+- Alembic directory present; startup checks ensure schema compatibility
+
+Seed/sample data:
+- `db/seed.py` seeds roles, faculties, departments, users (admin, academia, teacher, hr, admission, student), sample course, schedule and enrollments
+
+Attendance-related schema design:
+- `AttendanceSession` for session instance
+- `AttendanceRecord` for per-student session attendance with confidence and raw payload
+- Session closure logic marks absences for enrolled students without attendance records
+
+
+6. Models and Entities (summary)
+- `User`: identity, hashed password, roles, optional `teacher` relationship
+- `Role`: RBAC role names
+- `Student`: student profile, `embedding_ref` for recognition
+- `Teacher`: teacher profile linked to `User`
+- `Course`: code, title, normalized title, schedules, assignments
+- `CourseSchedule`: weekday, start/end time, grace period
+- `AttendanceSession`: session metadata and status
+- `AttendanceRecord`: status, confidence, recognized_at
+- `Enrollment`: student-course link
+
+
+7. Authentication & Authorization
+
+Login system & token flow:
+- `POST /auth/token` (form) issues access token and sets refresh token cookie
+- `POST /auth/refresh` reads refresh cookie and issues new access token
+- `GET /auth/me` returns user profile
+
+Password hashing:
+- Passlib with bcrypt; rehash if needed
+
+Role-based access control:
+- `require_roles` dependency enforces required roles
+- `SUPER_ADMIN` bypasses faculty scoping
+- Faculty equivalents: `FACULTY` and `FACULTY_ADMIN`
+
+Protected routes and permissions:
+- Many router endpoints include `Depends(require_roles(...))` and faculty scope checks
+
+
+8. Attendance System Logic
+
+Session creation:
+- `POST /sessions/start` enforces single active session per course; teacher or admin can start
+
+Student attendance tracking (frame flow):
+- `POST /attendance/frame` receives base64 image
+- Frame decoded and passed to face recognition; recognizer returns student number and confidence
+- Validate student registration, faculty, enrollment, duplicate attendance
+- Determine status using session.schedule.grace_period_minutes: PRESENT or LATE
+- Create `AttendanceRecord` with confidence and timestamp
+
+Session closure:
+- `POST /sessions/end` ends session and `close_session_and_mark_absent()` creates `ABSENT` records for enrolled students without attendance records
+
+AI/Recognition:
+- `FaceService` loads models and calls `FaceEmbeddingRecognizer` to recognize frames
+- Timeout and confidence threshold enforced via settings
+
+
+9. API Documentation (concise)
+
+Auth:
+- POST /auth/token (form) -> { access_token }
+- POST /auth/refresh -> { access_token } (reads cookie)
+- GET /auth/me -> current user
+- POST /auth/logout -> clears cookie
+
+Sessions:
+- POST /sessions/start { course_id, schedule_id?, session_type }
+- POST /sessions/end { session_id }
+- GET /sessions
+- GET /sessions/active [filters]
+
+Attendance:
+- POST /attendance/frame { session_id, image }
+- GET /attendance/records [filters]
+- PUT /attendance/records/{record_id} { status }
+
+Courses/Students/Other:
+- Standard CRUD endpoints under `/courses`, `/students`, etc. with role protections
+
+Error responses:
+- 400/401/403/404/409/422/500 with JSON `_error_payload`
+
+
+10. Frontend-Backend Integration
+
+How frontend communicates with backend:
+- `frontend/src/services/api.ts` axios instance with baseURL from `VITE_API_URL` and `withCredentials: true`
+- Access token appended in `Authorization` header; refresh handled via cookie
+
+Authentication handling:
+- `authService` login/refresh/initialize/logout wrappers
+- `useAuthStore` persists auth state
+
+Error handling:
+- Axios response interceptor refreshes on 401 and retries
+- On failed refresh, logs out user and redirects to `/login`
+
+
+11. Project Modules (summary)
+- Admin: user/role management, reports, settings
+- Academia: faculties, departments, courses, classes
+- Faculty: assign teacher, schedule course, faculty attendance
+- HR: teacher management and reports
+- Admission: student approval and face registration
+- Teacher: attendance scanning, sessions, schedule
+- Student: dashboard and attendance view
+- AI/Training: model training and dataset tools
+
+
+12. Security Analysis
+
+Highlights:
+- JWT + refresh cookie is good pattern; ensure secure cookie flags in production
+- Passwords hashed via bcrypt
+- RBAC enforced via dependencies
+- Rate limiting for critical endpoints
+
+Improvements:
+- Restrict CORS origins in production
+- Enforce HTTPS and secure cookie flags
+- Consider CSRF mitigations for cookie flows
+- Review model loading behavior for multi-worker deployments
+
+
+13. File & Folder Structure
+
+Frontend (summary):
+- frontend/src/App.tsx, main.tsx
+- frontend/src/app/router.tsx
+- frontend/src/components/, pages/, services/, store/
+
+Backend (summary):
+- backend/app/main.py
+- backend/app/core/ (config, security, logging)
+- backend/app/db/ (models, session, seed)
+- backend/app/routers/ (auth, attendance, sessions, courses, students, reports, etc.)
+- backend/app/services/
+- backend/requirements.txt, alembic/
+
+
+14. System Workflow (step-by-step)
+
+User login:
+```bash
+POST /auth/token (username/password form)
+Store access token in frontend; refresh token set as httpOnly cookie
+Call /auth/refresh then /auth/me to populate user state
+```
+
+Attendance taking:
+1. Teacher starts session via `/sessions/start`
+2. Frontend camera captures image and calls `/attendance/frame`
+3. Backend recognizes student and creates `AttendanceRecord`
+4. Teacher ends session `/sessions/end`; backend marks absences
+
+Course assignment / schedule management:
+- Faculty/Academia create schedules and assignments via `/courses` and schedule endpoints
+
+Report generation:
+- Frontend calls `/attendance/records` and other report endpoints; transforms and displays data
+
+
+15. Architecture & Design Patterns
+
+- Modular monolith with feature-based separation
+- Service layer pattern
+- FastAPI `Depends` for DI
+- ORM for persistence, Pydantic for validation
+- Frontend: component-driven SPA with service layer and store
+
+
+16. Deployment & Environment
+
+Local run commands:
+
+Backend:
+```bash
+cd attendance_system/backend
+python -m uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
+```
+
+Frontend:
+```bash
+cd attendance_system/frontend
+npm install
+npm run dev
+```
+
+Docker:
+- `docker-compose.yml` defines `mysql` and `attendance-backend`
+- Backend Dockerfile installs Python deps and runs uvicorn
+
+Environment variables: configure via `backend/.env` or `backend/.env.production`
+
+
+17. Current Project Status
+
+Completed:
+- Backend API and models implemented
+- Auth, RBAC, attendance processing, and frontend SPA present
+- Seed data and health checks implemented
+
+Incomplete / concerns:
+- `ScheduleService._tick()` is currently a stub and does not auto-manage sessions
+- CORS and cookie config may need production tightening
+- Model-loading and recognition scaling require architectural consideration
+
+
+18. Recommendations
+
+Performance:
+- Implement scheduler automation
+- Offload heavy recognition to worker processes or separate service
+
+Security:
+- Harden CORS, secure cookies, HTTPS enforcement, CSRF mitigation
+
+Code quality:
+- Add tests, linting, CI
+- Normalize role names across frontend/backend
+
+Scalability:
+- Consider dedicated recognition microservice, model cache, or GPU-backed service
+
+
+19. Final Summary
+
+Overall evaluation:
+- Strong, well-structured system with clear domain modeling and role-based controls
+- Good integration of face recognition for attendance
+- Main gaps: scheduler automation, production security hardening, and recognition scaling
+
+Strengths:
+- Clean modular codebase
+- Modern frontend stack
+- Seed data and health checks
+
+Weaknesses:
+- Scheduler disabled
+- Some production security defaults are permissive
+
+Complexity level: moderate-to-high
+
+Professional assessment:
+- System is close to production-ready for small deployments; requires scheduler and security improvements for broader production use.
+
+
+-- End of Documentation --

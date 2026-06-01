@@ -12,7 +12,7 @@ export interface AbsenceRecord {
   facultyOrDepartment: string;
   totalAbsences: number;
   attendancePercentage: number;
-  status: 'Active' | 'Inactive' | 'High' | 'Low' | 'Medium'; // Based on absence severity
+  status: 'Low' | 'Normal' | 'Good'; // Based on attendance percentage
 }
 
 export interface ChartDataPoint {

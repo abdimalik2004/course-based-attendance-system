@@ -47,7 +47,8 @@ export const useAttendanceStore = create<AttendanceState>((set) => ({
 
   startSession: (session) =>
     set({
-      sessionState: "starting",
+      // Go straight to waiting_for_face so the scanner begins immediately
+      sessionState: "waiting_for_face",
       scanningProgress: 0,
       recognizedUser: null,
       activeSessionId: session?.sessionId ?? null,

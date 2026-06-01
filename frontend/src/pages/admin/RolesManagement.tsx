@@ -144,9 +144,10 @@ export default function RolesManagement() {
             Create and manage user roles in the system
           </p>
         </div>
-        <div className="text-sm text-gray-500 dark:text-gray-400">
-          Only the core application roles are shown here.
-        </div>
+        <Button onClick={() => setCreateModalOpen(true)} className="gap-2">
+          <Plus size={18} />
+          Add Role
+        </Button>
       </div>
 
       <Card className="glass-card shadow-2xl shadow-primary/5">

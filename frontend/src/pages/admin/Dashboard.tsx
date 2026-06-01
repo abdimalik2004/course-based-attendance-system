@@ -1,3 +1,4 @@
+import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   Users,
@@ -5,6 +6,9 @@ import {
   Presentation,
   Activity,
   FileText,
+  RefreshCw,
+  Wifi,
+  WifiOff,
 } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { Card, CardContent } from "@/components/ui/Card";
@@ -17,53 +21,92 @@ import {
   TableRow,
 } from "@/components/ui/Table";
 import dashboardService from "@/services/dashboardService";
+import activityService, {
+  formatTimeAgo,
+  formatTime,
+  formatFullDateTime,
+} from "@/services/activityService";
+import type { ActivityLog } from "@/services/activityService";
 
-const RECENT_ACTIVITY = [
-  {
-    id: 1,
-    user: "John Doe",
-    action: "System Login",
-    time: "2 mins ago",
-    status: "Success",
-  },
-  {
-    id: 2,
-    user: "Sarah Smith",
-    action: "Updated Schedule",
-    time: "15 mins ago",
-    status: "Success",
-  },
-  {
-    id: 3,
-    user: "Admin",
-    action: "Database Backup",
-    time: "1 hour ago",
-    status: "Pending",
-  },
-  {
-    id: 4,
-    user: "Dr. Jane",
-    action: "Failed Auth",
-    time: "3 hours ago",
-    status: "Failed",
-  },
-  {
-    id: 5,
-    user: "Michael B.",
-    action: "Created Course",
-    time: "5 hours ago",
-    status: "Success",
-  },
-];
-
-export default function AdminDashboard() {
+function AdminDashboard() {
   const navigate = useNavigate();
+  const [recentActivities, setRecentActivities] = useState<ActivityLog[]>([]);
+  const [isWebSocketConnected, setIsWebSocketConnected] = useState(false);
 
   const { data, isLoading, error } = useQuery({
     queryKey: ["adminOverview"],
     queryFn: () => dashboardService.adminOverview(),
     staleTime: 1000 * 60 * 2,
   });
+
+  const {
+    data: initialActivities,
+    isLoading: activityLoading,
+    refetch: refetchActivity,
+    isFetching: activityFetching,
+  } = useQuery({
+    queryKey: ["recentActivity"],
+    queryFn: async () => {
+      return await activityService.getRecentActivities(20, 2);
+    },
+    staleTime: 1000 * 30,
+    refetchInterval: 1000 * 30, // Fallback polling every 30s
+  });
+
+  // Initialize activities from query result
+  useEffect(() => {
+    if (initialActivities) {
+      setRecentActivities(initialActivities);
+    }
+  }, [initialActivities]);
+
+  // WebSocket setup for real-time updates
+  useEffect(() => {
+    // Check if we have admin privileges and can connect to WebSocket
+    // In a real app, you might check user roles here
+    const handleNewActivity = (activity: ActivityLog) => {
+      setRecentActivities((prev) => {
+        // Prevent duplicates
+        if (prev.some((a) => a.id === activity.id)) {
+          return prev;
+        }
+        // Add to beginning and keep max 30
+        return [activity, ...prev].slice(0, 30);
+      });
+    };
+
+    const handleError = (error: Event) => {
+      console.error("WebSocket error:", error);
+      setIsWebSocketConnected(false);
+    };
+
+    const handleClose = (event: CloseEvent) => {
+      console.log("WebSocket closed:", event);
+      setIsWebSocketConnected(false);
+    };
+
+    // Attempt to connect to WebSocket
+    try {
+      activityService.connectWebSocket(
+        handleNewActivity,
+        handleError,
+        handleClose,
+      );
+      setIsWebSocketConnected(activityService.isWebSocketConnected());
+
+      // Check connection status periodically
+      const statusCheckInterval = setInterval(() => {
+        setIsWebSocketConnected(activityService.isWebSocketConnected());
+      }, 1000);
+
+      return () => {
+        clearInterval(statusCheckInterval);
+        // Don't disconnect on unmount in case other components use it
+      };
+    } catch (e) {
+      console.error("Failed to setup WebSocket:", e);
+    }
+  }, []);
 
   const metrics = [
     {
@@ -72,7 +115,7 @@ export default function AdminDashboard() {
       value: isLoading ? "—" : (data?.totalStudents ?? "—"),
       icon: GraduationCap,
       color: "text-green-500",
-      path: "/admin/users",
+      path: "/admin/students",
     },
     {
       id: 2,
@@ -80,7 +123,7 @@ export default function AdminDashboard() {
       value: isLoading ? "—" : (data?.totalTeachers ?? "—"),
       icon: Presentation,
       color: "text-purple-500",
-      path: "/admin/users",
+      path: "/admin/teachers",
     },
     {
       id: 3,
@@ -147,39 +190,114 @@ export default function AdminDashboard() {
       <div className="grid gap-4 md:grid-cols-7">
         <Card className="md:col-span-4 lg:col-span-5">
           <div className="p-6">
-            <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-4">
-              Recent Activity
-            </h3>
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>User</TableHead>
-                  <TableHead>Action</TableHead>
-                  <TableHead>Status</TableHead>
-                  <TableHead className="text-right">Time</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {RECENT_ACTIVITY.map((activity) => (
-                  <TableRow key={activity.id}>
-                    <TableCell className="font-medium">
-                      {activity.user}
-                    </TableCell>
-                    <TableCell>{activity.action}</TableCell>
-                    <TableCell>
-                      <span
-                        className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium ${activity.status === "Success" ? "bg-green-100 text-green-700 dark:bg-green-500/10 dark:text-green-400" : activity.status === "Failed" ? "bg-red-100 text-red-700 dark:bg-red-500/10 dark:text-red-400" : "bg-yellow-100 text-yellow-700 dark:bg-yellow-500/10 dark:text-yellow-400"}`}
-                      >
-                        {activity.status}
-                      </span>
-                    </TableCell>
-                    <TableCell className="text-right text-gray-500 dark:text-gray-400">
-                      {activity.time}
-                    </TableCell>
+            <div className="flex items-center justify-between mb-4">
+              <div>
+                <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
+                  Recent Activity
+                </h3>
+                <p className="text-xs text-gray-400 mt-0.5">
+                  Recent activity · Live updates
+                  {isWebSocketConnected && (
+                    <span className="inline-flex items-center ml-2">
+                      <Wifi
+                        size={12}
+                        className="text-green-500 mr-1 animate-pulse"
+                      />
+                      <span className="text-green-500">Connected</span>
+                    </span>
+                  )}
+                  {!isWebSocketConnected && (
+                    <span className="inline-flex items-center ml-2">
+                      <WifiOff size={12} className="text-orange-500 mr-1" />
+                      <span className="text-orange-500">Polling (30s)</span>
+                    </span>
+                  )}
+                </p>
+              </div>
+              <button
+                onClick={() => refetchActivity()}
+                disabled={activityFetching}
+                className="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-white/10 transition-colors disabled:opacity-40"
+                title="Refresh activity"
+              >
+                <RefreshCw
+                  size={15}
+                  className={`text-gray-400 ${activityFetching ? "animate-spin" : ""}`}
+                />
+              </button>
+            </div>
+            <div className="overflow-auto max-h-[340px] custom-scrollbar">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>User</TableHead>
+                    <TableHead>Action</TableHead>
+                    <TableHead>Status</TableHead>
+                    <TableHead className="text-right">Time</TableHead>
                   </TableRow>
-                ))}
-              </TableBody>
-            </Table>
+                </TableHeader>
+                <TableBody>
+                  {activityLoading && !recentActivities.length ? (
+                    Array.from({ length: 4 }).map((_, i) => (
+                      <TableRow key={i}>
+                        {Array.from({ length: 4 }).map((__, j) => (
+                          <TableCell key={j}>
+                            <div className="h-4 w-20 bg-gray-200 dark:bg-white/10 rounded animate-pulse" />
+                          </TableCell>
+                        ))}
+                      </TableRow>
+                    ))
+                  ) : !recentActivities || recentActivities.length === 0 ? (
+                    <TableRow>
+                      <TableCell
+                        colSpan={4}
+                        className="text-center text-gray-400 py-6"
+                      >
+                        No recent activity found.
+                      </TableCell>
+                    </TableRow>
+                  ) : (
+                    recentActivities.map((activity) => (
+                      <TableRow
+                        key={activity.id}
+                        className="hover:bg-gray-50 dark:hover:bg-white/5 transition-colors"
+                      >
+                        <TableCell className="font-medium text-gray-900 dark:text-gray-100 whitespace-nowrap">
+                          {activity.username}
+                        </TableCell>
+                        <TableCell
+                          className="text-gray-600 dark:text-gray-400 max-w-[220px] truncate"
+                          title={activity.action}
+                        >
+                          {activity.action}
+                        </TableCell>
+                        <TableCell>
+                          <span
+                            className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium ${
+                              activity.status === "Success"
+                                ? "bg-green-100 text-green-700 dark:bg-green-500/10 dark:text-green-400"
+                                : activity.status === "Failed"
+                                  ? "bg-red-100 text-red-700 dark:bg-red-500/10 dark:text-red-400"
+                                  : "bg-yellow-100 text-yellow-700 dark:bg-yellow-500/10 dark:text-yellow-400"
+                            }`}
+                          >
+                            {activity.status}
+                          </span>
+                        </TableCell>
+                        <TableCell
+                          className="text-right text-gray-500 dark:text-gray-400 whitespace-nowrap"
+                          title={formatFullDateTime(activity.created_at)}
+                        >
+                          <span className="text-xs">
+                            {formatTimeAgo(activity.created_at)}
+                          </span>
+                        </TableCell>
+                      </TableRow>
+                    ))
+                  )}
+                </TableBody>
+              </Table>
+            </div>
           </div>
         </Card>
 
@@ -221,3 +339,5 @@ export default function AdminDashboard() {
     </div>
   );
 }
+
+export default AdminDashboard;

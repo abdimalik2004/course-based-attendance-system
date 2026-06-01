@@ -1,20 +1,69 @@
-import { useState } from 'react';
-import { Save, Activity, Settings2 } from 'lucide-react';
+import { useState, useEffect } from 'react';
+import { Save, Activity, Settings2, CheckCircle, AlertCircle } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
+import { fetchSettings, saveSettings } from '@/services/settingsService';
 
 export default function Settings() {
   const [isSaving, setIsSaving] = useState(false);
-  
-  // Mock settings state
+  const [saved, setSaved] = useState(false);
+  const [error, setError] = useState('');
+  const [hasChanges, setHasChanges] = useState(false);
+
   const [requireApproval, setRequireApproval] = useState(true);
   const [notifyOnLeave, setNotifyOnLeave] = useState(true);
 
+  // Load from API on mount
+  useEffect(() => {
+    fetchSettings()
+      .then((data) => {
+        if (data['hr.require_approval'] !== undefined) {
+          setRequireApproval(data['hr.require_approval'] === 'true');
+        }
+        if (data['hr.notify_on_leave'] !== undefined) {
+          setNotifyOnLeave(data['hr.notify_on_leave'] === 'true');
+        }
+      })
+      .catch(() => {});
+  }, []);
+
+  const handleToggle = (setter: (v: boolean) => void, value: boolean) => {
+    setter(value);
+    setHasChanges(true);
+    setSaved(false);
+    setError('');
+  };
+
   const handleSave = async () => {
     setIsSaving(true);
-    // Simulate API call
-    await new Promise(resolve => setTimeout(resolve, 800));
-    setIsSaving(false);
-    alert('Settings saved successfully!');
+    setError('');
+    try {
+      await saveSettings({
+        'hr.require_approval': requireApproval,
+        'hr.notify_on_leave': notifyOnLeave,
+      });
+      setHasChanges(false);
+      setSaved(true);
+      setTimeout(() => setSaved(false), 3000);
+    } catch {
+      setError('Failed to save settings. Please try again.');
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const handleReset = () => {
+    fetchSettings()
+      .then((data) => {
+        setRequireApproval(data['hr.require_approval'] !== undefined ? data['hr.require_approval'] === 'true' : true);
+        setNotifyOnLeave(data['hr.notify_on_leave'] !== undefined ? data['hr.notify_on_leave'] === 'true' : true);
+      })
+      .catch(() => {
+        setRequireApproval(true);
+        setNotifyOnLeave(true);
+      });
+    setHasChanges(false);
+    setSaved(false);
+    setError('');
   };
 
   return (
@@ -39,11 +88,11 @@ export default function Settings() {
                 <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">Require admin approval before marking a teacher as "On Leave".</p>
               </div>
               <label className="relative inline-flex items-center cursor-pointer">
-                <input 
-                  type="checkbox" 
-                  className="sr-only peer" 
+                <input
+                  type="checkbox"
+                  className="sr-only peer"
                   checked={requireApproval}
-                  onChange={(e) => setRequireApproval(e.target.checked)}
+                  onChange={(e) => handleToggle(setRequireApproval, e.target.checked)}
                 />
                 <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-primary/20 dark:peer-focus:ring-primary/10 rounded-full peer dark:bg-gray-700 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all dark:border-gray-600 peer-checked:bg-primary"></div>
               </label>
@@ -57,11 +106,11 @@ export default function Settings() {
                 <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">Send an email notification when a teacher's status changes to "On Leave".</p>
               </div>
               <label className="relative inline-flex items-center cursor-pointer">
-                <input 
-                  type="checkbox" 
-                  className="sr-only peer" 
+                <input
+                  type="checkbox"
+                  className="sr-only peer"
                   checked={notifyOnLeave}
-                  onChange={(e) => setNotifyOnLeave(e.target.checked)}
+                  onChange={(e) => handleToggle(setNotifyOnLeave, e.target.checked)}
                 />
                 <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-primary/20 dark:peer-focus:ring-primary/10 rounded-full peer dark:bg-gray-700 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all dark:border-gray-600 peer-checked:bg-primary"></div>
               </label>
@@ -70,7 +119,7 @@ export default function Settings() {
           </div>
         </div>
 
-        {/* Status Definitions */}
+        {/* Status Definitions (read-only) */}
         <div className="glass-card rounded-2xl border border-gray-200 dark:border-white/10 overflow-hidden">
           <div className="p-4 border-b border-gray-200 dark:border-white/10 bg-gray-50/50 dark:bg-white/5 flex items-center gap-2">
             <Activity size={18} className="text-gray-500" />
@@ -78,7 +127,7 @@ export default function Settings() {
           </div>
           <div className="p-6 space-y-4">
             <p className="text-sm text-gray-500 dark:text-gray-400 mb-4">Current definitions for teacher statuses across the system. These cannot be changed directly here.</p>
-            
+
             <div className="flex items-start gap-3 p-3 bg-green-50 dark:bg-green-500/5 rounded-xl border border-green-100 dark:border-green-500/10">
               <span className="w-2.5 h-2.5 rounded-full bg-green-500 mt-1.5 shrink-0"></span>
               <div>
@@ -105,11 +154,22 @@ export default function Settings() {
           </div>
         </div>
 
+        {error && (
+          <div className="flex items-center gap-2 text-sm text-red-500">
+            <AlertCircle size={14} /> {error}
+          </div>
+        )}
+        {saved && (
+          <div className="flex items-center gap-2 text-sm text-emerald-500">
+            <CheckCircle size={14} /> Settings saved successfully.
+          </div>
+        )}
+
         <div className="flex justify-end gap-3 pb-6">
-          <Button variant="secondary" type="button">
+          <Button variant="secondary" type="button" onClick={handleReset} disabled={isSaving}>
             Reset to Defaults
           </Button>
-          <Button onClick={handleSave} isLoading={isSaving} className="min-w-[120px]">
+          <Button onClick={handleSave} isLoading={isSaving} disabled={!hasChanges || isSaving} className="min-w-[120px]">
             <Save className="mr-2 h-4 w-4" />
             Save Changes
           </Button>

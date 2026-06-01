@@ -65,8 +65,24 @@ export const useUsersStore = create<UsersState>((set) => ({
         users: [...state.users, newUser],
         isModalOpen: false,
       }));
-    } catch {
-      throw new Error("Failed to create user");
+    } catch (err: any) {
+      // Extract the most useful message from Axios/API errors.
+      // The backend can return detail as: string | list[{msg,loc,...}] | {message, missing} | undefined
+      const detail = err?.response?.data?.detail;
+      let message: string;
+      if (typeof detail === "string") {
+        message = detail;
+      } else if (Array.isArray(detail)) {
+        // Pydantic 422 validation errors
+        message = detail.map((d: any) => d?.msg ?? JSON.stringify(d)).join("; ");
+      } else if (detail && typeof detail === "object") {
+        // e.g. {"message": "Invalid role names", "missing": ["STUDENT"]}
+        const missing = Array.isArray(detail.missing) ? ` (${detail.missing.join(", ")})` : "";
+        message = (detail.message ?? JSON.stringify(detail)) + missing;
+      } else {
+        message = err?.message ?? "Failed to create user";
+      }
+      throw new Error(message);
     }
   },
 

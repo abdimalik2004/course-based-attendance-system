@@ -25,6 +25,8 @@ export const reportsService = {
     faculty?: string;
     department?: string;
     course?: string;
+    startDate?: string;
+    endDate?: string;
   }): Promise<{ data: AbsenceRecord[]; total: number }> => {
     const response = await api.get("/reports/absence-ranking", {
       params: {
@@ -35,6 +37,8 @@ export const reportsService = {
         faculty: params?.faculty,
         department: params?.department,
         course: params?.course,
+        start_date: params?.startDate || undefined,
+        end_date: params?.endDate || undefined,
       },
     });
 
@@ -65,16 +69,14 @@ export const reportsService = {
   },
 
   getDistributionSummary: async (): Promise<DistributionData> => {
-    const [studentsRes, teachersRes, facultiesRes] = await Promise.all([
-      api.get("/students", { params: { skip: 0, limit: 1 } }),
-      api.get("/teachers", { params: { skip: 0, limit: 1 } }),
-      api.get("/faculties", { params: { skip: 0, limit: 1 } }),
-    ]);
-
+    // Re-use /reports/summary (same role access as the rest of the reports page)
+    // instead of calling /students, /teachers, /faculties separately — those
+    // endpoints require different roles that not all admin users may have.
+    const response = await api.get("/reports/summary");
     return {
-      students: studentsRes.data?.total ?? 0,
-      teachers: teachersRes.data?.total ?? 0,
-      faculties: facultiesRes.data?.total ?? 0,
+      students: response.data.totalStudents ?? 0,
+      teachers: response.data.totalTeachers ?? 0,
+      faculties: response.data.totalFaculties ?? 0,
     };
   },
 };

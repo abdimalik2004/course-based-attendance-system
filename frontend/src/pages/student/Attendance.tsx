@@ -2,7 +2,6 @@ import { useState } from 'react';
 import { motion } from 'framer-motion';
 import { Search, Filter, Download } from 'lucide-react';
 import { useQuery } from '@tanstack/react-query';
-import { useAuthStore } from '@/store/useAuthStore';
 import { Card, CardContent } from '@/components/ui/Card';
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
@@ -30,17 +29,14 @@ const getProgressColor = (percent: number) => {
 };
 
 export default function StudentAttendance() {
-  const { user } = useAuthStore();
-  const studentId = user?.id as number | undefined;
   const [searchTerm, setSearchTerm] = useState('');
 
   const { data, isLoading, error } = useQuery({
-    queryKey: ['studentAttendance', studentId],
+    queryKey: ['studentAttendance'],
     queryFn: async () => {
-      const overview = await dashboardService.studentOverview(studentId);
+      const overview = await dashboardService.studentOverview();
       return overview?.attendance ?? [];
     },
-    enabled: Boolean(studentId),
     staleTime: 1000 * 60 * 2,
   });
 

@@ -299,10 +299,10 @@ The README now reflects current code and intentionally removes outdated referenc
 ## Recent Additions (since last README update)
 
 - Manual session control: sessions are no longer implicitly created/started by the scheduler. Teachers/Admins must start and end sessions explicitly using the API endpoints:
-  - `POST /sessions/start` — create and start an attendance session (records `instructor_id` on the session).
+  - `POST /sessions/start` — create and start an attendance session (records the starting teacher or admin on the session).
   - `POST /sessions/end` — close an active session and trigger absence marking.
 
-- `instructor_id` tracking: `attendance_sessions` now includes an `instructor_id` foreign key to `users.id` to record who started/ran the session.
+- Attendance actor tracking: `attendance_sessions` now uses `teacher_id` and `admin_id` foreign keys to record whether a teacher or an admin started the session.
 
 - Teacher metadata: `teachers` now has a `role` enum (Professor, Associate Professor, Assistant Professor, Lecturer) and a `status` enum (Active, Onleave, Inactive). These are available in the teacher creation/update APIs and have safe migration defaults.
 

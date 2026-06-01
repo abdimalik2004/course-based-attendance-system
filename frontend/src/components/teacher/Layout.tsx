@@ -5,17 +5,28 @@ import { useSidebarStore } from '@/store/useSidebarStore';
 import { cn } from '@/utils/cn';
 import { ThemeToggle } from '@/components/ui/ThemeToggle';
 import { LogOut, User, UserCog, Bell, Menu } from 'lucide-react';
+import { KeyRound } from 'lucide-react';
 import { useAuthStore } from '@/store/useAuthStore';
+import { UserAvatar } from '@/components/ui/UserAvatar';
 import { useUIStore } from '@/store/useUIStore';
 import { motion, AnimatePresence } from 'framer-motion';
 import logoUrl from '@/assets/logo.png';
 import lightLogoUrl from '@/assets/light-logo.png';
 
+/** Return first two words of full_name, falling back to username. */
+function getDisplayName(user: { full_name?: string | null; username?: string } | null): string {
+  if (!user) return '';
+  const parts = (user.full_name ?? '').trim().split(/\s+/).filter(Boolean);
+  if (parts.length >= 2) return `${parts[0]} ${parts[1]}`;
+  if (parts.length === 1) return parts[0];
+  return user.username ?? '';
+}
+
 function TeacherTopbar() {
   const { logout, user } = useAuthStore();
   const navigate = useNavigate();
   const { toggleSidebar } = useSidebarStore();
-  const { openEditProfile } = useUIStore();
+  const { openEditProfile, openChangePassword } = useUIStore();
   
   const [profileDropdownOpen, setProfileDropdownOpen] = useState(false);
   const [notificationDropdownOpen, setNotificationDropdownOpen] = useState(false);
@@ -111,21 +122,21 @@ function TeacherTopbar() {
         
         {/* Profile Dropdown */}
         <div className="relative flex items-center gap-2 pl-2 sm:border-l sm:border-gray-200 sm:dark:border-white/10" ref={profileRef}>
-          <button 
+          <button
             onClick={() => {
-                setProfileDropdownOpen(!profileDropdownOpen);
-                setNotificationDropdownOpen(false);
+              setProfileDropdownOpen(!profileDropdownOpen);
+              setNotificationDropdownOpen(false);
             }}
             className="flex h-9 w-9 items-center justify-center rounded-full bg-gray-100 dark:bg-white/10 text-gray-600 dark:text-gray-300 transition-colors hover:bg-gray-200 dark:hover:bg-white/20 focus:outline-none focus:ring-2 focus:ring-primary/50 overflow-hidden"
           >
-            <User size={18} />
+            <UserAvatar imageUrl={user?.profile_image_url} username={user?.username} size={36} />
           </button>
           <div className="hidden sm:flex flex-col items-start cursor-pointer" onClick={() => {
                 setProfileDropdownOpen(!profileDropdownOpen);
                 setNotificationDropdownOpen(false);
             }}>
             <span className="text-sm font-medium text-gray-700 dark:text-gray-200 leading-tight">
-              {user?.username || 'Mr. Ahmed Hassan'}
+              {getDisplayName(user)}
             </span>
           </div>
 
@@ -139,8 +150,8 @@ function TeacherTopbar() {
                 className="absolute right-0 top-12 w-48 rounded-xl border border-gray-200 dark:border-white/10 bg-white dark:bg-dark-card p-1.5 shadow-xl glass-card overflow-hidden z-50"
               >
                 <div className="px-3 py-2 border-b border-gray-100 dark:border-white/5 mb-1">
-                  <p className="text-sm font-medium text-gray-900 dark:text-white">{user?.username || 'Mr. Ahmed Hassan'}</p>
-                  <p className="text-xs text-gray-500 dark:text-gray-400 truncate">teacher@heegan.edu</p>
+                  <p className="text-sm font-medium text-gray-900 dark:text-white">{getDisplayName(user)}</p>
+                  <p className="text-xs text-gray-500 dark:text-gray-400 truncate">{user?.email || 'teacher@heegan.edu'}</p>
                 </div>
                 
                 <button
@@ -152,6 +163,17 @@ function TeacherTopbar() {
                 >
                   <UserCog size={16} />
                   <span>Edit Profile</span>
+                </button>
+
+                <button
+                  onClick={() => {
+                    setProfileDropdownOpen(false);
+                    openChangePassword();
+                  }}
+                  className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm text-gray-600 hover:bg-gray-100 hover:text-gray-900 dark:text-gray-300 dark:hover:bg-white/10 dark:hover:text-white transition-colors text-left"
+                >
+                  <KeyRound size={16} />
+                  <span>Change Password</span>
                 </button>
 
                 <div className="my-1 border-t border-gray-100 dark:border-white/5"></div>
@@ -201,7 +223,11 @@ export default function TeacherLayout() {
           {/* Ambient Background Accents */}
           <div className="absolute top-[-10%] right-[-10%] w-[40%] h-[40%] bg-blue-500/10 rounded-full blur-[120px] pointer-events-none" />
           <div className="absolute bottom-[-10%] left-[-10%] w-[40%] h-[40%] bg-purple-500/10 rounded-full blur-[120px] pointer-events-none" />
-          <Outlet />
+
+          {/* Main content wrapper with max width and centered */}
+          <div className="max-w-7xl mx-auto w-full relative z-10">
+            <Outlet />
+          </div>
         </main>
       </div>
     </div>

@@ -16,7 +16,7 @@ export function useReportSummary() {
   });
 }
 
-export function useAbsenceRanking(params?: { page?: number; limit?: number; search?: string; type?: string; faculty?: string; department?: string; course?: string }) {
+export function useAbsenceRanking(params?: { page?: number; limit?: number; search?: string; type?: string; faculty?: string; department?: string; course?: string; startDate?: string; endDate?: string }) {
   return useQuery({
     queryKey: reportKeys.absenceRanking(params),
     queryFn: () => reportsService.getAbsenceRanking(params),

@@ -6,7 +6,7 @@ from app.db.models import Course, Enrollment, Student
 
 
 def auto_enroll_student_in_matching_courses(db: Session, student: Student) -> int:
-    """Enroll a student into all courses in the same faculty."""
+    """Enroll a student into all courses that belong to their own department."""
     if student.id <= 0 or student.faculty_id <= 0 or student.department_id <= 0:
         return 0
 
@@ -14,8 +14,8 @@ def auto_enroll_student_in_matching_courses(db: Session, student: Student) -> in
         db.query(Course.id)
         .filter(
             Course.faculty_id == student.faculty_id,
+            Course.department_id == student.department_id,
             Course.id > 0,
-            Course.faculty_id > 0,
         )
         .all()
     )
@@ -45,16 +45,16 @@ def auto_enroll_student_in_matching_courses(db: Session, student: Student) -> in
 
 
 def auto_enroll_existing_students_for_course(db: Session, course: Course) -> int:
-    """Enroll existing students in the same faculty into a new course."""
-    if course.id <= 0 or course.faculty_id <= 0:
+    """Enroll existing students from the same department into a new course."""
+    if course.id <= 0 or course.faculty_id <= 0 or course.department_id <= 0:
         return 0
 
     student_rows = (
         db.query(Student.id)
         .filter(
             Student.faculty_id == course.faculty_id,
+            Student.department_id == course.department_id,
             Student.id > 0,
-            Student.faculty_id > 0,
         )
         .all()
     )

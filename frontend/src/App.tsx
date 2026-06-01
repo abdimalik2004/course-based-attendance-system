@@ -4,6 +4,8 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { router } from "./app/router";
 import { useThemeStore } from "./store/useThemeStore";
 import { EditProfileModal } from "./components/ui/EditProfileModal";
+import { ChangePasswordModal } from "./components/ui/ChangePasswordModal";
+import { ToastContainer } from "./components/ui/ToastContainer";
 import { authService } from "./services/authService";
 
 // Create a client
@@ -58,6 +60,8 @@ function App() {
         )}
       </Suspense>
       <EditProfileModal />
+      <ChangePasswordModal />
+      <ToastContainer />
     </QueryClientProvider>
   );
 }

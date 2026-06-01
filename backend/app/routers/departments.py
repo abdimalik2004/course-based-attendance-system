@@ -7,13 +7,14 @@ from sqlalchemy import func, or_
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from app.core.security import require_roles
+from app.core.security import get_current_user, require_roles
 from app.db.faculty_scope import FacultyScopeContext, enforce_faculty_scope, get_optional_faculty_scope_context
-from app.db.models import Department
+from app.db.models import Department, User
 from app.db.role_scoped import get_role_scoped_db
 from app.schemas.department import DepartmentCreate, DepartmentRead, DepartmentUpdate, PaginatedDepartmentRead
 from app.utils.db_conflicts import classify_integrity_error, integrity_error_mentions
 from app.utils.organization import ensure_faculty_row_available, get_faculty_or_404
+from app.utils.activity_logger import log_activity
 
 
 router = APIRouter(prefix="/departments", tags=["departments"])
@@ -63,6 +64,7 @@ def create_department(
     payload: DepartmentCreate,
     db: Session = Depends(get_role_scoped_db),
     faculty_scope = Depends(get_optional_faculty_scope_context),
+    current_user: "User" = Depends(get_current_user),
 ):
     faculty_id = _resolve_create_faculty_id(
         payload_faculty_id=payload.faculty_id,
@@ -94,6 +96,11 @@ def create_department(
     db.add(obj)
     try:
         db.commit()
+        log_activity(
+            action=f"Department Created - {payload.name}",
+            user=current_user,
+            db=db,
+        )
     except IntegrityError as exc:
         db.rollback()
         error_kind = classify_integrity_error(exc)
@@ -141,14 +148,8 @@ def list_departments(
     limit: int = Query(default=50, ge=1, le=200, description="Page size", examples=[20]),
     faculty_id: int | None = Query(default=None, description="Filter by faculty id", examples=[1]),
     search: str | None = Query(default=None, description="Search by department name or code", examples=["IT"]),
-    faculty_scope = Depends(get_optional_faculty_scope_context),
 ):
     query = db.query(Department)
-    if faculty_scope is not None:
-        if faculty_id is not None:
-            enforce_faculty_scope(faculty_id, faculty_scope)
-        else:
-            faculty_id = faculty_scope.faculty_id
     if faculty_id is not None:
         query = query.filter(Department.faculty_id == faculty_id)
     if search:

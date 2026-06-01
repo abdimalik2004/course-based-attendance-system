@@ -5,14 +5,15 @@ from sqlalchemy.orm import Session
 from sqlalchemy import or_
 from sqlalchemy.exc import IntegrityError
 
-from app.core.security import require_roles
+from app.core.security import get_current_user, require_roles
 from app.db.faculty_scope import (
     enforce_faculty_scope,
     get_optional_faculty_scope_context,
 )
-from app.db.models import Teacher
+from app.db.models import Teacher, User
 from app.db.role_scoped import get_role_scoped_db
 from app.schemas.teacher import TeacherCreate, TeacherRead, TeacherUpdate, PaginatedTeacherRead
+from app.utils.activity_logger import log_activity
 from app.utils.organization import ensure_department_belongs_to_faculty, get_department_or_404, get_faculty_or_404
 
 
@@ -48,6 +49,7 @@ def _generate_teacher_number(db: Session, faculty_code: str) -> str:
 def create_teacher(
     payload: TeacherCreate,
     db: Session = Depends(get_role_scoped_db),
+    current_user: User = Depends(get_current_user),
     faculty_scope = Depends(get_optional_faculty_scope_context),
 ):
     if faculty_scope is None:
@@ -77,6 +79,11 @@ def create_teacher(
         db.rollback()
         raise HTTPException(status_code=409, detail="Teacher number already exists") from exc
     db.refresh(obj)
+    log_activity(
+        action=f"Teacher Registered - {obj.full_name} ({obj.teacher_number})",
+        user=current_user,
+        db=db,
+    )
     return obj
 
 
