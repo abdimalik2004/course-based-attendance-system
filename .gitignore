@@ -2,6 +2,11 @@
 # Environment & Secrets
 # =========================
 .env
+.env.*
+*.env
+backend/.env
+backend/.env.*
+frontend/.env.*
 # frontend/.env only contains VITE_API_URL (no secrets) — allow it so
 # teammates get the correct API URL without manual setup.
 !frontend/.env
@@ -35,6 +40,28 @@ logs/
 # =========================
 *.h5
 models/*.onnx
+*.onnx
+
+# =========================
+# Database Files
+# =========================
+*.db
+*.db-journal
+*.sqlite
+*.sqlite3
+backend/database/
+
+# =========================
+# Frontend Build Output
+# =========================
+frontend/dist/
+frontend/build/
+
+# =========================
+# Test / Debug Scripts
+# =========================
+test_smtp.py
+test_resend.py
 
 # =========================
 # IDE / Editor
