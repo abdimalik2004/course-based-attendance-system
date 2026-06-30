@@ -10,6 +10,10 @@ import {
   Trash2,
   Filter,
   AlertTriangle,
+  Copy,
+  CheckCircle2,
+  User,
+  KeyRound,
 } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
@@ -70,6 +74,8 @@ export default function Students() {
   const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
   const [selectedStudent, setSelectedStudent] = useState<Student | null>(null);
   const [viewImageCount, setViewImageCount] = useState<number | null>(null);
+  const [credentials, setCredentials] = useState<{ studentNumber: string; password: string } | null>(null);
+  const [copiedField, setCopiedField] = useState<"username" | "password" | null>(null);
 
   const {
     register,
@@ -110,15 +116,25 @@ export default function Students() {
     return selectedFaculty ? departments[selectedFaculty] || [] : [];
   }, [selectedFaculty, departments]);
 
+  const copyToClipboard = (text: string, field: "username" | "password") => {
+    navigator.clipboard.writeText(text).then(() => {
+      setCopiedField(field);
+      setTimeout(() => setCopiedField(null), 2000);
+    });
+  };
+
   // Handle Add Submit
   const onAddSubmit = async (data: StudentForm) => {
-    await addStudent({
+    const result = await addStudent({
       fullName: data.fullName,
       faculty: data.faculty,
       department: data.department,
     });
     setIsAddModalOpen(false);
     reset();
+    if (result?.generatedPassword) {
+      setCredentials({ studentNumber: result.studentNumber, password: result.generatedPassword });
+    }
   };
 
   // Handle Edit Submit
@@ -577,6 +593,73 @@ export default function Students() {
             </Button>
           </div>
         </div>
+      </Modal>
+
+      {/* Credentials Modal — shown once after a new student is registered */}
+      <Modal
+        isOpen={!!credentials}
+        onClose={() => setCredentials(null)}
+        title="Student Account Created"
+      >
+        {credentials && (
+          <div className="space-y-5">
+            {/* Success banner */}
+            <div className="flex items-center gap-3 p-4 rounded-xl bg-green-50 dark:bg-green-500/10 border border-green-200 dark:border-green-500/20">
+              <CheckCircle2 className="text-green-600 dark:text-green-400 shrink-0" size={22} />
+              <p className="text-sm text-green-800 dark:text-green-300">
+                A login account has been automatically created for this student. Share these credentials with them.
+              </p>
+            </div>
+
+            {/* Username */}
+            <div>
+              <label className="block text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide mb-1.5">
+                Username
+              </label>
+              <div className="flex items-center gap-2 p-3 rounded-lg bg-gray-50 dark:bg-white/5 border border-gray-200 dark:border-white/10">
+                <User size={16} className="text-gray-400 shrink-0" />
+                <span className="flex-1 font-mono text-sm font-semibold text-gray-900 dark:text-gray-100">
+                  {credentials.studentNumber}
+                </span>
+                <button
+                  onClick={() => copyToClipboard(credentials.studentNumber, "username")}
+                  className="p-1.5 rounded-md hover:bg-gray-200 dark:hover:bg-white/10 transition-colors text-gray-500 dark:text-gray-400"
+                  title="Copy username"
+                >
+                  {copiedField === "username" ? <CheckCircle2 size={15} className="text-green-500" /> : <Copy size={15} />}
+                </button>
+              </div>
+            </div>
+
+            {/* Password */}
+            <div>
+              <label className="block text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide mb-1.5">
+                Default Password
+              </label>
+              <div className="flex items-center gap-2 p-3 rounded-lg bg-gray-50 dark:bg-white/5 border border-gray-200 dark:border-white/10">
+                <KeyRound size={16} className="text-gray-400 shrink-0" />
+                <span className="flex-1 font-mono text-sm font-semibold text-gray-900 dark:text-gray-100">
+                  {credentials.password}
+                </span>
+                <button
+                  onClick={() => copyToClipboard(credentials.password, "password")}
+                  className="p-1.5 rounded-md hover:bg-gray-200 dark:hover:bg-white/10 transition-colors text-gray-500 dark:text-gray-400"
+                  title="Copy password"
+                >
+                  {copiedField === "password" ? <CheckCircle2 size={15} className="text-green-500" /> : <Copy size={15} />}
+                </button>
+              </div>
+            </div>
+
+            <p className="text-xs text-gray-400 dark:text-gray-500">
+              The student should change their password after first login. These credentials will not be shown again.
+            </p>
+
+            <div className="flex justify-end">
+              <Button onClick={() => setCredentials(null)}>Done</Button>
+            </div>
+          </div>
+        )}
       </Modal>
     </div>
   );

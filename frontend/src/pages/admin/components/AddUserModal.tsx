@@ -12,15 +12,8 @@ import { useUsersStore } from "@/store/useUsersStore";
 import { useHrStore } from "@/store/useHrStore";
 import { useAdmissionStore } from "@/store/useAdmissionStore";
 
-const allowedRoles = [
-  "SUPER_ADMIN",
-  "ACADEMIA",
-  "ADMISSIONS",
-  "HR",
-  "FACULTY",
-  "TEACHER",
-  "STUDENT",
-];
+// Internal/backend-only roles that should not be assignable to users via the UI
+const HIDDEN_ROLES = new Set<string>();
 
 const roleLabelMap: Record<string, string> = {
   SUPER_ADMIN: "Admin",
@@ -127,7 +120,7 @@ export function AddUserModal() {
   const isFacultyRole = normalizedRole === "FACULTY";
   const isTeacherRole = normalizedRole === "TEACHER";
   const isStudentRole = normalizedRole === "STUDENT";
-  const visibleRoles = roles.filter((role) => allowedRoles.includes(role.name));
+  const visibleRoles = roles.filter((role) => !HIDDEN_ROLES.has(role.name));
 
   // Reset dependent ID fields to empty string whenever the role changes so the
   // placeholder option is always shown first when a new role is selected.
@@ -145,7 +138,13 @@ export function AddUserModal() {
       reset();
       setSubmitError(null);
     }
-  }, [isModalOpen, fetchRolesAndFaculties, fetchTeachers, fetchAdmissionData, reset]);
+  }, [
+    isModalOpen,
+    fetchRolesAndFaculties,
+    fetchTeachers,
+    fetchAdmissionData,
+    reset,
+  ]);
 
   const onSubmit = async (data: UserFormData) => {
     setIsSubmitting(true);

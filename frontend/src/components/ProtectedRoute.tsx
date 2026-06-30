@@ -10,7 +10,6 @@ type Role =
   | "HR"
   | "ADMISSIONS"
   | "FACULTY"
-  | "FACULTY_ADMIN"
   | "STUDENT"
   | null;
 
@@ -27,7 +26,6 @@ function homePath(role: string): string {
     case "ACADEMIA":
       return "/academia/dashboard";
     case "FACULTY":
-    case "FACULTY_ADMIN":
       return "/faculty/dashboard";
     case "TEACHER":
       return "/teacher/dashboard";
@@ -49,7 +47,6 @@ function roleLabel(role: string): string {
     case "ADMIN": return "Administrator";
     case "ACADEMIA": return "Academia";
     case "FACULTY": return "Faculty";
-    case "FACULTY_ADMIN": return "Faculty Admin";
     case "TEACHER": return "Teacher";
     case "HR": return "HR";
     case "ADMISSIONS": return "Admissions";

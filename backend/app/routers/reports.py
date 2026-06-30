@@ -28,7 +28,7 @@ from app.utils.activity_logger import log_activity
 
 router = APIRouter(prefix="/reports", tags=["reports"])
 
-report_access_dependency = Depends(require_roles("SUPER_ADMIN", "ADMIN", "ACADEMIA", "FACULTY", "FACULTY_ADMIN", "TEACHER", "HR", "ADMISSIONS"))
+report_access_dependency = Depends(require_roles("SUPER_ADMIN", "ADMIN", "ACADEMIA", "FACULTY", "TEACHER", "HR", "ADMISSIONS"))
 
 
 def _is_present_status(status: AttendanceStatus) -> bool:

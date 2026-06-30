@@ -143,7 +143,7 @@ function AdminDashboard() {
           : "—",
       icon: Activity,
       color: "text-primary-accent",
-      path: "/admin/attendance",
+      path: "/admin/attendance-list",
     },
   ];
 

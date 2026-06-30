@@ -13,6 +13,7 @@ from app.db.role_scoped import get_role_scoped_db
 from app.schemas.attendance import AttendanceSessionEndRequest, AttendanceSessionRead, AttendanceSessionStartRequest
 from app.services.attendance_service import attendance_service
 from app.utils.activity_logger import log_activity
+from app.services.notification_service import create_notification, NotificationType
 from app.routers.academic_structure import _sync_semester_statuses
 
 
@@ -20,9 +21,9 @@ router = APIRouter(prefix="/sessions", tags=["sessions"])
 
 
 # Roles that can start/end sessions (must be a teacher or admin actor)
-_SESSION_MGMT_ROLES = ("SUPER_ADMIN", "ACADEMIA", "FACULTY_ADMIN", "TEACHER")
+_SESSION_MGMT_ROLES = ("SUPER_ADMIN", "ACADEMIA", "FACULTY", "TEACHER")
 # Roles that can READ sessions (includes report-only admin role)
-_SESSION_ROLES = ("SUPER_ADMIN", "ADMIN", "HR", "ACADEMIA", "FACULTY_ADMIN", "TEACHER")
+_SESSION_ROLES = ("SUPER_ADMIN", "ADMIN", "HR", "ACADEMIA", "FACULTY", "TEACHER")
 
 
 @router.post(
@@ -65,6 +66,15 @@ def start_session(
                     f"(it runs {ay.start_date} to {ay.end_date})."
                 ),
             )
+
+    # Admin actors (SUPER_ADMIN without a TEACHER/FACULTY role) are restricted to Lab sessions only
+    actor_role_names = {role.name for role in current_user.roles}
+    is_admin_actor = "SUPER_ADMIN" in actor_role_names and not {"TEACHER", "FACULTY"}.intersection(actor_role_names)
+    if is_admin_actor and payload.session_type != "Lab":
+        raise HTTPException(
+            status_code=403,
+            detail="Admin role is only permitted to start Lab sessions. Lecture and Tutorial sessions must be started by a teacher.",
+        )
 
     result = attendance_service.start_session(
         db=db,
@@ -126,7 +136,7 @@ def list_sessions(
 
     # Scope TEACHER to only their own sessions — always enforce, never fall through
     role_names = {role.name for role in current_user.roles}
-    if "TEACHER" in role_names and not {"SUPER_ADMIN", "ACADEMIA", "FACULTY_ADMIN"}.intersection(role_names):
+    if "TEACHER" in role_names and not {"SUPER_ADMIN", "ACADEMIA", "FACULTY"}.intersection(role_names):
         teacher = db.query(Teacher).filter(Teacher.user_id == current_user.id).first()
         if teacher:
             query = query.filter(AttendanceSession.teacher_id == teacher.id)

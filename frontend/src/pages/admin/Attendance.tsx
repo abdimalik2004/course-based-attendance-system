@@ -21,8 +21,9 @@ const adminAttendanceSchema = z.object({
   course_id: z.string().min(1, 'Course is required'),
   schedule_id: z.string().min(1, 'Schedule is required'),
   class_id: z.string().min(1, 'Class is required'),
-  session_type: z.enum(['Lecture', 'Lab', 'Tutorial'], {
-    message: 'Session type is required',
+  // Admin role is restricted to Lab sessions only
+  session_type: z.literal('Lab', {
+    errorMap: () => ({ message: 'Admin role can only take Lab sessions' }),
   }),
   camera_index: z.coerce.number().int().min(0, 'Camera index must be 0 or greater'),
   notes: z.string().optional(),
@@ -32,7 +33,7 @@ type AdminAttendanceForm = z.infer<typeof adminAttendanceSchema>;
 
 export default function Attendance() {
   const { sessionState, startSession, setActiveSession, resetSession } = useAttendanceStore();
-  const { faculties, departments, courses, classes, classAssignments, courseAssignments, structures, isLoading: academiaLoading, error: academiaError, fetchData } = useAcademiaStore();
+  const { faculties, departments, courses, classes, classAssignments, isLoading: academiaLoading, error: academiaError, fetchData } = useAcademiaStore();
   const { user } = useAuthStore();
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -89,7 +90,7 @@ export default function Attendance() {
       course_id: '',
       schedule_id: '',
       class_id: '',
-      session_type: '' as any,
+      session_type: 'Lab',
       camera_index: 0,
       notes: '',
     },
@@ -100,22 +101,12 @@ export default function Attendance() {
   const selectedCourseId = watch('course_id');
   const selectedScheduleId = String(watch('schedule_id') ?? '');
 
-  // Course IDs that belong to a currently-active semester
-  const activeSemesterCourseIds = useMemo(() => {
-    const activeStructureIds = new Set(
-      structures.filter((s) => s.status === 'Active').map((s) => s.id),
-    );
-    return new Set(
-      courseAssignments
-        .filter((ca) => activeStructureIds.has(ca.academicYearId))
-        .map((ca) => ca.courseId),
-    );
-  }, [structures, courseAssignments]);
-
   const filteredDepartments = departments.filter((d) => d.facultyId === selectedFacultyId);
-  // Only show courses whose semester is currently active
+  // Show all courses for the selected department — the schedule time-slot
+  // validation below already prevents starting sessions outside valid hours,
+  // so an extra semester filter here only hides courses incorrectly.
   const filteredCourses = courses.filter(
-    (c) => c.departmentId === selectedDepartmentId && activeSemesterCourseIds.has(c.id),
+    (c) => c.departmentId === selectedDepartmentId,
   );
   const filteredClasses = classes.filter((cls) => cls.departmentId === selectedDepartmentId || cls.facultyId === selectedFacultyId);
 
@@ -489,24 +480,24 @@ export default function Attendance() {
                   </div>
 
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                    {/* Session Type */}
+                    {/* Session Type — Admin role is restricted to Lab only */}
                     <div className="space-y-2">
                       <label className="text-sm font-medium text-gray-700 dark:text-gray-300 ml-1">
                         Session Type <span className="text-red-500">*</span>
                       </label>
                       <select
                         {...register('session_type')}
-                        className={`flex h-12 w-full rounded-xl glass-input px-4 py-2 text-sm text-gray-900 dark:text-gray-100 transition-all appearance-none bg-no-repeat bg-[right_1rem_center] bg-[length:1em_1em] ${errors.session_type ? 'border-red-500 focus:border-red-500 focus:ring-red-500' : ''}`}
+                        className="flex h-12 w-full rounded-xl glass-input px-4 py-2 text-sm text-gray-900 dark:text-gray-100 transition-all appearance-none bg-no-repeat bg-[right_1rem_center] bg-[length:1em_1em] opacity-80 cursor-not-allowed"
                         style={{ backgroundImage: `url("data:image/svg+xml;charset=US-ASCII,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%2224%22%20height%3D%2224%22%20viewBox%3D%220%200%2024%2024%22%20fill%3D%22none%22%20stroke%3D%22%236B7280%22%20stroke-width%3D%222%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%3E%3Cpolyline%20points%3D%226%209%2012%2015%2018%209%22%3E%3C%2Fpolyline%3E%3C%2Fsvg%3E")`}}
                       >
-                        <option value="" disabled className="text-gray-500">Select Session Type...</option>
-                        <option value="Lecture" className="bg-white dark:bg-dark-bg text-gray-900 dark:text-white">Lecture</option>
+                        <option value="Lecture" disabled className="text-gray-400">Lecture (not available)</option>
                         <option value="Lab" className="bg-white dark:bg-dark-bg text-gray-900 dark:text-white">Lab</option>
-                        <option value="Tutorial" className="bg-white dark:bg-dark-bg text-gray-900 dark:text-white">Tutorial</option>
+                        <option value="Tutorial" disabled className="text-gray-400">Tutorial (not available)</option>
                       </select>
-                      {errors.session_type && (
-                        <p className="text-xs text-red-500 ml-1 mt-1">{errors.session_type.message}</p>
-                      )}
+                      <p className="text-xs text-amber-600 dark:text-amber-400 ml-1 flex items-center gap-1">
+                        <AlertCircle size={12} />
+                        Admin role is restricted to Lab sessions only
+                      </p>
                     </div>
 
                     {/* Camera Index */}

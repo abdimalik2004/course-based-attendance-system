@@ -17,15 +17,8 @@ import {
 import { Modal } from "@/components/ui/Modal";
 import { useUsersStore } from "@/store/useUsersStore";
 
-const allowedRoleNames = [
-  "SUPER_ADMIN",
-  "ACADEMIA",
-  "ADMISSIONS",
-  "HR",
-  "FACULTY",
-  "TEACHER",
-  "STUDENT",
-];
+// Roles that are internal/backend-only and should not be shown in the UI list
+const HIDDEN_ROLES = new Set<string>();
 
 const roleLabelMap: Record<string, string> = {
   SUPER_ADMIN: "Admin",
@@ -65,6 +58,10 @@ export default function RolesManagement() {
   // Edit state
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editName, setEditName] = useState("");
+  const [editError, setEditError] = useState("");
+  const [deleteError, setDeleteError] = useState("");
+  const [editSaving, setEditSaving] = useState(false);
+  const [deleteDeleting, setDeleteDeleting] = useState(false);
 
   const {
     register,
@@ -92,17 +89,22 @@ export default function RolesManagement() {
   const handleEditClick = (role: { id: string; name: string }) => {
     setEditingId(role.id);
     setEditName(role.name);
+    setEditError("");
     setEditModalOpen(true);
   };
 
   const handleSaveEdit = async () => {
     if (!editName.trim() || !editingId) return;
+    setEditSaving(true);
+    setEditError("");
     try {
       await editRole(editingId, editName.trim());
       setEditModalOpen(false);
       setEditingId(null);
-    } catch (err) {
-      console.error(err);
+    } catch (err: any) {
+      setEditError(err?.message ?? "Failed to update role");
+    } finally {
+      setEditSaving(false);
     }
   };
 
@@ -110,21 +112,27 @@ export default function RolesManagement() {
     setEditModalOpen(false);
     setEditingId(null);
     setEditName("");
+    setEditError("");
   };
 
   const handleDeleteClick = (role: { id: string; name: string }) => {
     setRoleToDelete(role);
+    setDeleteError("");
     setDeleteModalOpen(true);
   };
 
   const confirmDelete = async () => {
     if (!roleToDelete) return;
+    setDeleteDeleting(true);
+    setDeleteError("");
     try {
       await removeRole(roleToDelete.id);
       setDeleteModalOpen(false);
       setRoleToDelete(null);
-    } catch (err) {
-      console.error(err);
+    } catch (err: any) {
+      setDeleteError(err?.message ?? "Failed to delete role");
+    } finally {
+      setDeleteDeleting(false);
     }
   };
 
@@ -173,7 +181,7 @@ export default function RolesManagement() {
                   </TableRow>
                 ) : (
                   roles
-                    .filter((role) => allowedRoleNames.includes(role.name))
+                    .filter((role) => !HIDDEN_ROLES.has(role.name))
                     .map((role) => (
                       <TableRow key={role.id}>
                         <TableCell className="font-medium text-gray-500 dark:text-gray-400">
@@ -304,11 +312,15 @@ export default function RolesManagement() {
             />
           </div>
 
+          {editError && (
+            <p className="text-sm text-red-400">{editError}</p>
+          )}
+
           <div className="flex items-center justify-end gap-3 pt-6 border-t border-gray-100 dark:border-white/5 mt-6">
             <Button type="button" variant="ghost" onClick={handleCancelEdit}>
               Cancel
             </Button>
-            <Button onClick={handleSaveEdit} className="gap-2">
+            <Button onClick={handleSaveEdit} isLoading={editSaving} className="gap-2">
               <Save size={18} />
               Save Changes
             </Button>
@@ -327,19 +339,34 @@ export default function RolesManagement() {
           <p className="text-gray-600 dark:text-gray-300">
             Are you sure you want to delete the role{" "}
             <span className="font-semibold text-gray-900 dark:text-white">
-              "{roleToDelete?.name}"
+              {roleToDelete?.name}
             </span>
             ? This action cannot be undone.
           </p>
-          <div className="flex items-center justify-end gap-3 pt-4 border-t border-gray-100 dark:border-white/5 mt-4">
-            <Button variant="ghost" onClick={() => setDeleteModalOpen(false)}>
+
+          {deleteError && (
+            <p className="text-sm text-red-400">{deleteError}</p>
+          )}
+
+          <div className="flex items-center justify-end gap-3 pt-6 border-t border-gray-100 dark:border-white/5 mt-6">
+            <Button
+              type="button"
+              variant="ghost"
+              onClick={() => {
+                setDeleteModalOpen(false);
+                setRoleToDelete(null);
+                setDeleteError("");
+              }}
+            >
               Cancel
             </Button>
             <Button
               onClick={confirmDelete}
-              className="bg-red-500 hover:bg-red-600 text-white border-0 shadow-lg shadow-red-500/25"
+              isLoading={deleteDeleting}
+              className="gap-2 bg-red-500 hover:bg-red-600 text-white"
             >
-              Delete
+              <Trash2 size={18} />
+              Delete Role
             </Button>
           </div>
         </div>

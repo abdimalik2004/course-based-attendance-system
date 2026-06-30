@@ -76,7 +76,7 @@ class FaceEmbeddingRecognizer:
                 )
                 continue
 
-            quality_ok, _ = self.detector.passes_quality(frame, (x1, y1, w, h))
+            quality_ok, quality_reason = self.detector.passes_quality(frame, (x1, y1, w, h))
             if not quality_ok:
                 results.append(
                     {
@@ -84,6 +84,9 @@ class FaceEmbeddingRecognizer:
                         "student_id": None,
                         "confidence": 0.0,
                         "is_known": False,
+                        # Propagate quality failure reason so face_service can
+                        # surface a meaningful status (e.g. "low_light" for too_dark).
+                        "quality_reason": quality_reason,
                     }
                 )
                 continue
@@ -107,6 +110,40 @@ class FaceEmbeddingRecognizer:
             scores = np.dot(self.mean_embeddings, emb)
             best_idx = int(np.argmax(scores))
             best_score = float(scores[best_idx])
+
+            # ── Second-best gap check ──────────────────────────────────────────
+            # When enabled (margin_gap > 0), the best match must lead the
+            # second-best by at least margin_gap cosine units. Disabled by
+            # default (0.0) because with small student pools the gap is
+            # naturally small even for correct matches.
+            margin_gap = float(getattr(self.config, "embedding_margin_gap", 0.0))
+            second_best_score = 0.0
+            if len(scores) > 1:
+                sorted_scores = np.sort(scores)  # ascending
+                second_best_score = float(sorted_scores[-2])
+            gap = best_score - second_best_score
+
+            logger.debug(
+                "Recognize: candidate=%s best=%.3f second=%.3f gap=%.3f threshold=%.3f gap_limit=%.3f",
+                self.mean_student_ids[best_idx],
+                best_score,
+                second_best_score,
+                gap,
+                self.config.embedding_min_similarity,
+                margin_gap,
+            )
+
+            if margin_gap > 0.0 and len(scores) > 1 and gap < margin_gap:
+                results.append(
+                    {
+                        "bbox": (x1, y1, w, h),
+                        "student_id": None,
+                        "confidence": best_score,
+                        "is_known": False,
+                    }
+                )
+                continue
+
             is_known = best_score >= self.config.embedding_min_similarity
             student_id = self.mean_student_ids[best_idx] if is_known else None
             results.append(
@@ -122,10 +159,15 @@ class FaceEmbeddingRecognizer:
     def _extract_face_tensor(self, frame, bbox):
         x, y, w, h = bbox
         h_img, w_img = frame.shape[:2]
-        x1 = max(0, x)
-        y1 = max(0, y)
-        x2 = min(w_img, x + w)
-        y2 = min(h_img, y + h)
+        # Add 10 % padding on each side — identical to the padding used during
+        # training (train.py). Both must use the same crop geometry or the
+        # FaceNet embeddings from training and live recognition won't match.
+        pad_x = int(w * 0.10)
+        pad_y = int(h * 0.10)
+        x1 = max(0, x - pad_x)
+        y1 = max(0, y - pad_y)
+        x2 = min(w_img, x + w + pad_x)
+        y2 = min(h_img, y + h + pad_y)
         if x2 <= x1 or y2 <= y1:
             return None
 

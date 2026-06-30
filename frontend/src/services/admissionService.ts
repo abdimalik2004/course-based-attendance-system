@@ -11,6 +11,7 @@ export interface AdmissionStudentDto {
   embedding_ref?: string | null;
   status: AdmissionStatus;
   created_at: string;
+  generated_password?: string | null;
 }
 
 export interface AdmissionDashboardStatsDto {

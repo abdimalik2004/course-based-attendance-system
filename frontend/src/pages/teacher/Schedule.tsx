@@ -137,13 +137,17 @@ export default function TeacherSchedule() {
           if (!isNaN(hh)) endDateTime.setHours(hh, mm || 0, 0, 0);
         }
 
-        // "Ongoing Now" only when a teacher/admin has actually started the session —
-        // not just because the clock falls inside the scheduled time window.
-        const isCurrent = activeSessionCourseIds.has(String(schedule.course_id));
-        const isNext =
-          !isCurrent &&
-          startDateTime > now &&
-          startDateTime.getTime() - now.getTime() < 1000 * 60 * 60 * 24 * 3;
+        // Only flag statuses on today's occurrence — active sessions always run
+        // on the current date, and "Up Next" only makes sense for today.
+        const isToday = occurrence.toDateString() === now.toDateString();
+
+        // "Ongoing Now" only when a teacher/admin has actually started the session
+        // AND this specific occurrence row is for today.
+        const isCurrent =
+          isToday && activeSessionCourseIds.has(String(schedule.course_id));
+
+        // "Up Next" only for upcoming sessions on today — not other days of the week.
+        const isNext = isToday && !isCurrent && startDateTime > now;
 
         rows.push({
           id: `${schedule.id}-${wd}`,

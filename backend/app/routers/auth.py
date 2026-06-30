@@ -23,15 +23,21 @@ from app.db.session import get_db
 from app.db.reset_database import reset_database_to_clean_state
 from app.schemas.auth import (
     ChangePasswordRequest,
+    ForgotPasswordRequest,
     ResetDatabaseRequest,
+    ResetPasswordRequest,
     RoleCreate,
     RoleRead,
     Token,
     UserCreate,
     UserRead,
+    VerifyResetCodeRequest,
 )
+from app.services.email_service import generate_otp, otp_store, send_reset_code
 from app.services.user_service import create_user
 from app.utils.activity_logger import log_activity
+from app.services.notification_service import create_notification, notify_faculty_admins, notify_admins, NotificationType
+
 
 
 router = APIRouter(prefix="/auth", tags=["auth"])
@@ -73,6 +79,66 @@ def create_role(payload: RoleCreate, db: Session = Depends(get_db)):
 
     db.refresh(role)
     return role
+
+
+# System roles that cannot be renamed or deleted
+_PROTECTED_ROLES = {
+    "SUPER_ADMIN", "ACADEMIA", "ADMISSIONS", "HR",
+    "FACULTY", "TEACHER", "STUDENT",
+}
+
+
+@router.put(
+    "/roles/{role_id}",
+    response_model=RoleRead,
+    dependencies=[Depends(require_roles("SUPER_ADMIN"))],
+    responses={
+        400: {"description": "Invalid role name"},
+        403: {"description": "Cannot modify a system role"},
+        404: {"description": "Role not found"},
+        409: {"description": "Role name already exists"},
+    },
+)
+def update_role(role_id: int, payload: RoleCreate, db: Session = Depends(get_db)):
+    role = db.query(Role).filter(Role.id == role_id).first()
+    if not role:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Role not found")
+    if role.name in _PROTECTED_ROLES:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="System roles cannot be modified")
+
+    new_name = payload.name.strip().upper()
+    if not new_name:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Role name is required")
+
+    role.name = new_name
+    try:
+        db.commit()
+    except IntegrityError as exc:
+        db.rollback()
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Role name already exists") from exc
+
+    db.refresh(role)
+    return role
+
+
+@router.delete(
+    "/roles/{role_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    dependencies=[Depends(require_roles("SUPER_ADMIN"))],
+    responses={
+        403: {"description": "Cannot delete a system role"},
+        404: {"description": "Role not found"},
+    },
+)
+def delete_role(role_id: int, db: Session = Depends(get_db)):
+    role = db.query(Role).filter(Role.id == role_id).first()
+    if not role:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Role not found")
+    if role.name in _PROTECTED_ROLES:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="System roles cannot be deleted")
+
+    db.delete(role)
+    db.commit()
 
 
 @router.post(
@@ -261,6 +327,108 @@ def reset_database(payload: ResetDatabaseRequest):
 
     summary = reset_database_to_clean_state()
     return {"ok": True, "summary": summary}
+
+
+@router.post(
+    "/forgot-password",
+    responses={
+        200: {"description": "Reset code sent (or silently accepted if email not found)"},
+        429: {"description": "Too many requests"},
+    },
+)
+def forgot_password(payload: ForgotPasswordRequest, db: Session = Depends(get_db)):
+    """
+    Step 1 — request a password-reset code.
+
+    Always returns 200 even when the email is not registered so that
+    attackers cannot enumerate valid accounts. The code is sent via email
+    and stored in memory for 10 minutes.
+    """
+    email = payload.email.strip().lower()
+    dev_code: str | None = None
+
+    # Only send a code if the email actually exists in the DB.
+    user = db.query(User).filter(User.email == email).first()
+    if user:
+        code = generate_otp(6)
+        otp_store.create(email, code, expires_minutes=10)
+        sent = send_reset_code(email, code)
+        if not sent and settings.app_env != "production":
+            # SMTP not configured — surface the code directly so the flow can
+            # be tested without a Gmail account set up. In production this field
+            # is never returned (SMTP must be properly configured there).
+            dev_code = code
+
+    response: dict = {"ok": True, "message": "If that email is registered, a reset code has been sent."}
+    if dev_code:
+        response["dev_code"] = dev_code
+        response["dev_notice"] = "SMTP not configured — code returned here for development testing only."
+    return response
+
+
+@router.post(
+    "/verify-reset-code",
+    responses={
+        200: {"description": "Code verified — returns a one-time reset_token"},
+        400: {"description": "Invalid or expired code"},
+    },
+)
+def verify_reset_code(payload: VerifyResetCodeRequest):
+    """
+    Step 2 — verify the 6-digit code.
+
+    Returns a short-lived `reset_token` (15 minutes) that must be passed
+    to /reset-password. The OTP itself cannot be reused after this call.
+    """
+    email = payload.email.strip().lower()
+    reset_token = otp_store.verify(email, payload.code)
+    if not reset_token:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid or expired reset code. Please check the code and try again.",
+        )
+    return {"ok": True, "reset_token": reset_token}
+
+
+@router.post(
+    "/reset-password",
+    responses={
+        200: {"description": "Password updated successfully"},
+        400: {"description": "Invalid or expired reset token"},
+    },
+)
+def reset_password(payload: ResetPasswordRequest, db: Session = Depends(get_db)):
+    """
+    Step 3 — set the new password using the reset_token from step 2.
+
+    The reset_token is single-use and expires after 15 minutes.
+    """
+    email = otp_store.consume_reset_token(payload.reset_token)
+    if not email:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Reset session has expired or is invalid. Please start over.",
+        )
+
+    user = db.query(User).filter(User.email == email).first()
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="User not found.",
+        )
+
+    user.hashed_password = get_password_hash(payload.new_password)
+    db.commit()
+
+    log_activity(
+        action=f"Password Reset - {user.username}",
+        user=user,
+        status="Success",
+        db=db,
+    )
+    db.commit()
+
+    return {"ok": True, "message": "Password updated successfully. You can now sign in."}
 
 
 @router.post(

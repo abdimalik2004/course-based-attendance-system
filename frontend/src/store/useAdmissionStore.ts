@@ -40,7 +40,7 @@ interface AdmissionState {
     fullName: string;
     faculty: string;
     department: string;
-  }) => Promise<void>;
+  }) => Promise<{ studentNumber: string; generatedPassword: string | null } | null>;
   updateStudent: (
     id: string,
     updates: {
@@ -51,7 +51,7 @@ interface AdmissionState {
     },
   ) => Promise<void>;
   deleteStudent: (id: string) => Promise<void>;
-  approveStudent: (id: string) => Promise<void>;
+  approveStudent: (id: string) => Promise<{ studentNumber: string; generatedPassword: string | null } | null>;
   rejectStudent: (id: string) => Promise<void>;
 }
 
@@ -213,12 +213,16 @@ export const useAdmissionStore = create<AdmissionState>((set, get) => ({
         facultyId,
       );
 
-      await admissionService.createStudent({
+      const created = await admissionService.createStudent({
         full_name: student.fullName,
         faculty_id: facultyId,
         department_id: departmentId,
       });
       await get().fetchAdmissionData();
+      return {
+        studentNumber: created.student_number,
+        generatedPassword: created.generated_password ?? null,
+      };
     } catch (error) {
       const message =
         error instanceof Error ? error.message : "Failed to create student.";
@@ -306,7 +310,22 @@ export const useAdmissionStore = create<AdmissionState>((set, get) => ({
   },
 
   approveStudent: async (id) => {
-    await get().updateStudent(id, { status: "approved" });
+    set({ isSaving: true, error: null });
+    try {
+      const studentId = Number(id);
+      const result = await admissionService.updateStudent(studentId, { status: "approved" });
+      await get().fetchAdmissionData();
+      return {
+        studentNumber: result.student_number,
+        generatedPassword: result.generated_password ?? null,
+      };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Failed to approve student.";
+      set({ error: message });
+      throw error;
+    } finally {
+      set({ isSaving: false });
+    }
   },
 
   rejectStudent: async (id) => {

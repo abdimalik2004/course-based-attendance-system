@@ -13,6 +13,7 @@ from app.db.faculty_scope import FacultyScopeContext, enforce_faculty_scope, get
 from app.db.models import ClassBatch, ClassCourseAssignment, User
 from app.db.role_scoped import get_role_scoped_db
 from app.utils.activity_logger import log_activity
+from app.services.notification_service import notify_faculty_admins, NotificationType
 from app.schemas.classbatch import (
     ClassBatchCreate,
     ClassBatchRead,
@@ -188,6 +189,13 @@ def create_class_batch(
         raise HTTPException(status_code=400, detail="Class batch could not be created due to invalid data") from exc
     db.refresh(obj)
     log_activity(action=f"Class Created - {obj.name}", user=current_user, db=db)
+    notify_faculty_admins(
+        db, obj.faculty_id,
+        title="New Class Created",
+        message=f"Class '{obj.name}' has been created in your faculty.",
+        notif_type=NotificationType.SUCCESS,
+        link="/faculty/classes",
+    )
     return obj
 
 

@@ -11,8 +11,15 @@ import attendanceService from "@/services/attendanceService";
 import { attendanceKeys } from "@/hooks/queries/useAttendance";
 import { cn } from "@/utils/cn";
 
-// Average pixel brightness considered "too dark" to scan (0–255 scale)
-const LOW_LIGHT_THRESHOLD = 45;
+// Average pixel brightness considered "too dark" to scan (0–255 scale).
+// 65 catches dim classrooms (overcast day, single low-watt bulb) before they
+// reach the backend. The original 40 only caught near-pitch-black conditions.
+// If you find false-positives in normally lit rooms, lower this toward 50.
+const LOW_LIGHT_THRESHOLD = 65;
+
+// Max width (px) of the frame sent to the backend.
+// Reduces payload size by 4–9× vs. native 1080p and speeds up backend SCRFD.
+const MAX_SEND_WIDTH = 640;
 
 function getAverageBrightness(
   ctx: CanvasRenderingContext2D,
@@ -48,6 +55,10 @@ export default function ScannerInterface({ cameraIndex }: { cameraIndex?: number
   const [showEndConfirm, setShowEndConfirm] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
   const consecutiveNoMatchRef = useRef(0);
+  // Tracks consecutive backend "no_face" responses — when a masked face is in
+  // frame the browser FaceDetector may pass it through but SCRFD returns no_face
+  // repeatedly. After 3 hits we surface "partial_face" (Full Face Required).
+  const consecutiveNoFaceRef = useRef(0);
   // Mutex: prevents two async scan calls from overlapping inside the interval
   const scanInProgressRef = useRef(false);
   // Native browser face detector (Chrome / Edge — Shape Detection API)
@@ -118,14 +129,25 @@ export default function ScannerInterface({ cameraIndex }: { cameraIndex?: number
     if (!video || !activeSessionId) return null;
     if (video.videoWidth === 0 || video.videoHeight === 0) return null;
 
+    // Resize to MAX_SEND_WIDTH before encoding. Sending a full 1080p frame at
+    // JPEG 0.9 is 200-500 KB and forces the backend to run SCRFD on a huge
+    // image. At 640 px the payload drops to ~30-60 KB and SCRFD is 4× faster.
+    let sendW = video.videoWidth;
+    let sendH = video.videoHeight;
+    if (sendW > MAX_SEND_WIDTH) {
+      sendH = Math.round(sendH * MAX_SEND_WIDTH / sendW);
+      sendW = MAX_SEND_WIDTH;
+    }
+
     const canvas = document.createElement("canvas");
-    canvas.width = video.videoWidth;
-    canvas.height = video.videoHeight;
+    canvas.width = sendW;
+    canvas.height = sendH;
     const ctx = canvas.getContext("2d");
     if (!ctx) return null;
-    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-    const brightness = getAverageBrightness(ctx, canvas.width, canvas.height);
-    return { imageUrl: canvas.toDataURL("image/jpeg", 0.9), brightness };
+    ctx.drawImage(video, 0, 0, sendW, sendH);
+    const brightness = getAverageBrightness(ctx, sendW, sendH);
+    // 0.75 JPEG quality is indistinguishable to FaceNet but ~30% smaller file.
+    return { imageUrl: canvas.toDataURL("image/jpeg", 0.75), brightness };
   };
 
   // ── End session ─────────────────────────────────────────────────────────
@@ -156,6 +178,7 @@ export default function ScannerInterface({ cameraIndex }: { cameraIndex?: number
     if (!activeSessionId) return;
 
     consecutiveNoMatchRef.current = 0;
+    consecutiveNoFaceRef.current = 0;
     scanInProgressRef.current = false;
 
     const doScan = async () => {
@@ -187,8 +210,11 @@ export default function ScannerInterface({ cameraIndex }: { cameraIndex?: number
             videoRef.current,
           );
           if (faces.length === 0) {
-            // No face — unlock and quietly retry next tick
+            // No face — unlock and quietly retry next tick.
+            // Also reset the no-face counter: the browser's own detector
+            // confirms the frame is empty, so this is not a mask scenario.
             consecutiveNoMatchRef.current = 0;
+            consecutiveNoFaceRef.current = 0;
             scanInProgressRef.current = false;
             return;
           }
@@ -222,19 +248,43 @@ export default function ScannerInterface({ cameraIndex }: { cameraIndex?: number
 
       switch (status) {
         case "no_face":
-          // Backend confirmed no face — unlock and retry next tick
+          // Backend confirmed no face. Most of the time this is a genuinely
+          // empty frame (the browser FaceDetector pre-filter usually catches
+          // those, but not always). However when someone wears a mask or covers
+          // their face with a hand, the browser's lenient detector may pass the
+          // frame through while SCRFD cannot find a face — producing repeated
+          // no_face responses. After 3 consecutive hits (~2 s) we surface the
+          // "Full Face Required" warning so the person knows the issue.
           consecutiveNoMatchRef.current = 0;
-          scanInProgressRef.current = false;
+          consecutiveNoFaceRef.current += 1;
+          if (consecutiveNoFaceRef.current >= 3) {
+            consecutiveNoFaceRef.current = 0;
+            // Leave mutex locked; auto-reset will unlock after 2500 ms
+            setRecognitionResult("partial_face");
+          } else {
+            scanInProgressRef.current = false;
+          }
+          break;
+
+        case "low_light":
+          // Backend detected a face but brightness was too low for a reliable
+          // embedding. Surface the same amber Low Light warning the frontend
+          // brightness check would show (mutex stays locked; auto-reset unlocks).
+          consecutiveNoFaceRef.current = 0;
+          consecutiveNoMatchRef.current = 0;
+          setRecognitionResult("low_light");
           break;
 
         case "partial_face":
           // Face occluded (mask / sunglasses / hand) — leave mutex locked;
           // cleanup unlocks when auto-reset restores waiting_for_face
+          consecutiveNoFaceRef.current = 0;
           setRecognitionResult("partial_face");
           break;
 
         case "success":
           consecutiveNoMatchRef.current = 0;
+          consecutiveNoFaceRef.current = 0;
           // Leave mutex locked — cleanup unlocks for next student's loop
           setRecognitionResult("success", {
             name: result.full_name ?? result.student_number ?? `Session ${activeSessionId}`,
@@ -251,6 +301,7 @@ export default function ScannerInterface({ cameraIndex }: { cameraIndex?: number
 
         case "already_marked":
           consecutiveNoMatchRef.current = 0;
+          consecutiveNoFaceRef.current = 0;
           // Leave mutex locked — cleanup unlocks for next student's loop
           setRecognitionResult("already_marked", {
             name: result.full_name ?? result.student_number ?? `Session ${activeSessionId}`,
@@ -269,6 +320,7 @@ export default function ScannerInterface({ cameraIndex }: { cameraIndex?: number
           // Unapproved student — treat exactly like an unknown face.
           // The backend already masks this as "not_recognized" but handle
           // the old status string here too for safety.
+          consecutiveNoFaceRef.current = 0;
           consecutiveNoMatchRef.current += 1;
           if (consecutiveNoMatchRef.current >= 4) {
             consecutiveNoMatchRef.current = 0;
@@ -280,10 +332,11 @@ export default function ScannerInterface({ cameraIndex }: { cameraIndex?: number
 
         default:
           // not_recognized — face is visible but student is unknown.
-          // After 4 consecutive misses show "failed"; otherwise unlock
-          // and let the next tick try again.
+          // After 3 consecutive misses show "failed" so an unknown person
+          // gets a quick response (~2 s) rather than waiting through 4 ticks.
+          consecutiveNoFaceRef.current = 0;
           consecutiveNoMatchRef.current += 1;
-          if (consecutiveNoMatchRef.current >= 4) {
+          if (consecutiveNoMatchRef.current >= 3) {
             consecutiveNoMatchRef.current = 0;
             // Leave mutex locked — cleanup unlocks for next student's loop
             setRecognitionResult("failed");
@@ -295,9 +348,11 @@ export default function ScannerInterface({ cameraIndex }: { cameraIndex?: number
     };
 
     // Brief startup delay so the camera can fully initialise before we send
-    // the first frame, then tick every 900 ms.
-    const startTimer = setTimeout(doScan, 600);
-    const intervalId = setInterval(doScan, 900);
+    // the first frame, then tick every 700 ms.
+    // Smaller frames (max 640 px) process faster on the backend so we can
+    // scan more often without hitting the rate limit (180 req/min >> 85/min).
+    const startTimer = setTimeout(doScan, 400);
+    const intervalId = setInterval(doScan, 700);
 
     return () => {
       clearTimeout(startTimer);

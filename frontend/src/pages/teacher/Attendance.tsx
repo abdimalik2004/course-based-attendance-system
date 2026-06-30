@@ -8,7 +8,6 @@ import { Card, CardContent } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
 import { useAttendanceStore } from "@/store/useAttendanceStore";
-import { useAcademiaStore } from "@/store/useAcademiaStore";
 import ScannerInterface from "@/components/attendance/ScannerInterface";
 import { cn } from "@/utils/cn";
 import { useQuery } from "@tanstack/react-query";
@@ -39,14 +38,7 @@ export default function TeacherAttendance() {
     resetSession,
     setActiveSession,
   } = useAttendanceStore();
-  const { structures, courseAssignments, fetchData: fetchAcademiaData } = useAcademiaStore();
   const [sessionError, setSessionError] = useState<string | null>(null);
-
-  // Ensure academia store is populated (needed for semester filtering)
-  useEffect(() => {
-    if (structures.length === 0) fetchAcademiaData();
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
   const { data: activeSessions } = useQuery({
     queryKey: ["teacherActiveSessions"],
     queryFn: () => attendanceService.listActiveSessions(),
@@ -78,39 +70,21 @@ export default function TeacherAttendance() {
     staleTime: 1000 * 60 * 5,
   });
 
-  // Course IDs that have an active semester assignment
-  const activeSemesterCourseIds = useMemo(() => {
-    const activeIds = new Set(
-      structures.filter((s) => s.status === 'Active').map((s) => s.id),
-    );
-    return new Set(
-      courseAssignments
-        .filter((ca) => activeIds.has(ca.academicYearId))
-        .map((ca) => ca.courseId),
-    );
-  }, [structures, courseAssignments]);
-
   const teacherCourses = useMemo(() => {
     const assignments = coursesData?.items ?? coursesData ?? [];
     const allCourses: any[] = allCoursesData?.items ?? allCoursesData ?? [];
 
-    return assignments
-      .map((assignment: any) => {
-        // assignment = { id, course_id, teacher_id, is_primary }
-        const courseId = String(assignment.course_id ?? assignment.id);
-        const courseDetail = allCourses.find((c: any) => String(c.id) === courseId);
-        return {
-          id: courseId,
-          name: courseDetail?.title ?? courseDetail?.name ?? `Course ${courseId}`,
-          class_name: courseDetail?.department_name ?? "",
-        };
-      })
-      // Only show courses whose semester is currently active.
-      // If the academia store hasn't loaded yet (activeSemesterCourseIds empty), show all.
-      .filter((c: any) =>
-        activeSemesterCourseIds.size === 0 || activeSemesterCourseIds.has(c.id),
-      );
-  }, [coursesData, allCoursesData, activeSemesterCourseIds]);
+    return assignments.map((assignment: any) => {
+      // assignment = { id, course_id, teacher_id, is_primary }
+      const courseId = String(assignment.course_id ?? assignment.id);
+      const courseDetail = allCourses.find((c: any) => String(c.id) === courseId);
+      return {
+        id: courseId,
+        name: courseDetail?.title ?? courseDetail?.name ?? `Course ${courseId}`,
+        class_name: courseDetail?.department_name ?? "",
+      };
+    });
+  }, [coursesData, allCoursesData]);
 
   // Only the session THIS teacher personally started (teacher_id matches their DB id)
   const myActiveSession = useMemo(() => {

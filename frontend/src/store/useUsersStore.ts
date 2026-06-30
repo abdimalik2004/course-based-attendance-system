@@ -126,8 +126,9 @@ export const useUsersStore = create<UsersState>((set) => ({
       set((state) => ({
         roles: state.roles.map((r) => (r.id === id ? updatedRole : r)),
       }));
-    } catch {
-      throw new Error("Failed to update role");
+    } catch (err: any) {
+      const detail = err?.response?.data?.detail;
+      throw new Error(typeof detail === "string" ? detail : "Failed to update role");
     }
   },
 
@@ -135,8 +136,9 @@ export const useUsersStore = create<UsersState>((set) => ({
     try {
       await usersService.deleteRole(id);
       set((state) => ({ roles: state.roles.filter((r) => r.id !== id) }));
-    } catch {
-      throw new Error("Failed to delete role");
+    } catch (err: any) {
+      const detail = err?.response?.data?.detail;
+      throw new Error(typeof detail === "string" ? detail : "Failed to delete role");
     }
   },
 }));

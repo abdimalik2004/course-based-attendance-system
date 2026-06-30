@@ -20,7 +20,7 @@ def get_role_scoped_db(current_user: User = Depends(get_current_user)) -> Genera
             db.close()
         return
 
-    if ("FACULTY" in role_names or "FACULTY_ADMIN" in role_names) and current_user.faculty_id is None:
+    if ("FACULTY" in role_names or "FACULTY" in role_names) and current_user.faculty_id is None:
         raise HTTPException(status_code=403, detail="Faculty-scoped user is missing faculty association")
 
     db = SessionLocal()

@@ -52,11 +52,42 @@ def trigger_retrain():
         )
 
     def _retrain():
-        train_embeddings_from_dataset(cfg)
+        from app.services.face_service import face_service as _fs
+
+        # Borrow already-loaded models to avoid ONNX hang (see students.py for details).
+        # _retrain() is already executing inside a background job thread, so there's no
+        # need for a nested thread + timeout — that just adds unnecessary complexity.
+        borrowed_model = None
+        borrowed_detector = None
         try:
-            face_service.reload_models()
+            with _fs._lock:
+                rec = _fs._recognizer
+                if rec is not None:
+                    borrowed_model = rec.model
+                    borrowed_detector = rec.detector
         except Exception:
-            pass  # Non-fatal: model reload failure should not fail the job
+            pass
+
+        if borrowed_model is None:
+            try:
+                det_rec = _fs._ensure_detect_recognizer()
+                if det_rec is not None:
+                    borrowed_model = det_rec.model
+                    borrowed_detector = det_rec.detector
+            except Exception:
+                pass
+
+        # Run training directly in this background thread.
+        train_embeddings_from_dataset(
+            cfg,
+            model=borrowed_model,
+            detector=borrowed_detector,
+        )
+
+        try:
+            _fs.reload_models()
+        except Exception:
+            pass
 
     job_id = enqueue_embeddings_training(
         _retrain,

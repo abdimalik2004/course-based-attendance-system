@@ -51,9 +51,12 @@ class AttendanceService:
             if reason == "no_face":
                 # Nothing in the frame — client should silently retry
                 return {"ok": False, "status": "no_face", "message": "No face detected", "processing_time": pt}
+            if reason == "low_light":
+                # Face detected but frame is too dark to produce a usable embedding
+                return {"ok": False, "status": "low_light", "message": "Improve lighting", "processing_time": pt}
             if reason in ("below_threshold",):
                 # Face detected but recognition quality too low — likely partial face,
-                # mask, dark sunglasses, or hand obscuring key facial landmarks
+                # mask, dark sunglasses, hand over mouth/nose, or scarf
                 return {
                     "ok": False,
                     "status": "partial_face",
@@ -215,7 +218,7 @@ class AttendanceService:
 
         if teacher_id is None:
             role_names = {role.name for role in actor.roles}
-            _admin_roles = {"SUPER_ADMIN", "ACADEMIA", "FACULTY_ADMIN", "HR", "ADMISSIONS"}
+            _admin_roles = {"SUPER_ADMIN", "ACADEMIA", "FACULTY", "HR", "ADMISSIONS"}
             if role_names & _admin_roles:
                 admin_id = actor_id
             else:

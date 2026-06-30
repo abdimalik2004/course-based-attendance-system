@@ -8,9 +8,9 @@ from sqlalchemy.orm import Session
 from sqlalchemy import or_, func
 from sqlalchemy.exc import IntegrityError
 
-from app.core.security import get_current_user, require_roles
+from app.core.security import get_current_user, require_roles, get_password_hash
 from app.db.faculty_scope import enforce_faculty_scope, get_optional_faculty_scope_context
-from app.db.models import Student, StudentAdmissionStatus, User
+from app.db.models import Role, Student, StudentAdmissionStatus, User
 from app.db.role_scoped import get_role_scoped_db
 from app.utils.activity_logger import log_activity
 from app.services.enrollment_service import auto_enroll_student_in_matching_courses
@@ -40,6 +40,7 @@ import cv2
 from pathlib import Path
 import re
 from fastapi import Response
+from app.services.notification_service import create_notification, NotificationType
 
 
 router = APIRouter(prefix="/students", tags=["students"])
@@ -199,12 +200,17 @@ def create_student(
         db.rollback()
         raise HTTPException(status_code=409, detail="Student number already exists") from exc
     db.refresh(obj)
+
+    # No user account is created at registration time.
+    # Credentials are only issued when admissions approves the student (see update_student).
+
     log_activity(
         action=f"Student Registered - {obj.full_name} ({obj.student_number})",
         user=current_user,
         db=db,
     )
-    return obj
+
+    return StudentRead.model_validate(obj)
 
 
 class FaceDetectRequest(BaseModel):
@@ -286,6 +292,8 @@ def update_student(
     department = get_department_or_404(db, target_department_id)
     ensure_department_belongs_to_faculty(department, target_faculty_id)
 
+    previous_status = obj.status
+
     payload_data = payload.model_dump(exclude_unset=True)
     for field in ("faculty_id", "department_id"):
         payload_data.pop(field, None)
@@ -303,7 +311,72 @@ def update_student(
         db.rollback()
         raise HTTPException(status_code=409, detail="Update conflicts with existing student data") from exc
     db.refresh(obj)
-    return obj
+
+    # ── Create user account on approval / handle status change notifications ──
+    generated_password: str | None = None
+    new_status = obj.status
+
+    if previous_status != new_status:
+        if new_status == StudentAdmissionStatus.APPROVED:
+            # Create login credentials now that the student is approved.
+            existing_user = db.query(User).filter(User.username == obj.student_number).first()
+            if not existing_user:
+                plain_password = obj.student_number
+                student_role = db.query(Role).filter(Role.name == "STUDENT").first()
+                new_user = User(
+                    username=obj.student_number,
+                    hashed_password=get_password_hash(plain_password),
+                    student_id=obj.id,
+                    is_active=True,
+                )
+                if student_role:
+                    new_user.roles = [student_role]
+                db.add(new_user)
+                try:
+                    db.commit()
+                    generated_password = plain_password
+                except IntegrityError:
+                    db.rollback()
+            else:
+                # Account already exists (e.g. re-approved after rejection) — reactivate it
+                existing_user.is_active = True
+                existing_user.student_id = obj.id
+                db.commit()
+
+            # Notify the student
+            student_user = db.query(User).filter(User.student_id == obj.id).first()
+            if student_user:
+                create_notification(
+                    db, student_user.id,
+                    title="Admission Approved",
+                    message=(
+                        "Congratulations! Your admission has been approved. "
+                        "You can now log in to your student portal."
+                    ),
+                    notif_type=NotificationType.SUCCESS,
+                    link="/student/dashboard",
+                )
+
+        elif new_status == StudentAdmissionStatus.REJECTED:
+            # Deactivate the student's login account if it exists
+            student_user = db.query(User).filter(User.student_id == obj.id).first()
+            if student_user:
+                student_user.is_active = False
+                db.commit()
+                create_notification(
+                    db, student_user.id,
+                    title="Admission Update",
+                    message=(
+                        "Your admission application has been rejected. "
+                        "Please contact the admissions office for more information."
+                    ),
+                    notif_type=NotificationType.ERROR,
+                    link="/student/dashboard",
+                )
+
+    result = StudentRead.model_validate(obj)
+    result.generated_password = generated_password
+    return result
 
 
 @router.delete("/{student_id}", dependencies=[Depends(require_roles("ADMISSIONS"))])
@@ -438,17 +511,54 @@ def capture_and_train(
         saved += 1
         index += 1
 
-    # Enqueue embedding training as a background job
+    # Enqueue embedding training as a background job.
+    # _train_wrapper runs in its own background thread (via enqueue_embeddings_training),
+    # so it is safe to do CPU-heavy work here — it will not block any HTTP requests.
     try:
         from app.services.training_manager import enqueue_embeddings_training
 
         def _train_wrapper():
             cfg = load_config()
-            train_embeddings_from_dataset(cfg)
+
+            # ── Borrow already-loaded models from the recognition service ──────
+            # Creating brand-new FaceNet + SCRFD instances inside the training
+            # thread causes a long hang on Windows: ONNX Runtime serialises
+            # concurrent model loads. Reusing the live recognizer's objects
+            # (or the detect-only recognizer pre-warmed at startup) avoids this.
+            borrowed_model = None
+            borrowed_detector = None
+            try:
+                with face_service._lock:
+                    rec = face_service._recognizer
+                    if rec is not None:
+                        borrowed_model = rec.model
+                        borrowed_detector = rec.detector
+            except Exception:
+                pass
+
+            if borrowed_model is None:
+                # Fall back to the detect-only recognizer (pre-warmed at startup).
+                try:
+                    det_rec = face_service._ensure_detect_recognizer()
+                    if det_rec is not None:
+                        borrowed_model = det_rec.model
+                        borrowed_detector = det_rec.detector
+                except Exception:
+                    pass  # last resort: training loads its own fresh copies
+
+            # Run training directly — this thread is already a background job.
+            train_embeddings_from_dataset(
+                cfg,
+                model=borrowed_model,
+                detector=borrowed_detector,
+            )
+
+            # Reload recognition models so next scan uses the new embeddings.
             try:
                 face_service.reload_models()
             except Exception:
-                # Non-fatal: model reload failure should not crash job
+                # Non-fatal: mtime-based auto-reload will pick up the new file
+                # on the next recognition request.
                 pass
 
         job_id = enqueue_embeddings_training(_train_wrapper, meta={

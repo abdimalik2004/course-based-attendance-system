@@ -11,7 +11,6 @@ export type UserRole =
   | "HR"
   | "ADMISSIONS"
   | "STUDENT"
-  | "FACULTY_ADMIN"
   | string;
 export type UserStatus = "Active" | "Inactive";
 

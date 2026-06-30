@@ -157,9 +157,35 @@ class FaceService:
 
         known = [r for r in results if r.get("is_known")]
         if not known:
-            # At least one face was detected by the detector but it was not matched
-            # to any enrolled student. This commonly happens when the face is partially
-            # occluded (mask, sunglasses, hand over face).
+            # At least one face was detected by the detector but no enrolled
+            # student was matched. Determine the most helpful reason so the
+            # frontend can display the right warning.
+
+            # 1. Dark-frame quality failure — face detected but too dark to recognise.
+            #    quality_reason is set by embedding_recognizer when passes_quality()
+            #    returns False. We surface this as "low_light" so the frontend shows
+            #    the amber Low Light warning instead of a generic "not recognised".
+            dark_fail = any(r.get("quality_reason") == "too_dark" for r in results)
+            if dark_fail:
+                return {"matched": False, "reason": "low_light", "processing_time": duration}
+
+            # 2. Partial-occlusion heuristic — face detected and quality OK, but
+            #    confidence is in a mid-range that suggests partial coverage (mouth,
+            #    nose, scarf) rather than a complete stranger.
+            #    We compare against half of the recognizer's own similarity threshold:
+            #    an enrolled student with mouth covered typically scores 0.35-0.55,
+            #    while a genuine stranger usually scores < 0.25.
+            best_conf = max((r.get("confidence", 0.0) for r in results), default=0.0)
+            partial_floor = recognizer.config.embedding_min_similarity * 0.50
+            if best_conf >= partial_floor:
+                return {
+                    "matched": False,
+                    "reason": "below_threshold",
+                    "confidence": float(best_conf),
+                    "processing_time": duration,
+                }
+
+            # 3. Genuine stranger or unusable embedding — below even the partial floor.
             return {"matched": False, "reason": "not_recognized", "processing_time": duration}
 
         best = max(known, key=lambda x: x.get("confidence", 0.0))

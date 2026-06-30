@@ -42,7 +42,10 @@ class Settings:
     scheduler_poll_seconds: int = int(os.getenv("SCHEDULER_POLL_SECONDS", "60"))
     default_grace_period_minutes: int = int(os.getenv("DEFAULT_GRACE_PERIOD_MINUTES", "10"))
 
-    face_confidence_threshold: float = float(os.getenv("FACE_CONFIDENCE_THRESHOLD", "0.60"))
+    # Must be ≤ ATTENDANCE_EMBEDDING_MIN_SIMILARITY so face_service never
+    # silently rejects a match the recognizer already accepted. Set to 0.58
+    # (just below the recognizer's 0.60) so only one gate applies.
+    face_confidence_threshold: float = float(os.getenv("FACE_CONFIDENCE_THRESHOLD", "0.58"))
     face_timeout_seconds: float = float(os.getenv("FACE_TIMEOUT_SECONDS", "2.0"))
     cors_allow_origins: tuple[str, ...] = _env_list("CORS_ALLOW_ORIGINS", "http://localhost:5173")
     cors_allow_methods: tuple[str, ...] = _env_list("CORS_ALLOW_METHODS", "*")
@@ -59,6 +62,21 @@ class Settings:
     auth_rate_limit_window_seconds: int = int(os.getenv("AUTH_RATE_LIMIT_WINDOW_SECONDS", "60"))
     frame_rate_limit_requests: int = int(os.getenv("FRAME_RATE_LIMIT_REQUESTS", "180"))
     frame_rate_limit_window_seconds: int = int(os.getenv("FRAME_RATE_LIMIT_WINDOW_SECONDS", "60"))
+
+    # ── Email — Resend API (preferred) ──────────────────────────────────────
+    # Sign up free at resend.com → API Keys → Create API Key (starts with re_)
+    # Free tier: 3,000 emails/month, 100/day.
+    # If set, Resend is used instead of SMTP below.
+    resend_api_key: str = os.getenv("RESEND_API_KEY", "")
+    resend_from: str = os.getenv("RESEND_FROM", "")   # e.g. noreply@yourdomain.com
+
+    # ── Email — SMTP fallback (Gmail App Password) ───────────────────────────
+    # Used when RESEND_API_KEY is not set.
+    smtp_host: str = os.getenv("SMTP_HOST", "smtp.gmail.com")
+    smtp_port: int = int(os.getenv("SMTP_PORT", "587"))
+    smtp_email: str = os.getenv("SMTP_EMAIL", "")          # sender address
+    smtp_password: str = os.getenv("SMTP_PASSWORD", "")    # app password
+    smtp_from_name: str = os.getenv("SMTP_FROM_NAME", "Heegan Attendance")
 
     @property
     def database_url(self) -> str:

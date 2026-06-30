@@ -635,15 +635,18 @@ class CourseScheduleWeekday(Base):
 
 class AttendanceSession(Base):
     __tablename__ = "attendance_sessions"
-    __table_args__ = (
-        UniqueConstraint("schedule_id", "session_date", "start_time", name="uq_schedule_session_occurrence"),
-    )
+    # Note: the unique constraint on (schedule_id, session_date, start_time) was
+    # removed because schedule_id is now nullable — SQL NULLs compare as unequal
+    # so the constraint would not prevent duplicate orphaned sessions anyway.
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True, autoincrement=True)
     course_id: Mapped[int] = mapped_column(ForeignKey("courses.id", ondelete="CASCADE"), nullable=False)
     teacher_id: Mapped[int | None] = mapped_column(ForeignKey("teachers.id", ondelete="SET NULL"), nullable=True)
     admin_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
-    schedule_id: Mapped[int] = mapped_column(ForeignKey("course_schedules.id", ondelete="CASCADE"), nullable=False)
+    # SET NULL so that deleting a CourseSchedule preserves the session history
+    # (and all its AttendanceRecord rows). The schedule reference becomes NULL
+    # but the session and its records remain queryable via course_id / session_id.
+    schedule_id: Mapped[int | None] = mapped_column(ForeignKey("course_schedules.id", ondelete="SET NULL"), nullable=True)
     session_date: Mapped[date] = mapped_column(Date, nullable=False)
     start_time: Mapped[datetime] = mapped_column(DateTime, nullable=False)
     end_time: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
@@ -726,6 +729,35 @@ class ActivityLog(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), nullable=False, index=True)
 
     user: Mapped[Optional["User"]] = relationship(foreign_keys=[user_id])
+
+
+class NotificationType(str, enum.Enum):
+    INFO = "info"
+    SUCCESS = "success"
+    WARNING = "warning"
+    ERROR = "error"
+
+
+class Notification(Base):
+    """Per-user in-app notifications."""
+
+    __tablename__ = "notifications"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    title: Mapped[str] = mapped_column(String(200), nullable=False)
+    message: Mapped[str] = mapped_column(Text, nullable=False)
+    type: Mapped[NotificationType] = mapped_column(
+        Enum(NotificationType, name="notification_type", native_enum=False,
+             values_callable=lambda obj: [e.value for e in obj]),
+        nullable=False,
+        default=NotificationType.INFO,
+    )
+    is_read: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    link: Mapped[str | None] = mapped_column(String(300), nullable=True)  # frontend route to navigate to
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), nullable=False, index=True)
+
+    user: Mapped["User"] = relationship(foreign_keys=[user_id])
 
 
 class SystemSetting(Base):

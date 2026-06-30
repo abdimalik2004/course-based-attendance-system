@@ -1,14 +1,15 @@
-import { 
-  Settings, 
-  UserCircle, 
-  Shield, 
-  Bell, 
-  SlidersHorizontal, 
-  Lock
+import {
+  Settings,
+  UserCircle,
+  Shield,
+  Bell,
+  SlidersHorizontal,
+  Lock,
+  Brain,
 } from 'lucide-react';
 import { cn } from '@/utils/cn';
 
-export type SettingsTab = 'general' | 'account' | 'security' | 'notifications' | 'preferences' | 'access';
+export type SettingsTab = 'general' | 'account' | 'security' | 'notifications' | 'preferences' | 'access' | 'ai';
 
 interface SettingsSidebarProps {
   activeTab: SettingsTab;
@@ -22,6 +23,7 @@ const tabs: { id: SettingsTab; label: string; icon: React.ElementType }[] = [
   { id: 'notifications', label: 'Notifications', icon: Bell },
   { id: 'preferences', label: 'System Preferences', icon: SlidersHorizontal },
   { id: 'access', label: 'Access Control', icon: Lock },
+  { id: 'ai', label: 'Face Model', icon: Brain },
 ];
 
 export function SettingsSidebar({ activeTab, onTabChange }: SettingsSidebarProps) {

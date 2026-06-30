@@ -25,7 +25,7 @@ def get_optional_faculty_scope_context(
     if "ACADEMIA" in role_names or "HR" in role_names or "ADMISSIONS" in role_names:
         return None
 
-    if "FACULTY" not in role_names and "FACULTY_ADMIN" not in role_names:
+    if "FACULTY" not in role_names and "FACULTY" not in role_names:
         return None
 
     if current_user.faculty_id is None:

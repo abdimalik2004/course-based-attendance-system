@@ -18,6 +18,9 @@ interface RolePerms {
   manageAdmissions: boolean;
 }
 
+// Roles that are internal/backend-only and should not appear in the Access Control UI
+const HIDDEN_ROLES = new Set<string>();
+
 // Default permission templates keyed by uppercase role name
 const defaultPermsFor = (name: string): RolePerms => {
   switch (name.toUpperCase()) {
@@ -29,8 +32,12 @@ const defaultPermsFor = (name: string): RolePerms => {
       return { manageUsers: false, manageRoles: false, viewReports: true, takeAttendance: false, editSettings: false, manageAcademic: false, manageAdmissions: true };
     case 'HR':
       return { manageUsers: true, manageRoles: false, viewReports: true, takeAttendance: false, editSettings: false, manageAcademic: false, manageAdmissions: false };
+    case 'FACULTY':
+      return { manageUsers: false, manageRoles: false, viewReports: true, takeAttendance: false, editSettings: false, manageAcademic: true, manageAdmissions: false };
     case 'TEACHER':
       return { manageUsers: false, manageRoles: false, viewReports: false, takeAttendance: true, editSettings: false, manageAcademic: false, manageAdmissions: false };
+    case 'STUDENT':
+      return { manageUsers: false, manageRoles: false, viewReports: false, takeAttendance: false, editSettings: false, manageAcademic: false, manageAdmissions: false };
     default:
       return { manageUsers: false, manageRoles: false, viewReports: false, takeAttendance: false, editSettings: false, manageAcademic: false, manageAdmissions: false };
   }
@@ -151,7 +158,7 @@ export function AccessControlSettings() {
           {roles.length === 0 ? (
             <p className="text-sm text-gray-500 px-2">Loading roles…</p>
           ) : (
-            roles.map((role) => (
+            roles.filter((role) => !HIDDEN_ROLES.has(role.name)).map((role) => (
               <button
                 key={role.id}
                 onClick={() => setSelectedRole(role.name)}

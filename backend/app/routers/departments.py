@@ -15,6 +15,7 @@ from app.schemas.department import DepartmentCreate, DepartmentRead, DepartmentU
 from app.utils.db_conflicts import classify_integrity_error, integrity_error_mentions
 from app.utils.organization import ensure_faculty_row_available, get_faculty_or_404
 from app.utils.activity_logger import log_activity
+from app.services.notification_service import notify_faculty_admins, NotificationType
 
 
 router = APIRouter(prefix="/departments", tags=["departments"])
@@ -134,6 +135,13 @@ def create_department(
         logger.exception("Unexpected integrity error while creating department")
         raise HTTPException(status_code=400, detail="Department could not be created due to invalid data") from exc
     db.refresh(obj)
+    notify_faculty_admins(
+        db, obj.faculty_id,
+        title="New Department Created",
+        message=f"Department '{obj.name}' has been created in your faculty.",
+        notif_type=NotificationType.SUCCESS,
+        link="/faculty/departments",
+    )
     return obj
 
 

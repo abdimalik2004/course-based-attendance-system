@@ -8,7 +8,6 @@ type Role =
   | "HR"
   | "ADMISSIONS"
   | "FACULTY"
-  | "FACULTY_ADMIN"
   | "STUDENT"
   | null;
 

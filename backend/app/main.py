@@ -125,7 +125,6 @@ def seed_roles() -> None:
             "SUPER_ADMIN",
             "ACADEMIA",
             "FACULTY",
-            "FACULTY_ADMIN",
             "HR",
             "ADMISSIONS",
             "TEACHER",
@@ -155,7 +154,13 @@ async def lifespan(_: FastAPI):
     load_timezone_from_db()
 
     # Load AI models exactly once during startup.
+    # load_models() may fail gracefully when no embeddings exist yet (first-time
+    # setup). Either way, pre-warm the detect-only recognizer so SCRFD + FaceNet
+    # stay resident in memory. Without this, the first training run has to
+    # re-initialise both models from scratch, which hangs on Windows while ONNX
+    # Runtime serialises concurrent model loads.
     face_service.load_models()
+    face_service._ensure_detect_recognizer()  # keeps SCRFD + FaceNet in memory
     logger.info("Face models loaded")
 
     await schedule_service.start()

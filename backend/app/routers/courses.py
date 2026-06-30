@@ -33,6 +33,7 @@ from app.schemas.course import (
 )
 from app.schemas.student import StudentRead
 from app.utils.weekday_utils import weekdays_intersect
+from app.services.notification_service import create_notification, notify_faculty_admins, NotificationType
 
 
 router = APIRouter(prefix="/courses", tags=["courses"])
@@ -168,6 +169,13 @@ def create_course(
         db.rollback()
         raise HTTPException(status_code=409, detail="Course code already exists in this faculty") from exc
     db.refresh(obj)
+    notify_faculty_admins(
+        db, obj.faculty_id,
+        title="New Course Created",
+        message=f"Course '{obj.title}' has been added to your faculty.",
+        notif_type=NotificationType.SUCCESS,
+        link="/faculty/courses",
+    )
     return obj
 
 

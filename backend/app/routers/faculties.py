@@ -125,7 +125,7 @@ def create_faculty(
 @router.get(
     "",
     response_model=PaginatedFacultyRead,
-    dependencies=[Depends(require_roles("SUPER_ADMIN", "ADMIN", "ACADEMIA", "FACULTY", "HR", "ADMISSION", "ADMISSIONS"))],
+    dependencies=[Depends(require_roles("SUPER_ADMIN", "ADMIN", "ACADEMIA", "FACULTY", "TEACHER", "HR", "ADMISSION", "ADMISSIONS"))],
 )
 def list_faculties(
     db: Session = Depends(get_db),

@@ -144,19 +144,39 @@ def load_config(base_dir=None):
         db_name=os.getenv("ATTENDANCE_DB_NAME", "attendance"),
         db_user=os.getenv("ATTENDANCE_DB_USER", "root"),
         db_password=os.getenv("ATTENDANCE_DB_PASSWORD", ""),
-        scrfd_det_size=_env_int("ATTENDANCE_SCRFD_DET_SIZE", 640),
+        # ── Detection ──────────────────────────────────────────────────────────
+        # 320 px SCRFD grid is accurate enough for close-range attendance (face
+        # is typically 30–50 % of frame width). Halving from 640 cuts detection
+        # work by ~4× with no meaningful accuracy loss for this use-case.
+        scrfd_det_size=_env_int("ATTENDANCE_SCRFD_DET_SIZE", 320),
         scrfd_threshold=_env_float("ATTENDANCE_SCRFD_THRESHOLD", 0.50),
         scrfd_max_faces=_env_int("ATTENDANCE_SCRFD_MAX_FACES", 20),
-        detect_max_width=_env_int("ATTENDANCE_DETECTION_MAX_WIDTH", 960),
-        quality_check_enabled=_env_bool("ATTENDANCE_QUALITY_CHECK_ENABLED", False),
-        quality_min_blur_variance=_env_float("ATTENDANCE_QUALITY_MIN_BLUR_VARIANCE", 60.0),
-        quality_min_brightness=_env_float("ATTENDANCE_QUALITY_MIN_BRIGHTNESS", 45.0),
-        quality_max_brightness=_env_float("ATTENDANCE_QUALITY_MAX_BRIGHTNESS", 210.0),
+        # Frontend now sends max-640 px frames; no backend rescaling needed.
+        detect_max_width=_env_int("ATTENDANCE_DETECTION_MAX_WIDTH", 640),
+        # ── Frame quality gate ─────────────────────────────────────────────────
+        # Enabled: reject dark / blurry frames before they reach FaceNet,
+        # saving a full neural-net forward pass on useless input.
+        quality_check_enabled=_env_bool("ATTENDANCE_QUALITY_CHECK_ENABLED", True),
+        quality_min_blur_variance=_env_float("ATTENDANCE_QUALITY_MIN_BLUR_VARIANCE", 40.0),
+        quality_min_brightness=_env_float("ATTENDANCE_QUALITY_MIN_BRIGHTNESS", 30.0),
+        quality_max_brightness=_env_float("ATTENDANCE_QUALITY_MAX_BRIGHTNESS", 220.0),
         confidence_threshold=_env_float("ATTENDANCE_CONFIDENCE_THRESHOLD", 60.0),
-        embedding_min_similarity=_env_float("ATTENDANCE_EMBEDDING_MIN_SIMILARITY", 0.6),
+        # ── Matching thresholds ────────────────────────────────────────────────
+        # 0.60 cosine similarity: strict enough to avoid mismatches between
+        # different students. Lower to 0.55 only if known students are not being
+        # recognised in good lighting after a fresh retrain.
+        embedding_min_similarity=_env_float("ATTENDANCE_EMBEDDING_MIN_SIMILARITY", 0.60),
+        # Gap check: 0.0 = disabled.
+        # With a small student pool (~14 students) the gap between the best and
+        # second-best cosine score is often < 0.07 even for a correct match,
+        # so a non-zero gap causes near-universal rejection. Re-enable (0.04–0.06)
+        # only after verifying the dataset produces clean, well-separated embeddings.
         embedding_margin_gap=_env_float("ATTENDANCE_EMBEDDING_MARGIN_GAP", 0.0),
         min_face_size=_env_int("ATTENDANCE_MIN_FACE_SIZE", 60),
-        required_matches=_env_int("ATTENDANCE_REQUIRED_MATCHES", 5),
+        # ── Recognition speed ─────────────────────────────────────────────────
+        # 2 consecutive hits at 700 ms scan interval ≈ 1.5 s for a clear face.
+        # Old default was 5 (= 4.5 s minimum). Override via env if needed.
+        required_matches=_env_int("ATTENDANCE_REQUIRED_MATCHES", 2),
         process_every_n_frames=_env_int("ATTENDANCE_PROCESS_EVERY_N_FRAMES", 2),
         bbox_smooth_alpha=_env_float("ATTENDANCE_BBOX_SMOOTH_ALPHA", 0.35),
         bbox_smooth_max_misses=_env_int("ATTENDANCE_BBOX_SMOOTH_MAX_MISSES", 8),
@@ -174,6 +194,8 @@ def load_config(base_dir=None):
         capture_pad_right=_env_float("ATTENDANCE_CAPTURE_PAD_RIGHT", 0.15),
         log_dir=Path(os.getenv("ATTENDANCE_LOG_DIR", base_dir / "logs")),
         log_file=Path(os.getenv("ATTENDANCE_LOG_FILE", base_dir / "logs" / "attendance.log")),
-        train_max_images_per_student=_env_int("ATTENDANCE_TRAIN_MAX_IMAGES_PER_STUDENT", 20),
+        # 10 images per student keeps CPU training under 2 minutes for ≤30 students.
+        # Raise to 15-20 only if you have a GPU or very few students.
+        train_max_images_per_student=_env_int("ATTENDANCE_TRAIN_MAX_IMAGES_PER_STUDENT", 10),
         train_batch_size=_env_int("ATTENDANCE_TRAIN_BATCH_SIZE", 32),
     )

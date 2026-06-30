@@ -17,6 +17,19 @@ import { AddUserModal } from "./components/AddUserModal";
 import { EditUserModal } from "./components/EditUserModal";
 import type { User } from "@/types/users.types";
 
+type RoleFilter = "ALL" | "SUPER_ADMIN" | "ADMISSIONS" | "ACADEMIA" | "HR" | "FACULTY" | "TEACHER" | "STUDENT";
+
+const ROLE_FILTERS: { label: string; value: RoleFilter }[] = [
+  { label: "All", value: "ALL" },
+  { label: "Admin", value: "SUPER_ADMIN" },
+  { label: "Admission", value: "ADMISSIONS" },
+  { label: "Academia", value: "ACADEMIA" },
+  { label: "HR", value: "HR" },
+  { label: "Faculties", value: "FACULTY" },
+  { label: "Teachers", value: "TEACHER" },
+  { label: "Students", value: "STUDENT" },
+];
+
 export default function UsersManagement() {
   const { users, isLoading, fetchUsers, setModalOpen, deleteUser } =
     useUsersStore();
@@ -25,6 +38,7 @@ export default function UsersManagement() {
   const [isViewModalOpen, setIsViewModalOpen] = useState(false);
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
+  const [activeFilter, setActiveFilter] = useState<RoleFilter>("ALL");
 
   useEffect(() => {
     fetchUsers();
@@ -53,21 +67,64 @@ export default function UsersManagement() {
     }
   };
 
+  const filteredUsers =
+    activeFilter === "ALL"
+      ? users
+      : users.filter((u) => u.role === activeFilter);
+
   return (
     <div className="space-y-6">
-      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
-        <div>
-          <h1 className="text-3xl font-bold tracking-tight text-gray-900 dark:text-gray-100">
-            Users Management
-          </h1>
-          <p className="text-gray-500 dark:text-gray-400 mt-1">
-            Manage system users and roles
-          </p>
+      <div>
+        {/* Title row */}
+        <div className="flex flex-row justify-between items-center gap-4">
+          <div>
+            <h1 className="text-3xl font-bold tracking-tight text-gray-900 dark:text-gray-100">
+              Users Management
+            </h1>
+            <p className="text-gray-500 dark:text-gray-400 mt-1">
+              Manage system users and roles
+            </p>
+          </div>
+          <Button
+            onClick={() => setModalOpen(true)}
+            className="flex-shrink-0 flex items-center gap-2 px-4 py-2 whitespace-nowrap"
+          >
+            <Plus size={16} />
+            Add New User
+          </Button>
         </div>
-        <Button onClick={() => setModalOpen(true)} className="gap-2">
-          <Plus size={20} />
-          Add New User
-        </Button>
+        {/* Role filter pills */}
+        <div className="flex flex-nowrap gap-1.5 mt-3 overflow-x-auto pb-1 scrollbar-none">
+          {ROLE_FILTERS.map(({ label, value }) => {
+            const count =
+              value === "ALL"
+                ? users.length
+                : users.filter((u) => u.role === value).length;
+            const isActive = activeFilter === value;
+            return (
+              <button
+                key={value}
+                onClick={() => setActiveFilter(value)}
+                className={`inline-flex shrink-0 items-center gap-1.5 px-3 py-1 rounded-full text-sm font-medium transition-all duration-150 border ${
+                  isActive
+                    ? "bg-primary text-white border-primary shadow-sm shadow-primary/30"
+                    : "bg-white/5 dark:bg-white/5 text-gray-600 dark:text-gray-400 border-gray-200 dark:border-white/10 hover:border-primary/50 hover:text-primary dark:hover:text-primary"
+                }`}
+              >
+                {label}
+                <span
+                  className={`text-xs px-1.5 py-0.5 rounded-full font-semibold ${
+                    isActive
+                      ? "bg-white/20 text-white"
+                      : "bg-gray-100 dark:bg-white/10 text-gray-500 dark:text-gray-400"
+                  }`}
+                >
+                  {count}
+                </span>
+              </button>
+            );
+          })}
+        </div>
       </div>
 
       <Card className="glass-card shadow-2xl shadow-primary/5">
@@ -112,14 +169,14 @@ export default function UsersManagement() {
                       </TableCell>
                     </TableRow>
                   ))
-                ) : users.length === 0 ? (
+                ) : filteredUsers.length === 0 ? (
                   <TableRow>
                     <TableCell colSpan={7} className="h-24 text-center">
-                      No users found.
+                      No users found{activeFilter !== "ALL" ? ` for role "${activeFilter}"` : ""}.
                     </TableCell>
                   </TableRow>
                 ) : (
-                  users.map((user) => (
+                  filteredUsers.map((user) => (
                     <TableRow key={user.id}>
                       <TableCell className="font-medium text-gray-900 dark:text-gray-100">
                         {user.username}

@@ -25,6 +25,7 @@ from app.schemas.academic_structure import (
     PaginatedCourseSemesterAssignmentRead,
 )
 from app.utils.activity_logger import log_activity
+from app.services.notification_service import notify_faculty_admins, NotificationType
 from app.utils.db_conflicts import classify_integrity_error, integrity_error_mentions
 from app.utils.organization import (
     ensure_class_batch_matches_faculty_and_department,
@@ -333,6 +334,14 @@ def create_course_semester_assignment(
         raise HTTPException(status_code=400, detail="Course semester assignment could not be created") from exc
     db.refresh(obj)
     log_activity(action=f"Course Assigned to Semester - {course.title} → {academic_year.term_name}", user=current_user, db=db)
+    notify_faculty_admins(
+        db,
+        faculty.id,
+        title="Course Assigned to Semester",
+        message=f"Course '{course.title}' has been assigned to {academic_year.term_name}.",
+        notif_type=NotificationType.INFO,
+        link="/faculty/academic-structure",
+    )
     return obj
 
 
@@ -497,6 +506,14 @@ def create_class_course_assignment(
             raise HTTPException(status_code=400, detail="Class course assignment references invalid data") from exc
         raise HTTPException(status_code=400, detail="Class course assignment could not be created") from exc
     db.refresh(obj)
+    notify_faculty_admins(
+        db,
+        faculty.id,
+        title="Class Assigned to Course",
+        message=f"Class '{class_batch.name}' has been assigned to course '{course.title}'.",
+        notif_type=NotificationType.INFO,
+        link="/faculty/academic-structure",
+    )
     return obj
 
 

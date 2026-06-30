@@ -61,6 +61,8 @@ class StudentRead(StudentBase):
 
     id: int
     created_at: datetime
+    # Only populated on first creation — shows the auto-generated login credentials
+    generated_password: str | None = None
 
 
 class PaginatedStudentRead(BaseModel):

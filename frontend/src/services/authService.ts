@@ -55,6 +55,41 @@ export const authService = {
     }
     useAuthStore.getState().logout();
   },
+
+  // ── Forgot Password flow ─────────────────────────────────────────────────
+
+  /**
+   * Step 1 — request a 6-digit code to be emailed.
+   * In development (SMTP not configured) the backend returns `dev_code`
+   * so the flow can be tested without a real Gmail account.
+   */
+  forgotPassword: async (email: string): Promise<{ devCode?: string }> => {
+    const res = await authClient.post<{ ok: boolean; dev_code?: string }>(
+      "/auth/forgot-password",
+      { email },
+    );
+    return { devCode: res.data.dev_code };
+  },
+
+  /**
+   * Step 2 — submit the code the user received.
+   * Returns a one-time `reset_token` valid for 15 minutes.
+   */
+  verifyResetCode: async (email: string, code: string): Promise<string> => {
+    const res = await authClient.post<{ ok: boolean; reset_token: string }>(
+      "/auth/verify-reset-code",
+      { email, code },
+    );
+    return res.data.reset_token;
+  },
+
+  /** Step 3 — set a new password using the reset_token from step 2 */
+  resetPassword: async (resetToken: string, newPassword: string): Promise<void> => {
+    await authClient.post("/auth/reset-password", {
+      reset_token: resetToken,
+      new_password: newPassword,
+    });
+  },
 };
 
 export default authService;

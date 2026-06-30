@@ -137,7 +137,7 @@ def seed_demo_data() -> None:
         ]:
             _get_or_create_org_unit(db, code, name)
 
-        for role_name in ["SUPER_ADMIN", "ACADEMIA", "FACULTY", "FACULTY_ADMIN", "HR", "ADMISSIONS", "TEACHER", "STUDENT"]:
+        for role_name in ["SUPER_ADMIN", "ACADEMIA", "FACULTY", "HR", "ADMISSIONS", "TEACHER", "STUDENT"]:
             _get_or_create_role(db, role_name)
         db.flush()
 

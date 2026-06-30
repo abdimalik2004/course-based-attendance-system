@@ -19,8 +19,8 @@ oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/token")
 
 
 ROLE_EQUIVALENTS: dict[str, set[str]] = {
-    "FACULTY": {"FACULTY", "FACULTY_ADMIN"},
-    "FACULTY_ADMIN": {"FACULTY", "FACULTY_ADMIN"},
+    "FACULTY": {"FACULTY"},
+    "FACULTY": {"FACULTY"},
 }
 
 SUPER_ADMIN_ROLE = "SUPER_ADMIN"

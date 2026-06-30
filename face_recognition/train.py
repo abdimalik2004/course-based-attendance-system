@@ -68,25 +68,31 @@ def train_from_dataset(config):
     # TODO: add incremental update strategy for new students without full retraining.
 
 
-def train_embeddings_from_dataset(config):
+def train_embeddings_from_dataset(config, *, model=None, detector=None):
     """
-    Fast FaceNet embedding training pipeline.
+    FaceNet embedding training pipeline.
 
-    Key optimisations over the original sequential/CPU implementation:
-      1. Auto-selects CUDA when available (GPU gives 5-10× speed-up).
-      2. Uses OpenCV Haar Cascade for face detection instead of the heavy
-         InsightFace/SCRFD model — ~15× faster per image with acceptable
-         accuracy for training (the SCRFD model is kept for live attendance
-         recognition where precision matters more).
-      3. Parallel image loading and preprocessing via ThreadPoolExecutor.
-      4. Batched FaceNet inference — processes multiple face tensors in one
-         forward pass instead of one-at-a-time.
-      5. Skips quality checks (blur / brightness) which are only useful for
-         live capture, not for pre-saved dataset images.
-      6. Caps images per student (default 20) to avoid runaway training times
-         when a student has hundreds of images.
-      7. Falls back to a centre-crop when Haar Cascade finds no face
-         (images were captured with the face centred, so this is safe).
+    Parameters
+    ----------
+    config  : AppConfig
+    model   : optional pre-loaded InceptionResnetV1 instance.
+              Pass the one already held by the recognition service to avoid a
+              second expensive model-load (and to prevent Windows ONNX-Runtime
+              load serialisation, which causes the training thread to hang).
+    detector: optional pre-loaded FaceDetector instance (same reason).
+
+    Pipeline:
+      1. Auto-select CUDA when available (GPU gives 5-10× speed-up).
+      2. Parallel image loading via ThreadPoolExecutor (IO-bound).
+      3. SCRFD face detection per image — same crop geometry as live recognition,
+         so training embeddings match what the recognizer sees at attendance time.
+         Falls back to a centre-crop when SCRFD finds no face.
+      4. Batched FaceNet inference.
+      5. Cap images per student (default 20) to avoid runaway training times.
+
+    Using SCRFD in training is the key accuracy improvement over the old
+    centre-crop approach: previously, training saw a rough 75 %-of-frame crop
+    while recognition saw a tight SCRFD bbox — the mismatch degraded accuracy.
     """
     import time
     from concurrent.futures import ThreadPoolExecutor
@@ -97,17 +103,19 @@ def train_embeddings_from_dataset(config):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     logger.info("Training embeddings on device: %s", device)
 
-    # ── 2. Load FaceNet once ─────────────────────────────────────────────────
-    model = InceptionResnetV1(pretrained="vggface2").eval().to(device)
+    # ── 2. FaceNet model ─────────────────────────────────────────────────────
+    # Prefer the pre-loaded model passed in by the caller (avoids a second
+    # heavyweight model initialisation that can hang on Windows due to ONNX
+    # Runtime serialising concurrent loads).
+    _own_model = model is None
+    if model is None:
+        logger.info("No pre-loaded FaceNet model provided — loading fresh copy")
+        model = InceptionResnetV1(pretrained="vggface2").eval().to(device)
+    else:
+        logger.info("Re-using pre-loaded FaceNet model for training")
+        model = model.eval()
 
-    # ── 3. No face detector needed during training ───────────────────────────
-    # Images were captured by the webcam UI which already validated face
-    # presence before saving. Every image in the dataset is guaranteed to
-    # contain a centred face, so we use a simple centre-crop — no detection
-    # neural net or Haar Cascade required. This is the single biggest speed
-    # improvement: detection was the main bottleneck in the old pipeline.
-
-    # ── 4. Tunable parameters (override via config if needed) ────────────────
+    # ── 3. Tunable parameters ────────────────────────────────────────────────
     max_imgs_per_student = int(getattr(config, "train_max_images_per_student", 20))
     batch_size = int(getattr(config, "train_batch_size", 32))
 
@@ -115,7 +123,7 @@ def train_embeddings_from_dataset(config):
     if not dataset_dir.exists():
         raise RuntimeError(f"Dataset folder not found: {dataset_dir}")
 
-    # ── 5. Gather image paths ────────────────────────────────────────────────
+    # ── 4. Gather image paths ────────────────────────────────────────────────
     all_pairs: list[tuple[Path, str]] = []
     for student_dir in iter_student_dataset_dirs(dataset_dir):
         student_id = normalize_student_id(student_dir.name)
@@ -124,8 +132,6 @@ def train_embeddings_from_dataset(config):
             + list(student_dir.glob("*.jpeg"))
             + list(student_dir.glob("*.png"))
         )
-        # Limit per student — more images beyond ~20 add diminishing returns
-        # and make training noticeably slower
         if len(imgs) > max_imgs_per_student:
             imgs = imgs[:max_imgs_per_student]
         for p in imgs:
@@ -134,45 +140,81 @@ def train_embeddings_from_dataset(config):
     if not all_pairs:
         raise RuntimeError("No images found in dataset directory")
 
-    # ── 6. Parallel image loading + centre-crop ──────────────────────────────
-    def _preprocess(pair: tuple[Path, str]):
+    # ── 5. Parallel image loading (IO-bound) ─────────────────────────────────
+    def _load_image(pair: tuple[Path, str]) -> tuple:
         img_path, student_id = pair
         img = cv2.imread(str(img_path))
+        return img, student_id
+
+    n_workers = min(8, max(1, len(all_pairs)))
+    with ThreadPoolExecutor(max_workers=n_workers) as pool:
+        loaded = list(pool.map(_load_image, all_pairs))
+
+    # ── 6. SCRFD detection + preprocessing (serial — SCRFD is not thread-safe) ─
+    # IMPORTANT: only SCRFD-detected crops are used. The centre-crop fallback
+    # was removed because it produces a large background-heavy patch (360×360 of
+    # a 640×480 frame) that FaceNet encodes as "room background", making every
+    # student's embedding look nearly identical. Live recognition uses a tight
+    # SCRFD bbox — training must use the same geometry or embeddings won't match.
+    # Images where SCRFD finds no face are SKIPPED; they are not usable.
+    _own_detector = detector is None
+    if detector is None:
+        logger.info("No pre-loaded detector provided — loading fresh SCRFD")
+        detector = FaceDetector(config)
+    face_tensors: list[torch.Tensor] = []
+    student_ids: list[str] = []
+    scrfd_hits = 0
+    skipped_no_face = 0
+
+    for img, student_id in loaded:
         if img is None:
-            return None, student_id
+            continue
 
         img_h, img_w = img.shape[:2]
+        face = None
 
-        # Centre-crop: take the inner 75 % of the shorter dimension.
-        # Webcam capture already validated and centred the face before saving,
-        # so no face detector is needed here.
-        crop = int(min(img_h, img_w) * 0.75)
-        cx, cy = img_w // 2, img_h // 2
-        x1 = max(0, cx - crop // 2)
-        y1 = max(0, cy - crop // 2)
-        x2 = min(img_w, x1 + crop)
-        y2 = min(img_h, y1 + crop)
+        # SCRFD detection — identical crop to live recognition.
+        try:
+            _, detections = detector.detect_with_keypoints(img)
+            if detections:
+                largest = max(detections, key=lambda d: d["bbox"][2] * d["bbox"][3])
+                x, y, w, h = largest["bbox"]
+                # Add 10 % padding on each side so FaceNet sees a little context,
+                # matching what live recognition gets after SCRFD crops.
+                pad_x = int(w * 0.10)
+                pad_y = int(h * 0.10)
+                x1 = max(0, x - pad_x)
+                y1 = max(0, y - pad_y)
+                x2 = min(img_w, x + w + pad_x)
+                y2 = min(img_h, y + h + pad_y)
+                if x2 > x1 and y2 > y1:
+                    face = img[y1:y2, x1:x2]
+                    scrfd_hits += 1
+        except Exception as exc:
+            logger.debug("SCRFD detection failed for %s: %s", student_id, exc)
 
-        face = img[y1:y2, x1:x2]
-        if face.size == 0:
-            return None, student_id
+        if face is None or face.size == 0:
+            # Image unusable — SCRFD found no face.
+            # Skipping rather than using a background crop keeps training
+            # consistent with inference (both always use SCRFD-detected regions).
+            skipped_no_face += 1
+            logger.debug(
+                "Skipping image for %s — no face detected by SCRFD", student_id
+            )
+            continue
 
         resized = cv2.resize(face, (160, 160), interpolation=cv2.INTER_AREA)
         rgb = cv2.cvtColor(resized, cv2.COLOR_BGR2RGB).astype(np.float32)
         norm = (rgb - 127.5) / 128.0
         tensor = torch.from_numpy(np.transpose(norm, (2, 0, 1)))
-        return tensor, student_id
+        face_tensors.append(tensor)
+        student_ids.append(student_id)
 
-    n_workers = min(8, max(1, len(all_pairs)))
-    with ThreadPoolExecutor(max_workers=n_workers) as pool:
-        processed = list(pool.map(_preprocess, all_pairs))
-
-    face_tensors: list[torch.Tensor] = []
-    student_ids: list[str] = []
-    for tensor, sid in processed:
-        if tensor is not None:
-            face_tensors.append(tensor)
-            student_ids.append(sid)
+    logger.info(
+        "Face crop: %d SCRFD detections, %d skipped (no face detected)",
+        scrfd_hits,
+        skipped_no_face,
+    )
 
     if not face_tensors:
         raise RuntimeError("No face samples found for embedding training")

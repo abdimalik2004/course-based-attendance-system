@@ -12,7 +12,7 @@ from app.services.student_portal_service import student_portal_service
 
 router = APIRouter(tags=["student-portal"])
 
-_STUDENT_ALLOWED_ROLES = ("STUDENT", "SUPER_ADMIN", "ACADEMIA", "FACULTY", "FACULTY_ADMIN", "ADMISSIONS", "TEACHER")
+_STUDENT_ALLOWED_ROLES = ("STUDENT", "SUPER_ADMIN", "ACADEMIA", "FACULTY", "ADMISSIONS", "TEACHER")
 
 
 # ------------------------------------------------------------------
@@ -48,7 +48,7 @@ async def get_my_schedule(
 # ------------------------------------------------------------------
 
 def _is_staff(user: User) -> bool:
-    staff_roles = {"SUPER_ADMIN", "ACADEMIA", "FACULTY", "FACULTY_ADMIN", "ADMISSIONS", "TEACHER"}
+    staff_roles = {"SUPER_ADMIN", "ACADEMIA", "FACULTY", "ADMISSIONS", "TEACHER"}
     return any(role.name in staff_roles for role in user.roles)
 
 

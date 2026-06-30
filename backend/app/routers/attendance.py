@@ -35,7 +35,7 @@ def _session_faculty_id(db: Session, session_id: int) -> int:
 @router.post(
     "/frame",
     dependencies=[
-        Depends(require_roles("SUPER_ADMIN", "ACADEMIA", "FACULTY_ADMIN", "TEACHER")),
+        Depends(require_roles("SUPER_ADMIN", "ACADEMIA", "FACULTY", "TEACHER")),
         Depends(rate_limit_dependency(settings.frame_rate_limit_requests, settings.frame_rate_limit_window_seconds)),
     ],
     responses={
@@ -55,7 +55,7 @@ def process_attendance_frame(
     return attendance_service.process_frame(db=db, session_id=payload.session_id, image_b64=payload.image)
 
 
-@router.get("/records", dependencies=[Depends(require_roles("SUPER_ADMIN", "ADMIN", "ACADEMIA", "FACULTY", "FACULTY_ADMIN", "TEACHER", "HR", "ADMISSIONS"))])
+@router.get("/records", dependencies=[Depends(require_roles("SUPER_ADMIN", "ADMIN", "ACADEMIA", "FACULTY", "TEACHER", "HR", "ADMISSIONS"))])
 def list_attendance_records(
     page: int = Query(default=1, ge=1),
     limit: int = Query(default=20, ge=1, le=200),
@@ -80,7 +80,7 @@ def list_attendance_records(
     # Scope TEACHER: only show records from sessions THIS teacher personally managed.
     # Admin or another teacher may have run sessions on the same course — exclude those.
     role_names = {role.name for role in current_user.roles}
-    if "TEACHER" in role_names and not {"SUPER_ADMIN", "ACADEMIA", "FACULTY_ADMIN", "HR", "ADMISSIONS", "ADMIN"}.intersection(role_names):
+    if "TEACHER" in role_names and not {"SUPER_ADMIN", "ACADEMIA", "FACULTY", "HR", "ADMISSIONS", "ADMIN"}.intersection(role_names):
         teacher = db.query(Teacher).filter(Teacher.user_id == current_user.id).first()
         if teacher:
             # Join to the session and filter by the session's teacher_id
@@ -180,7 +180,7 @@ def list_attendance_records(
 
 @router.put(
     "/records/{record_id}",
-    dependencies=[Depends(require_roles("SUPER_ADMIN", "ADMIN", "ACADEMIA", "FACULTY", "FACULTY_ADMIN", "TEACHER", "HR", "ADMISSIONS"))],
+    dependencies=[Depends(require_roles("SUPER_ADMIN", "ADMIN", "ACADEMIA", "FACULTY", "TEACHER", "HR", "ADMISSIONS"))],
 )
 def update_attendance_record_status(
     record_id: int,

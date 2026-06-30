@@ -6,6 +6,7 @@ import { SecuritySettings } from './sections/SecuritySettings';
 import { NotificationSettings } from './sections/NotificationSettings';
 import { SystemPreferences } from './sections/SystemPreferences';
 import { AccessControlSettings } from './sections/AccessControlSettings';
+import { AISettings } from './sections/AISettings';
 
 export default function SettingsLayout() {
   const [activeTab, setActiveTab] = useState<SettingsTab>('general');
@@ -24,6 +25,8 @@ export default function SettingsLayout() {
         return <SystemPreferences />;
       case 'access':
         return <AccessControlSettings />;
+      case 'ai':
+        return <AISettings />;
       default:
         return <GeneralSettings />;
     }
