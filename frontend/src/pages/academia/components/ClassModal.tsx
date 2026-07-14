@@ -29,6 +29,7 @@ export function ClassModal() {
     departments,
   } = useAcademiaStore();
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState<string | null>(null);
 
   const { isOpen, mode, record } = classModal;
   const isViewMode = mode === "view";
@@ -53,6 +54,7 @@ export function ClassModal() {
 
   useEffect(() => {
     if (isOpen) {
+      setSubmitError(null);
       if (record) {
         reset({
           facultyId: record.facultyId,
@@ -75,6 +77,7 @@ export function ClassModal() {
   const onSubmit = async (data: ClassFormData) => {
     if (isViewMode) return;
     setIsSubmitting(true);
+    setSubmitError(null);
     try {
       if (mode === "edit" && record) {
         await updateClass(record.id, data);
@@ -82,8 +85,13 @@ export function ClassModal() {
         await addClass(data);
       }
       closeModal("class");
-    } catch (error) {
-      console.error(error);
+    } catch (error: any) {
+      const msg =
+        error?.response?.data?.detail ??
+        error?.response?.data?.error?.message ??
+        (error instanceof Error ? error.message : null) ??
+        (mode === "edit" ? "Failed to update class" : "Failed to create class");
+      setSubmitError(msg);
     } finally {
       setIsSubmitting(false);
     }
@@ -103,6 +111,11 @@ export function ClassModal() {
       className="md:max-w-md"
     >
       <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
+        {submitError && (
+          <div className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700 dark:border-rose-500/20 dark:bg-rose-500/10 dark:text-rose-200">
+            {submitError}
+          </div>
+        )}
         <div>
           <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5 ml-1">
             Faculty
@@ -139,6 +152,13 @@ export function ClassModal() {
             disabled={isViewMode || !selectedFacultyId}
           />
         </div>
+
+        {!isViewMode && (
+          <p className="text-xs text-gray-500 dark:text-gray-400 px-1 -mt-1">
+            The class name is auto-generated from the faculty code (e.g.{" "}
+            <strong>MED001</strong>, <strong>ENG002</strong>).
+          </p>
+        )}
 
         <div>
           <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5 ml-1">

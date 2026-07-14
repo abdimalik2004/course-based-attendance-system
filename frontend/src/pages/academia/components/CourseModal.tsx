@@ -19,6 +19,7 @@ type CourseFormData = z.infer<typeof courseSchema>;
 export function CourseModal() {
   const { courseModal, closeModal, addCourse, updateCourse, faculties, departments } = useAcademiaStore();
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState<string | null>(null);
 
   const { isOpen, mode, record } = courseModal;
   const isViewMode = mode === 'view';
@@ -32,6 +33,7 @@ export function CourseModal() {
 
   useEffect(() => {
     if (isOpen) {
+      setSubmitError(null);
       if (record) {
         reset({ facultyId: record.facultyId, departmentId: record.departmentId, title: record.title });
       } else {
@@ -43,6 +45,7 @@ export function CourseModal() {
   const onSubmit = async (data: CourseFormData) => {
     if (isViewMode) return;
     setIsSubmitting(true);
+    setSubmitError(null);
     try {
       if (mode === 'edit' && record) {
         await updateCourse(record.id, data);
@@ -50,8 +53,13 @@ export function CourseModal() {
         await addCourse(data);
       }
       closeModal('course');
-    } catch (error) {
-      console.error(error);
+    } catch (error: any) {
+      const msg =
+        error?.response?.data?.detail ??
+        error?.response?.data?.error?.message ??
+        (error instanceof Error ? error.message : null) ??
+        (mode === 'edit' ? 'Failed to update course' : 'Failed to create course');
+      setSubmitError(msg);
     } finally {
       setIsSubmitting(false);
     }
@@ -66,40 +74,46 @@ export function CourseModal() {
   return (
     <Modal isOpen={isOpen} onClose={() => closeModal('course')} title={titles[mode]} className="md:max-w-md">
       <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
+        {submitError && (
+          <div className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700 dark:border-rose-500/20 dark:bg-rose-500/10 dark:text-rose-200">
+            {submitError}
+          </div>
+        )}
         <div>
           <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5 ml-1">Faculty Name</label>
-          <Select 
+          <Select
             options={[
               { value: '', label: 'Select Faculty...' },
               ...faculties.map(f => ({ value: f.id, label: f.name }))
             ]}
-            {...register('facultyId')} 
+            {...register('facultyId')}
             onChange={(e) => {
               register('facultyId').onChange(e);
-              setValue('departmentId', '', { shouldValidate: true });
+              // Clear department silently — don't trigger validation until the user submits
+              setValue('departmentId', '', { shouldValidate: false });
             }}
-            error={errors.facultyId?.message} 
+            error={errors.facultyId?.message}
             disabled={isViewMode}
           />
         </div>
         <div>
           <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5 ml-1">Department</label>
-          <Select 
+          <Select
             options={[
               { value: '', label: 'Select Department...' },
               ...availableDepartments.map(d => ({ value: d.id, label: d.name }))
             ]}
-            {...register('departmentId')} 
-            error={errors.departmentId?.message} 
+            {...register('departmentId')}
+            error={errors.departmentId?.message}
             disabled={isViewMode || !selectedFacultyId}
           />
         </div>
         <div>
           <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5 ml-1">Course Title</label>
-          <Input 
-            placeholder="e.g. Introduction to Physics" 
-            {...register('title')} 
-            error={errors.title?.message} 
+          <Input
+            placeholder="e.g. Introduction to Physics"
+            {...register('title')}
+            error={errors.title?.message}
             disabled={isViewMode}
             className={isViewMode ? 'bg-gray-50 dark:bg-dark-bg text-gray-500' : ''}
           />

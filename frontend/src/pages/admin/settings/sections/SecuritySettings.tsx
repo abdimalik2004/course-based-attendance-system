@@ -9,7 +9,6 @@ import { api } from '@/services/api';
 import { fetchSettings, saveSettings } from '@/services/settingsService';
 
 export function SecuritySettings() {
-  const [is2FAEnabled, setIs2FAEnabled] = useState(true);
   const [sessionTimeout, setSessionTimeout] = useState('30m');
   const [securitySaved, setSecuritySaved] = useState(false);
   const [securityError, setSecurityError] = useState('');
@@ -43,8 +42,8 @@ export function SecuritySettings() {
       setPasswordError('All password fields are required.');
       return;
     }
-    if (newPassword.length < 8) {
-      setPasswordError('New password must be at least 8 characters.');
+    if (newPassword.length < 6) {
+      setPasswordError('New password must be at least 6 characters.');
       return;
     }
     if (newPassword !== confirmPassword) {
@@ -103,7 +102,7 @@ export function SecuritySettings() {
                 <label className="text-sm font-medium text-gray-400 ml-1">Current Password</label>
                 <Input
                   type="password"
-                  placeholder="••••••••"
+                  placeholder="Enter your current password"
                   value={currentPassword}
                   onChange={(e) => setCurrentPassword(e.target.value)}
                   className="bg-white/5 border-white/10"
@@ -113,7 +112,7 @@ export function SecuritySettings() {
                 <label className="text-sm font-medium text-gray-400 ml-1">New Password</label>
                 <Input
                   type="password"
-                  placeholder="••••••••"
+                  placeholder="Minimum 6 characters"
                   value={newPassword}
                   onChange={(e) => setNewPassword(e.target.value)}
                   className="bg-white/5 border-white/10"
@@ -123,11 +122,24 @@ export function SecuritySettings() {
                 <label className="text-sm font-medium text-gray-400 ml-1">Confirm New Password</label>
                 <Input
                   type="password"
-                  placeholder="••••••••"
+                  placeholder="Re-enter your new password"
                   value={confirmPassword}
                   onChange={(e) => setConfirmPassword(e.target.value)}
                   className="bg-white/5 border-white/10"
                 />
+                {confirmPassword.length > 0 && (
+                  confirmPassword !== newPassword ? (
+                    <p className="text-xs text-red-400 ml-1 flex items-center gap-1">
+                      <AlertCircle size={11} />
+                      Passwords do not match.
+                    </p>
+                  ) : (
+                    <p className="text-xs text-emerald-400 ml-1 flex items-center gap-1">
+                      <CheckCircle size={11} />
+                      Passwords matched.
+                    </p>
+                  )
+                )}
               </div>
             </div>
 
@@ -171,12 +183,17 @@ export function SecuritySettings() {
           <div className="space-y-6">
             <h3 className="text-white font-medium">Additional Security</h3>
 
-            <div className="flex items-center justify-between p-4 rounded-xl border border-white/10 bg-white/5">
+            <div className="flex items-center justify-between p-4 rounded-xl border border-white/10 bg-white/5 opacity-70">
               <div>
-                <h4 className="text-white font-medium text-sm">Two-Factor Authentication</h4>
+                <h4 className="text-white font-medium text-sm flex items-center gap-2">
+                  Two-Factor Authentication
+                  <span className="text-xs px-2 py-0.5 rounded-full bg-amber-500/15 text-amber-400 border border-amber-500/20 font-normal">
+                    Coming Soon
+                  </span>
+                </h4>
                 <p className="text-gray-400 text-xs mt-1">Require an extra security step during login.</p>
               </div>
-              <Switch checked={is2FAEnabled} onChange={setIs2FAEnabled} />
+              <Switch checked={false} onChange={() => {}} disabled={true} />
             </div>
 
             <div className="space-y-2 max-w-md">

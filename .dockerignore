@@ -12,7 +12,12 @@ backend/database/
 backend/.env
 backend/.env.development
 backend/.env.production
-dataset/
 logs/
 .git/
 .gitignore
+# Frontend is deployed to Vercel separately
+frontend/
+# Dev-only GUI scripts
+capture_gui.py
+gui.py
+examples/

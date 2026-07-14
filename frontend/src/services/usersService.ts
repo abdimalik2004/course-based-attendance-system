@@ -21,6 +21,8 @@ export const usersService = {
       email: u.email || "",
       role: (u.role_names?.[0] || "STAFF") as any,
       facultyId: u.faculty_id ? String(u.faculty_id) : null,
+      teacherId: u.teacher_id ? String(u.teacher_id) : null,
+      studentId: u.student_id ? String(u.student_id) : null,
       status: u.is_active ? "Active" : "Inactive",
       createdAt: u.created_at || new Date().toISOString(),
     }));

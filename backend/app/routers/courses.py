@@ -159,16 +159,16 @@ def create_course(
     try:
         db.flush()
         auto_enroll_existing_students_for_course(db, obj)
-        log_activity(
-            action=f"Course Created - {payload.title}",
-            user=current_user,
-            db=db,
-        )
         db.commit()
     except IntegrityError as exc:
         db.rollback()
         raise HTTPException(status_code=409, detail="Course code already exists in this faculty") from exc
     db.refresh(obj)
+    log_activity(
+        action=f"Course Created - {obj.title}",
+        user=current_user,
+        db=db,
+    )
     notify_faculty_admins(
         db, obj.faculty_id,
         title="New Course Created",
@@ -278,6 +278,7 @@ def assign_teacher(
     payload: CourseAssignmentCreate,
     db: Session = Depends(get_role_scoped_db),
     faculty_scope = Depends(get_optional_faculty_scope_context),
+    current_user = Depends(get_current_user),
 ):
     course = db.query(Course).filter(Course.id == payload.course_id).first()
     if not course:
@@ -304,6 +305,26 @@ def assign_teacher(
         db.rollback()
         raise HTTPException(status_code=409, detail="Teacher already assigned to this course") from exc
     db.refresh(assignment)
+    log_activity(
+        action=f"Teacher Assigned to Course - {teacher.full_name} → {course.title}",
+        user=current_user,
+        db=db,
+    )
+
+    # Notify the teacher they have been assigned to this course
+    if teacher.user_id:
+        role_label = "primary teacher" if assignment.is_primary else "co-teacher"
+        create_notification(
+            db, teacher.user_id,
+            title="Course Assignment",
+            message=(
+                f"You have been assigned as {role_label} for the course "
+                f"'{course.title}'. Check your schedule for session details."
+            ),
+            notif_type=NotificationType.INFO,
+            link="/teacher/schedule",
+        )
+
     return {
         "id": assignment.id,
         "course_id": assignment.course_id,

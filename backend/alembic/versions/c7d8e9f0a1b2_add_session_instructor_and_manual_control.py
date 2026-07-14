@@ -21,7 +21,7 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
-    op.execute("ALTER TABLE attendance_sessions ADD COLUMN instructor_id INT NULL AFTER course_id")
+    op.add_column("attendance_sessions", sa.Column("instructor_id", sa.Integer(), nullable=True))
     op.alter_column("attendance_sessions", "end_time", existing_type=sa.DateTime(), nullable=True)
     op.create_foreign_key(
         "fk_attendance_sessions_instructor_id_users",

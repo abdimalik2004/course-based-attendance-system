@@ -1,5 +1,6 @@
 import { useEffect, useState, useMemo } from "react";
 import { Plus, Edit2, Trash2, Building2 } from "lucide-react";
+import { Pagination } from "@/components/academia/Pagination";
 import { Card, CardContent } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
 import {
@@ -25,14 +26,23 @@ export default function Faculties() {
   const [deleteId, setDeleteId] = useState<string | null>(null);
   const [viewFaculty, setViewFaculty] = useState<Faculty | null>(null);
   const [searchTerm, setSearchTerm] = useState("");
+  const [page, setPage] = useState(1);
+  const PAGE_SIZE = 10;
 
   const filteredFaculties = useMemo(() => {
+    setPage(1);
     return faculties.filter(
       (f) =>
         f.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
         f.code.toLowerCase().includes(searchTerm.toLowerCase()),
     );
   }, [faculties, searchTerm]);
+
+  const totalPages = Math.max(1, Math.ceil(filteredFaculties.length / PAGE_SIZE));
+  const paginatedFaculties = filteredFaculties.slice(
+    (page - 1) * PAGE_SIZE,
+    page * PAGE_SIZE,
+  );
 
   useEffect(() => {
     fetchData();
@@ -105,7 +115,7 @@ export default function Faculties() {
                     </TableCell>
                   </TableRow>
                 ) : (
-                  filteredFaculties.map((faculty) => (
+                  paginatedFaculties.map((faculty) => (
                     <TableRow key={faculty.id}>
                       <TableCell className="font-medium text-gray-900 dark:text-white">
                         {faculty.name}
@@ -148,6 +158,13 @@ export default function Faculties() {
               </TableBody>
             </Table>
           </div>
+          <Pagination
+            page={page}
+            totalPages={totalPages}
+            totalItems={filteredFaculties.length}
+            pageSize={PAGE_SIZE}
+            onPageChange={setPage}
+          />
         </CardContent>
       </Card>
 
@@ -155,7 +172,7 @@ export default function Faculties() {
       <ConfirmDeleteModal
         isOpen={!!deleteId}
         onClose={() => setDeleteId(null)}
-        onConfirm={() => deleteId && deleteFaculty(deleteId)}
+        onConfirm={async () => { if (deleteId) await deleteFaculty(deleteId); }}
       />
 
       <ViewModal

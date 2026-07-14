@@ -6,6 +6,8 @@ import {
   BookOpen,
   GraduationCap,
   Calendar,
+  ClipboardList,
+  ChevronRight,
 } from "lucide-react";
 import { StatCard } from "@/components/ui/StatCard";
 import { useFacultyStore } from "@/store/useFacultyStore";
@@ -154,33 +156,55 @@ export default function FacultyDashboard() {
           <div className="absolute inset-0 bg-gradient-to-bl from-blue-500/5 to-purple-500/5 opacity-0 group-hover:opacity-100 transition-opacity duration-500"></div>
           <h2 className="text-xl font-bold text-gray-900 dark:text-white mb-4 flex items-center gap-2">
             <div className="w-2 h-6 bg-purple-500 rounded-full"></div>
-            Data Status
+            Quick Actions
           </h2>
-          <div className="space-y-4">
-            <div className="flex items-center justify-between p-3 rounded-lg bg-white/5 border border-white/10">
-              <span className="text-gray-400">Courses</span>
-              <span className="text-lg font-semibold text-white">
-                {stats.totalCourses}
-              </span>
-            </div>
-            <div className="flex items-center justify-between p-3 rounded-lg bg-white/5 border border-white/10">
-              <span className="text-gray-400">Departments</span>
-              <span className="text-lg font-semibold text-white">
-                {stats.totalDepartments}
-              </span>
-            </div>
-            <div className="flex items-center justify-between p-3 rounded-lg bg-white/5 border border-white/10">
-              <span className="text-gray-400">Classes</span>
-              <span className="text-lg font-semibold text-white">
-                {stats.totalClasses}
-              </span>
-            </div>
-            <div className="flex items-center justify-between p-3 rounded-lg bg-white/5 border border-white/10">
-              <span className="text-gray-400">Teachers</span>
-              <span className="text-lg font-semibold text-white">
-                {stats.totalTeachers}
-              </span>
-            </div>
+          <div className="space-y-3">
+            {[
+              {
+                icon: Users,
+                label: "Assign Teacher",
+                description: "Assign teachers to faculty courses",
+                path: "/faculty/assign-teacher",
+                color: "text-blue-400",
+                bg: "bg-blue-500/10 border-blue-500/20",
+              },
+              {
+                icon: Calendar,
+                label: "Schedule Course",
+                description: "Set up course schedules and times",
+                path: "/faculty/schedule",
+                color: "text-purple-400",
+                bg: "bg-purple-500/10 border-purple-500/20",
+              },
+              {
+                icon: ClipboardList,
+                label: "Attendance List",
+                description: "View and manage attendance records",
+                path: "/faculty/attendance-list",
+                color: "text-emerald-400",
+                bg: "bg-emerald-500/10 border-emerald-500/20",
+              },
+            ].map((action) => (
+              <button
+                key={action.path}
+                onClick={() => navigate(action.path)}
+                className="w-full flex items-center gap-3 p-3 rounded-lg bg-white/5 border border-white/10 hover:bg-white/10 hover:border-white/20 transition-all duration-200 text-left group/btn"
+              >
+                <div className={`flex items-center justify-center w-9 h-9 rounded-lg border ${action.bg} shrink-0`}>
+                  <action.icon size={18} className={action.color} />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-semibold text-gray-900 dark:text-white">
+                    {action.label}
+                  </p>
+                  <p className="text-xs text-gray-400 truncate">{action.description}</p>
+                </div>
+                <ChevronRight
+                  size={16}
+                  className="text-gray-500 group-hover/btn:text-gray-300 transition-colors shrink-0"
+                />
+              </button>
+            ))}
           </div>
         </div>
       </div>

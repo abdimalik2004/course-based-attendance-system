@@ -110,15 +110,16 @@ def create_faculty(
     faculty = Faculty(name=payload.name, code=payload.code, years=payload.years)
     db.add(faculty)
     try:
-        log_activity(
-            action=f"Faculty Created - {payload.name}",
-            user=current_user,
-            db=db,
-        )
+        db.commit()
     except IntegrityError as exc:
         db.rollback()
         raise HTTPException(status_code=409, detail="Faculty with same name/code already exists") from exc
     db.refresh(faculty)
+    log_activity(
+        action=f"Faculty Created - {payload.name}",
+        user=current_user,
+        db=db,
+    )
     return faculty
 
 

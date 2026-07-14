@@ -7,6 +7,7 @@ import {
   ArrowUpRight,
   TrendingUp,
   Plus,
+  Calendar,
 } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/Card";
 import {
@@ -19,10 +20,13 @@ import {
 } from "@/components/academia/Table";
 import { Badge } from "@/components/ui/Badge";
 import { useAcademiaStore } from "@/store/useAcademiaStore";
-import { useEffect } from "react";
+import { useEffect, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import { CourseModal } from "./components/CourseModal";
 import { ClassModal } from "./components/ClassModal";
+import { FacultyModal } from "./components/FacultyModal";
+import { DepartmentModal } from "./components/DepartmentModal";
+import { AddStructureModal } from "./components/AddStructureModal";
 
 export default function AcademiaDashboard() {
   const {
@@ -31,6 +35,8 @@ export default function AcademiaDashboard() {
     courses,
     classes,
     classAssignments,
+    courseAssignments,
+    structures,
     fetchData,
     openModal,
     isLoading,
@@ -42,23 +48,46 @@ export default function AcademiaDashboard() {
     fetchData();
   }, [fetchData]);
 
-  const recentClassAssignments = classAssignments
-    .slice(0, 5)
-    .map((assignment) => {
-      const matchedClass = classes.find((cls) => cls.id === assignment.classId);
-      const matchedCourse = courses.find(
-        (course) => course.id === assignment.courseId,
-      );
+  // ── Active semester context ───────────────────────────────────────────────
+  const activeStructure = useMemo(
+    () => structures.find((s) => s.status === "Active") ?? null,
+    [structures],
+  );
 
-      return {
-        id: assignment.id,
-        code: matchedCourse?.code ?? "N/A",
-        name: matchedClass?.name ?? "Unassigned Class",
-        instructor: matchedCourse ? matchedCourse.title : "Unassigned",
-        capacity: matchedClass ? `Year ${matchedClass.year}` : "N/A",
-        status: matchedClass ? "Assigned" : "Pending",
-      };
-    });
+  /** Set of courseIds assigned to the currently active academic term */
+  const activeCourseIds = useMemo(() => {
+    if (!activeStructure) return new Set<string>();
+    return new Set(
+      courseAssignments
+        .filter((a) => a.academicYearId === activeStructure.id)
+        .map((a) => a.courseId),
+    );
+  }, [courseAssignments, activeStructure]);
+
+
+  const semesterLabel = activeStructure ? activeStructure.term : "No Active Term";
+
+  // ── Recent class assignments table data ───────────────────────────────────
+  const recentClassAssignments = useMemo(
+    () =>
+      classAssignments.slice(0, 5).map((assignment) => {
+        const matchedClass = classes.find((cls) => cls.id === assignment.classId);
+        const matchedCourse = courses.find(
+          (course) => course.id === assignment.courseId,
+        );
+        const isActive = activeCourseIds.has(assignment.courseId);
+
+        return {
+          id: assignment.id,
+          code: matchedCourse?.code ?? "N/A",
+          name: matchedClass?.name ?? "Unassigned Class",
+          courseTitle: matchedCourse ? matchedCourse.title : "Unassigned",
+          capacity: matchedClass ? `Year ${matchedClass.year}` : "N/A",
+          status: isActive ? "In Semester" : matchedClass ? "Assigned" : "Unassigned",
+        };
+      }),
+    [classAssignments, classes, courses, activeCourseIds],
+  );
 
   const METRICS = [
     {
@@ -67,7 +96,7 @@ export default function AcademiaDashboard() {
       value: faculties.length,
       icon: Building2,
       color: "text-blue-500",
-      trend: "Growing",
+      trend: faculties.length > 0 ? "Registered" : "None Added",
       path: "/academia/faculties",
     },
     {
@@ -76,25 +105,25 @@ export default function AcademiaDashboard() {
       value: departments.length,
       icon: Network,
       color: "text-emerald-500",
-      trend: "Stable",
+      trend: departments.length > 0 ? "Registered" : "None Added",
       path: "/academia/departments",
     },
     {
       id: 3,
       title: "Live Courses",
-      value: courses.length,
+      value: activeCourseIds.size,
       icon: BookOpen,
       color: "text-indigo-500",
-      trend: "Active",
+      trend: semesterLabel,
       path: "/academia/courses",
     },
     {
       id: 4,
-      title: "Enrolled Classes",
+      title: "Total Classes",
       value: classes.length,
       icon: Users,
       color: "text-purple-500",
-      trend: "In-Session",
+      trend: classes.length > 0 ? "Registered" : "None Added",
       path: "/academia/classes",
     },
   ];
@@ -164,10 +193,10 @@ export default function AcademiaDashboard() {
           <div className="p-6 border-b border-gray-200 dark:border-white/10 flex items-center justify-between">
             <div>
               <h3 className="text-lg font-semibold text-gray-900 dark:text-white">
-                Live Classes Overview
+                Class Assignments Overview
               </h3>
               <p className="text-sm text-gray-500 dark:text-gray-400">
-                Current semester active course sessions
+                Courses assigned to classes this semester
               </p>
             </div>
             <button
@@ -185,13 +214,13 @@ export default function AcademiaDashboard() {
                     Course Code
                   </TableHead>
                   <TableHead className="text-gray-900 dark:text-gray-100">
-                    Section Name
+                    Class
                   </TableHead>
                   <TableHead className="text-gray-900 dark:text-gray-100">
-                    Instructor
+                    Course Title
                   </TableHead>
                   <TableHead className="text-gray-900 dark:text-gray-100">
-                    Capacity
+                    Year
                   </TableHead>
                   <TableHead className="text-gray-900 dark:text-gray-100 pr-6 text-right">
                     Status
@@ -221,13 +250,23 @@ export default function AcademiaDashboard() {
                         {cls.name}
                       </TableCell>
                       <TableCell className="text-gray-600 dark:text-gray-300">
-                        {cls.instructor}
+                        {cls.courseTitle}
                       </TableCell>
                       <TableCell className="text-gray-600 dark:text-gray-300 font-medium">
                         {cls.capacity}
                       </TableCell>
                       <TableCell className="pr-6 text-right">
-                        <Badge variant="success">{cls.status}</Badge>
+                        <Badge
+                          variant={
+                            cls.status === "In Semester"
+                              ? "success"
+                              : cls.status === "Unassigned"
+                                ? "danger"
+                                : "warning"
+                          }
+                        >
+                          {cls.status}
+                        </Badge>
                       </TableCell>
                     </TableRow>
                   ))
@@ -247,6 +286,32 @@ export default function AcademiaDashboard() {
               </h3>
               <div className="space-y-3">
                 <button
+                  onClick={() => openModal("faculty", "create")}
+                  className="w-full flex items-center justify-between p-4 rounded-xl border border-gray-200 dark:border-white/10 hover:border-blue-500 dark:hover:border-blue-500 bg-white dark:bg-white/5 hover:bg-gray-50 dark:hover:bg-white/10 shadow-sm transition-all group"
+                >
+                  <span className="font-medium text-gray-700 dark:text-gray-200 group-hover:text-blue-500 transition-colors flex gap-2 items-center">
+                    <Plus size={16} /> New Faculty
+                  </span>
+                  <Building2
+                    size={18}
+                    className="text-gray-400 group-hover:text-blue-500 transition-colors"
+                  />
+                </button>
+
+                <button
+                  onClick={() => openModal("department", "create")}
+                  className="w-full flex items-center justify-between p-4 rounded-xl border border-gray-200 dark:border-white/10 hover:border-emerald-500 dark:hover:border-emerald-500 bg-white dark:bg-white/5 hover:bg-gray-50 dark:hover:bg-white/10 shadow-sm transition-all group"
+                >
+                  <span className="font-medium text-gray-700 dark:text-gray-200 group-hover:text-emerald-500 transition-colors flex gap-2 items-center">
+                    <Plus size={16} /> New Department
+                  </span>
+                  <Network
+                    size={18}
+                    className="text-gray-400 group-hover:text-emerald-500 transition-colors"
+                  />
+                </button>
+
+                <button
                   onClick={() => openModal("course", "create")}
                   className="w-full flex items-center justify-between p-4 rounded-xl border border-gray-200 dark:border-white/10 hover:border-primary dark:hover:border-primary bg-white dark:bg-white/5 hover:bg-gray-50 dark:hover:bg-white/10 shadow-sm transition-all group"
                 >
@@ -261,14 +326,27 @@ export default function AcademiaDashboard() {
 
                 <button
                   onClick={() => openModal("class", "create")}
-                  className="w-full flex items-center justify-between p-4 rounded-xl border border-gray-200 dark:border-white/10 hover:border-emerald-500 dark:hover:border-emerald-500 bg-white dark:bg-white/5 hover:bg-gray-50 dark:hover:bg-white/10 shadow-sm transition-all group"
+                  className="w-full flex items-center justify-between p-4 rounded-xl border border-gray-200 dark:border-white/10 hover:border-purple-500 dark:hover:border-purple-500 bg-white dark:bg-white/5 hover:bg-gray-50 dark:hover:bg-white/10 shadow-sm transition-all group"
                 >
-                  <span className="font-medium text-gray-700 dark:text-gray-200 group-hover:text-emerald-500 transition-colors flex gap-2 items-center">
+                  <span className="font-medium text-gray-700 dark:text-gray-200 group-hover:text-purple-500 transition-colors flex gap-2 items-center">
                     <Plus size={16} /> New Class
                   </span>
                   <Users
                     size={18}
-                    className="text-gray-400 group-hover:text-emerald-500 transition-colors"
+                    className="text-gray-400 group-hover:text-purple-500 transition-colors"
+                  />
+                </button>
+
+                <button
+                  onClick={() => openModal("structure", "create")}
+                  className="w-full flex items-center justify-between p-4 rounded-xl border border-gray-200 dark:border-white/10 hover:border-orange-500 dark:hover:border-orange-500 bg-white dark:bg-white/5 hover:bg-gray-50 dark:hover:bg-white/10 shadow-sm transition-all group"
+                >
+                  <span className="font-medium text-gray-700 dark:text-gray-200 group-hover:text-orange-500 transition-colors flex gap-2 items-center">
+                    <Plus size={16} /> New Academic Year
+                  </span>
+                  <Calendar
+                    size={18}
+                    className="text-gray-400 group-hover:text-orange-500 transition-colors"
                   />
                 </button>
               </div>
@@ -276,8 +354,11 @@ export default function AcademiaDashboard() {
           </Card>
         </div>
       </div>
+      <FacultyModal />
+      <DepartmentModal />
       <CourseModal />
       <ClassModal />
+      <AddStructureModal />
     </div>
   );
 }

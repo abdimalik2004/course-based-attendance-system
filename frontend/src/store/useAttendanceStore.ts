@@ -27,6 +27,9 @@ interface AttendanceState {
   recognizedUser: RecognizedUser | null;
   activeSessionId: number | null;
   activeCourseName: string;
+  /** Set to true when a session is ended via the scanner; cleared when a new session starts or the banner is dismissed */
+  justEndedSession: boolean;
+  lastEndedCourseName: string;
 
   startSession: (session?: { sessionId: number; courseName?: string }) => void;
   waitForFace: () => void;
@@ -36,6 +39,7 @@ interface AttendanceState {
   setRecognitionResult: (state: SessionState, user?: RecognizedUser) => void;
   setActiveSession: (sessionId: number | null, courseName?: string) => void;
   resetSession: () => void;
+  dismissEndedBanner: () => void;
 }
 
 export const useAttendanceStore = create<AttendanceState>((set) => ({
@@ -44,6 +48,8 @@ export const useAttendanceStore = create<AttendanceState>((set) => ({
   recognizedUser: null,
   activeSessionId: null,
   activeCourseName: "",
+  justEndedSession: false,
+  lastEndedCourseName: "",
 
   startSession: (session) =>
     set({
@@ -53,6 +59,7 @@ export const useAttendanceStore = create<AttendanceState>((set) => ({
       recognizedUser: null,
       activeSessionId: session?.sessionId ?? null,
       activeCourseName: session?.courseName ?? "",
+      justEndedSession: false,
     }),
 
   waitForFace: () =>
@@ -88,11 +95,17 @@ export const useAttendanceStore = create<AttendanceState>((set) => ({
     }),
 
   resetSession: () =>
-    set({
+    set((state) => ({
       sessionState: "idle",
       scanningProgress: 0,
       recognizedUser: null,
+      // Capture the course name before clearing it so the banner can show it
+      justEndedSession: state.activeSessionId != null,
+      lastEndedCourseName: state.activeCourseName,
       activeSessionId: null,
       activeCourseName: "",
-    }),
+    })),
+
+  dismissEndedBanner: () =>
+    set({ justEndedSession: false, lastEndedCourseName: "" }),
 }));

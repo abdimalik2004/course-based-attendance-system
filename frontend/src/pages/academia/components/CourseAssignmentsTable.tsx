@@ -22,6 +22,7 @@ export function CourseAssignmentsTable() {
     courses,
     faculties,
     departments,
+    isLoading,
     openModal,
     deleteCourseAssignment,
   } = useAcademiaStore();
@@ -31,26 +32,23 @@ export function CourseAssignmentsTable() {
   );
   const [searchTerm, setSearchTerm] = useState("");
 
-  const getCourseCode = (courseId: string) =>
-    courses.find((c) => c.id === courseId)?.code || "Unknown";
+  const getCourse = (courseId: string) =>
+    courses.find((c) => c.id === courseId) ?? null;
   const getFacultyName = (facultyId: string) =>
     faculties.find((f) => f.id === facultyId)?.name || "Unknown";
   const getDeptName = (deptId: string) =>
     departments.find((d) => d.id === deptId)?.name || "Unknown";
 
   const filteredAssignments = useMemo(() => {
-    return courseAssignments.filter((assignment) => {
-      const searchMatch =
-        getCourseCode(assignment.courseId)
-          .toLowerCase()
-          .includes(searchTerm.toLowerCase()) ||
-        getFacultyName(assignment.facultyId)
-          .toLowerCase()
-          .includes(searchTerm.toLowerCase()) ||
-        getDeptName(assignment.departmentId)
-          .toLowerCase()
-          .includes(searchTerm.toLowerCase());
-      return searchMatch;
+    const q = searchTerm.toLowerCase();
+    return courseAssignments.filter((a) => {
+      const course = getCourse(a.courseId);
+      return (
+        (course?.code ?? "").toLowerCase().includes(q) ||
+        (course?.title ?? "").toLowerCase().includes(q) ||
+        getFacultyName(a.facultyId).toLowerCase().includes(q) ||
+        getDeptName(a.departmentId).toLowerCase().includes(q)
+      );
     });
   }, [courseAssignments, searchTerm, courses, faculties, departments]);
 
@@ -70,7 +68,7 @@ export function CourseAssignmentsTable() {
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead>Course Code</TableHead>
+                  <TableHead>Course</TableHead>
                   <TableHead>Faculty Name</TableHead>
                   <TableHead>Department</TableHead>
                   <TableHead>Semester</TableHead>
@@ -79,7 +77,15 @@ export function CourseAssignmentsTable() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {filteredAssignments.length === 0 ? (
+                {isLoading ? (
+                  Array.from({ length: 3 }).map((_, i) => (
+                    <TableRow key={`skeleton-${i}`}>
+                      <TableCell colSpan={6}>
+                        <div className="h-4 bg-gray-200 dark:bg-white/10 rounded animate-pulse" />
+                      </TableCell>
+                    </TableRow>
+                  ))
+                ) : filteredAssignments.length === 0 ? (
                   <TableRow>
                     <TableCell
                       colSpan={6}
@@ -89,47 +95,57 @@ export function CourseAssignmentsTable() {
                     </TableCell>
                   </TableRow>
                 ) : (
-                  filteredAssignments.map((assignment) => (
-                    <TableRow key={assignment.id}>
-                      <TableCell className="font-medium text-gray-900 dark:text-gray-100">
-                        {getCourseCode(assignment.courseId)}
-                      </TableCell>
-                      <TableCell className="text-gray-600 dark:text-gray-300">
-                        {getFacultyName(assignment.facultyId)}
-                      </TableCell>
-                      <TableCell className="text-gray-600 dark:text-gray-300">
-                        {getDeptName(assignment.departmentId)}
-                      </TableCell>
-                      <TableCell>Semester {assignment.semester}</TableCell>
-                      <TableCell className="text-gray-500 dark:text-gray-400">
-                        {new Date(assignment.createdAt).toLocaleDateString()}
-                      </TableCell>
-                      <TableCell className="text-right">
-                        <div className="flex items-center justify-end gap-2">
-                          <ViewButton
-                            onClick={() => setViewAssignment(assignment)}
-                            tooltip="View"
-                          />
-                          <button
-                            onClick={() =>
-                              openModal("courseAssign", "edit", assignment)
-                            }
-                            className="p-1.5 rounded-lg text-amber-500 hover:text-amber-600 hover:bg-amber-50 dark:hover:bg-amber-500/10 transition-colors"
-                            title="Edit"
-                          >
-                            <Edit2 size={16} />
-                          </button>
-                          <button
-                            onClick={() => setDeleteId(assignment.id)}
-                            className="p-1.5 rounded-lg text-red-500 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-500/10 transition-colors"
-                            title="Delete"
-                          >
-                            <Trash2 size={16} />
-                          </button>
-                        </div>
-                      </TableCell>
-                    </TableRow>
-                  ))
+                  filteredAssignments.map((assignment) => {
+                    const course = getCourse(assignment.courseId);
+                    return (
+                      <TableRow key={assignment.id}>
+                        <TableCell>
+                          <div className="font-medium text-gray-900 dark:text-gray-100">
+                            {course?.code ?? "Unknown"}
+                          </div>
+                          {course?.title && (
+                            <div className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
+                              {course.title}
+                            </div>
+                          )}
+                        </TableCell>
+                        <TableCell className="text-gray-600 dark:text-gray-300">
+                          {getFacultyName(assignment.facultyId)}
+                        </TableCell>
+                        <TableCell className="text-gray-600 dark:text-gray-300">
+                          {getDeptName(assignment.departmentId)}
+                        </TableCell>
+                        <TableCell>Semester {assignment.semester}</TableCell>
+                        <TableCell className="text-gray-500 dark:text-gray-400">
+                          {new Date(assignment.createdAt).toLocaleDateString()}
+                        </TableCell>
+                        <TableCell className="text-right">
+                          <div className="flex items-center justify-end gap-2">
+                            <ViewButton
+                              onClick={() => setViewAssignment(assignment)}
+                              tooltip="View"
+                            />
+                            <button
+                              onClick={() =>
+                                openModal("courseAssign", "edit", assignment)
+                              }
+                              className="p-1.5 rounded-lg text-amber-500 hover:text-amber-600 hover:bg-amber-50 dark:hover:bg-amber-500/10 transition-colors"
+                              title="Edit"
+                            >
+                              <Edit2 size={16} />
+                            </button>
+                            <button
+                              onClick={() => setDeleteId(assignment.id)}
+                              className="p-1.5 rounded-lg text-red-500 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-500/10 transition-colors"
+                              title="Delete"
+                            >
+                              <Trash2 size={16} />
+                            </button>
+                          </div>
+                        </TableCell>
+                      </TableRow>
+                    );
+                  })
                 )}
               </TableBody>
             </Table>
@@ -140,11 +156,8 @@ export function CourseAssignmentsTable() {
       <ConfirmDeleteModal
         isOpen={!!deleteId}
         onClose={() => setDeleteId(null)}
-        onConfirm={() => {
-          if (deleteId) {
-            deleteCourseAssignment(deleteId);
-            setDeleteId(null);
-          }
+        onConfirm={async () => {
+          if (deleteId) await deleteCourseAssignment(deleteId);
         }}
       />
 
@@ -154,27 +167,28 @@ export function CourseAssignmentsTable() {
         title="Course Assignment Details"
         data={
           viewAssignment
-            ? [
-                {
-                  label: "Course Code",
-                  value: getCourseCode(viewAssignment.courseId),
-                },
-                {
-                  label: "Faculty Name",
-                  value: getFacultyName(viewAssignment.facultyId),
-                },
-                {
-                  label: "Department",
-                  value: getDeptName(viewAssignment.departmentId),
-                },
-                { label: "Semester", value: viewAssignment.semester },
-                {
-                  label: "Created At",
-                  value: new Date(
-                    viewAssignment.createdAt,
-                  ).toLocaleDateString(),
-                },
-              ]
+            ? (() => {
+                const course = getCourse(viewAssignment.courseId);
+                return [
+                  { label: "Course Code", value: course?.code ?? "Unknown" },
+                  { label: "Course Title", value: course?.title ?? "Unknown" },
+                  {
+                    label: "Faculty Name",
+                    value: getFacultyName(viewAssignment.facultyId),
+                  },
+                  {
+                    label: "Department",
+                    value: getDeptName(viewAssignment.departmentId),
+                  },
+                  { label: "Semester", value: viewAssignment.semester },
+                  {
+                    label: "Created At",
+                    value: new Date(
+                      viewAssignment.createdAt,
+                    ).toLocaleDateString(),
+                  },
+                ];
+              })()
             : null
         }
       />

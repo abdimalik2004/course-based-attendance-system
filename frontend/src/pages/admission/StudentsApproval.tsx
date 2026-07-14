@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
-import { Search, Filter, CheckCircle2, XCircle, X, Copy, Check } from "lucide-react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { Search, Filter, CheckCircle2, XCircle, X, Copy, Check, AlertTriangle } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
@@ -24,17 +25,43 @@ type StudentCapturedImagePreview = StudentCapturedImageDto & {
   previewUrl: string;
 };
 
+/** Map raw DTO → Student shape (same as useAdmissionStore normalizeAdmissionState) */
+function mapToStudent(dto: any): Student {
+  return {
+    id: String(dto.id),
+    studentNumber: dto.student_number,
+    fullName: dto.full_name,
+    facultyId: String(dto.faculty_id),
+    departmentId: String(dto.department_id),
+    faculty: dto.faculty_name ?? `Faculty ${dto.faculty_id}`,
+    department: dto.department_name ?? `Department ${dto.department_id}`,
+    class: `Class ${new Date(dto.created_at).getFullYear()}`,
+    faceImagesCount: dto.face_images_count ?? 0,
+    status: dto.status,
+    createdAt: dto.created_at,
+    dateOfBirth: dto.date_of_birth ?? null,
+    phone: dto.phone ?? null,
+    email: dto.email ?? null,
+  };
+}
+
 export default function StudentsApproval() {
-  const {
-    students,
-    isLoading,
-    isSaving,
-    error,
-    fetchAdmissionData,
-    approveStudent,
-    rejectStudent,
-  } = useAdmissionStore();
+  const { isSaving, approveStudent, rejectStudent } = useAdmissionStore();
+  const queryClient = useQueryClient();
   const [searchTerm, setSearchTerm] = useState("");
+
+  // Fetch ALL pending students directly from the API — bypasses the store's
+  // single-page cache so students on page 2+ are never invisible in the queue.
+  const {
+    data: pendingData,
+    isLoading,
+    error,
+  } = useQuery({
+    queryKey: ["admissionPendingStudents"],
+    queryFn: () =>
+      admissionService.listStudents({ status: "pending", skip: 0, limit: 500 }),
+    staleTime: 30_000,
+  });
 
   // Modal states
   const [isViewModalOpen, setIsViewModalOpen] = useState(false);
@@ -42,6 +69,7 @@ export default function StudentsApproval() {
 
   const [isApproveConfirmOpen, setIsApproveConfirmOpen] = useState(false);
   const [isRejectConfirmOpen, setIsRejectConfirmOpen] = useState(false);
+  const [approvalError, setApprovalError] = useState<string | null>(null);
   const [credentials, setCredentials] = useState<{ studentNumber: string; password: string } | null>(null);
   const [copiedField, setCopiedField] = useState<"username" | "password" | null>(null);
   const [capturedImages, setCapturedImages] = useState<
@@ -50,20 +78,20 @@ export default function StudentsApproval() {
   const [isImagesLoading, setIsImagesLoading] = useState(false);
   const [imagesError, setImagesError] = useState<string | null>(null);
 
-  useEffect(() => {
-    void fetchAdmissionData();
-  }, [fetchAdmissionData]);
+  const allPendingStudents: Student[] = useMemo(() => {
+    const items = pendingData?.items ?? [];
+    return items.map(mapToStudent);
+  }, [pendingData]);
 
   const pendingStudents = useMemo(() => {
-    return students.filter(
-      (student) =>
-        student.status === "pending" &&
-        (student.fullName.toLowerCase().includes(searchTerm.toLowerCase()) ||
-          student.studentNumber
-            .toLowerCase()
-            .includes(searchTerm.toLowerCase())),
+    if (!searchTerm) return allPendingStudents;
+    const q = searchTerm.toLowerCase();
+    return allPendingStudents.filter(
+      (s) =>
+        s.fullName.toLowerCase().includes(q) ||
+        s.studentNumber.toLowerCase().includes(q),
     );
-  }, [students, searchTerm]);
+  }, [allPendingStudents, searchTerm]);
 
   const openViewModal = (student: Student) => {
     setSelectedStudent(student);
@@ -162,13 +190,22 @@ export default function StudentsApproval() {
   };
 
   const confirmApprove = async () => {
-    if (selectedStudent) {
+    if (!selectedStudent) return;
+    try {
       const result = await approveStudent(selectedStudent.id);
       setIsApproveConfirmOpen(false);
       closeModals();
+      // Refresh the pending list so the approved student disappears from the queue
+      void queryClient.invalidateQueries({ queryKey: ["admissionPendingStudents"] });
       if (result?.generatedPassword) {
         setCredentials({ studentNumber: result.studentNumber, password: result.generatedPassword });
       }
+    } catch (err: unknown) {
+      setIsApproveConfirmOpen(false);
+      const detail = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
+      setApprovalError(
+        detail ?? "Failed to approve student. Please try again.",
+      );
     }
   };
 
@@ -177,6 +214,8 @@ export default function StudentsApproval() {
       await rejectStudent(selectedStudent.id);
       setIsRejectConfirmOpen(false);
       closeModals();
+      // Refresh the pending list so the rejected student disappears from the queue
+      void queryClient.invalidateQueries({ queryKey: ["admissionPendingStudents"] });
     }
   };
 
@@ -195,7 +234,7 @@ export default function StudentsApproval() {
 
       {error ? (
         <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-500/20 dark:bg-red-500/10 dark:text-red-300">
-          {error}
+          {error instanceof Error ? error.message : "Failed to load pending students."}
         </div>
       ) : null}
 
@@ -399,6 +438,21 @@ export default function StudentsApproval() {
               )}
             </div>
 
+            {/* No images warning — shown when images are loaded but none exist */}
+            {!isImagesLoading && !imagesError && capturedImages.length === 0 && (
+              <div className="flex items-start gap-3 p-4 rounded-xl bg-amber-50 dark:bg-amber-500/10 border border-amber-200 dark:border-amber-500/20">
+                <AlertTriangle className="text-amber-500 dark:text-amber-400 shrink-0 mt-0.5" size={18} />
+                <div>
+                  <p className="text-sm font-semibold text-amber-800 dark:text-amber-300">
+                    No face images captured
+                  </p>
+                  <p className="text-sm text-amber-700 dark:text-amber-400 mt-0.5">
+                    This student has no face data registered. Approval will be blocked until face images are captured via the Face Registration page.
+                  </p>
+                </div>
+              </div>
+            )}
+
             {/* Action Buttons */}
             <div className="pt-4 border-t border-gray-200 dark:border-white/10 flex flex-wrap items-center justify-end gap-3">
               <Button
@@ -490,6 +544,30 @@ export default function StudentsApproval() {
             >
               Reject
             </Button>
+          </div>
+        </div>
+      </Modal>
+
+      {/* Approval Error Modal — shown when backend rejects the approval (e.g. no face images) */}
+      <Modal
+        isOpen={!!approvalError}
+        onClose={() => setApprovalError(null)}
+        title="Cannot Approve Student"
+      >
+        <div className="space-y-5">
+          <div className="flex items-start gap-4 p-4 rounded-xl bg-red-50 dark:bg-red-500/10 border border-red-100 dark:border-red-500/20">
+            <div className="w-10 h-10 rounded-full bg-red-100 dark:bg-red-500/20 flex items-center justify-center shrink-0">
+              <AlertTriangle className="text-red-600 dark:text-red-400" size={20} />
+            </div>
+            <p className="text-sm text-red-700 dark:text-red-300 mt-1">
+              {approvalError}
+            </p>
+          </div>
+          <p className="text-sm text-gray-500 dark:text-gray-400">
+            Go to the <span className="font-medium text-gray-700 dark:text-gray-300">Face Registration</span> page, capture the student's face images, then return here to approve.
+          </p>
+          <div className="flex justify-end">
+            <Button onClick={() => setApprovalError(null)}>Got It</Button>
           </div>
         </div>
       </Modal>

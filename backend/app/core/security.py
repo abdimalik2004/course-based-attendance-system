@@ -18,10 +18,7 @@ pwd_context = CryptContext(schemes=["bcrypt", "pbkdf2_sha256"], deprecated="auto
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/token")
 
 
-ROLE_EQUIVALENTS: dict[str, set[str]] = {
-    "FACULTY": {"FACULTY"},
-    "FACULTY": {"FACULTY"},
-}
+ROLE_EQUIVALENTS: dict[str, set[str]] = {}
 
 SUPER_ADMIN_ROLE = "SUPER_ADMIN"
 
@@ -91,6 +88,13 @@ def decode_refresh_token(token: str) -> str:
     return username
 
 
+_TIMEOUT_SECONDS: dict[str, int] = {
+    "15m": 15 * 60,
+    "30m": 30 * 60,
+    "1h": 60 * 60,
+}
+
+
 def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)) -> User:
     credentials_exception = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
@@ -98,13 +102,31 @@ def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(
         headers={"WWW-Authenticate": "Bearer"},
     )
     try:
-        username = decode_token(token)
-    except TokenPayloadError as exc:
+        payload = jwt.decode(token, settings.secret_key, algorithms=[settings.jwt_algorithm])
+        username: str | None = payload.get("sub")
+        iat: int | None = payload.get("iat")
+        if not username:
+            raise credentials_exception
+    except JWTError as exc:
         raise credentials_exception from exc
 
     user = db.query(User).filter(User.username == username).first()
     if not user or not user.is_active:
         raise credentials_exception
+
+    # Enforce session timeout stored in system_settings
+    if iat is not None:
+        from app.db.models import SystemSetting  # local import to avoid circular dependency
+        setting = db.query(SystemSetting).filter(SystemSetting.key == "security.session_timeout").first()
+        if setting and setting.value in _TIMEOUT_SECONDS:
+            timeout_secs = _TIMEOUT_SECONDS[setting.value]
+            if datetime.now(timezone.utc).timestamp() > iat + timeout_secs:
+                raise HTTPException(
+                    status_code=status.HTTP_401_UNAUTHORIZED,
+                    detail="Session expired. Please log in again.",
+                    headers={"WWW-Authenticate": "Bearer"},
+                )
+
     return user
 
 

@@ -1,8 +1,5 @@
 import { useEffect, useState, useMemo } from "react";
-import { useForm, Controller } from "react-hook-form";
-import { zodResolver } from "@hookform/resolvers/zod";
-import * as z from "zod";
-import { Calendar, Edit2, Trash2, Clock } from "lucide-react";
+import { Calendar, Edit2, Trash2, Plus } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
 import {
@@ -14,25 +11,12 @@ import {
   TableRow,
 } from "@/components/ui/Table";
 import { Input } from "@/components/ui/Input";
-import { Select } from "@/components/ui/Select";
 import { ViewButton } from "@/components/ui/ViewButton";
 import { ViewModal } from "@/components/ui/ViewModal";
 import { useFacultyStore } from "@/store/useFacultyStore";
 import { ScheduleModal } from "@/components/faculty/ScheduleModal";
 import { ConfirmDeleteModal } from "@/components/academia/ConfirmDeleteModal";
 import type { CourseSchedule } from "@/store/useFacultyStore";
-import { cn } from "@/utils/cn";
-
-const weekdays = ["sat", "sun", "mon", "tue", "wed", "thu", "fri"] as const;
-
-const scheduleSchema = z.object({
-  courseId: z.string().min(1, "Course is required"),
-  weekdays: z.array(z.string()).min(1, "Select at least one weekday"),
-  startTime: z.string().min(1, "Start time is required"),
-  endTime: z.string().min(1, "End time is required"),
-  gracePeriod: z.number().min(0, "Grace period must be positive"),
-});
-type ScheduleForm = z.infer<typeof scheduleSchema>;
 
 export default function ScheduleCourse() {
   const {
@@ -42,7 +26,6 @@ export default function ScheduleCourse() {
     error,
     fetchData,
     openModal,
-    addSchedule,
     deleteSchedule,
   } = useFacultyStore();
   const [deleteId, setDeleteId] = useState<string | null>(null);
@@ -54,82 +37,17 @@ export default function ScheduleCourse() {
   const filteredSchedules = useMemo(() => {
     return schedules.filter((schedule) => {
       const course = getCourse(schedule.courseId);
-      const searchMatch =
-        (course?.title || "")
-          .toLowerCase()
-          .includes(searchTerm.toLowerCase()) ||
+      return (
+        (course?.title || "").toLowerCase().includes(searchTerm.toLowerCase()) ||
         (course?.code || "").toLowerCase().includes(searchTerm.toLowerCase()) ||
-        schedule.weekdays
-          .join(" ")
-          .toLowerCase()
-          .includes(searchTerm.toLowerCase());
-      return searchMatch;
+        schedule.weekdays.join(" ").toLowerCase().includes(searchTerm.toLowerCase())
+      );
     });
   }, [schedules, searchTerm, courses]);
-
-  const {
-    register,
-    handleSubmit,
-    control,
-    reset,
-    formState: { errors, isSubmitting },
-  } = useForm<ScheduleForm>({
-    resolver: zodResolver(scheduleSchema),
-    defaultValues: {
-      weekdays: [],
-      gracePeriod: 15,
-    },
-  });
 
   useEffect(() => {
     fetchData();
   }, [fetchData]);
-
-  const onSubmit = async (data: ScheduleForm) => {
-    try {
-      const payload = {
-        course_id: Number(data.courseId),
-        weekday: data.weekdays,
-        start_time: data.startTime + ":00",
-        end_time: data.endTime + ":00",
-        grace_period_minutes: Number(data.gracePeriod),
-      };
-
-      console.log("SENDING PAYLOAD:", payload);
-
-      await addSchedule(payload);
-
-      reset({
-        courseId: "",
-        weekdays: [],
-        startTime: "",
-        endTime: "",
-        gracePeriod: 15,
-      });
-    } catch (error) {
-      console.error("Failed to save schedule:", error);
-    }
-  };
-
-  // Collect the set of course IDs that already have at least one schedule entry.
-  const scheduledCourseIds = useMemo(
-    () => new Set(schedules.map((s) => s.courseId)),
-    [schedules],
-  );
-
-  const courseOptions = [
-    { value: "", label: "Select Course..." },
-    ...courses.map((c) => {
-      const alreadyScheduled = scheduledCourseIds.has(c.id);
-      return {
-        value: c.id,
-        label: alreadyScheduled
-          ? `${c.code} - ${c.title} (already scheduled)`
-          : `${c.code} - ${c.title}`,
-        disabled: alreadyScheduled,
-      };
-    }),
-  ];
 
   return (
     <div className="space-y-6 max-w-7xl mx-auto">
@@ -143,6 +61,10 @@ export default function ScheduleCourse() {
             Create and manage course schedules.
           </p>
         </div>
+        <Button onClick={() => openModal("schedule", "create")} className="gap-2">
+          <Plus size={20} />
+          Add Schedule
+        </Button>
       </div>
 
       {error ? (
@@ -151,122 +73,6 @@ export default function ScheduleCourse() {
         </div>
       ) : null}
 
-      {/* Inline Form Section */}
-      <Card className="glass-panel overflow-visible">
-        <CardContent className="p-6">
-          <form onSubmit={handleSubmit(onSubmit)} className="space-y-6">
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-              <div className="col-span-1 md:col-span-2 space-y-1">
-                <label className="text-sm font-medium text-gray-700 dark:text-gray-300">
-                  Course
-                </label>
-                <Select
-                  options={courseOptions}
-                  error={errors.courseId?.message}
-                  {...register("courseId")}
-                />
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5 ml-1">
-                  Start Time
-                </label>
-                <div className="relative">
-                  <Clock
-                    className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400"
-                    size={18}
-                  />
-                  <Input
-                    type="time"
-                    className="pl-10 text-gray-900 dark:text-white dark:[color-scheme:dark]"
-                    {...register("startTime")}
-                  />
-                </div>
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5 ml-1">
-                  End Time
-                </label>
-                <div className="relative">
-                  <Clock
-                    className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400"
-                    size={18}
-                  />
-                  <Input
-                    type="time"
-                    className="pl-10 text-gray-900 dark:text-white dark:[color-scheme:dark]"
-                    {...register("endTime")}
-                  />
-                </div>
-              </div>
-            </div>
-
-            <div className="space-y-2">
-              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
-                Weekdays
-              </label>
-              <Controller
-                name="weekdays"
-                control={control}
-                render={({ field }) => (
-                  <div className="flex flex-wrap gap-2">
-                    {weekdays.map((day) => {
-                      const isSelected = field.value.includes(day);
-                      return (
-                        <button
-                          key={day}
-                          type="button"
-                          onClick={() => {
-                            const newValue = isSelected
-                              ? field.value.filter((d) => d !== day)
-                              : [...field.value, day];
-                            field.onChange(newValue);
-                          }}
-                          className={cn(
-                            "px-4 py-2 rounded-full text-sm font-medium capitalize transition-all duration-300 border",
-                            isSelected
-                              ? "bg-purple-500/20 border-purple-500 text-purple-400 shadow-[0_0_10px_rgba(168,85,247,0.4)]"
-                              : "bg-white/5 border-white/10 text-gray-400 hover:text-gray-200 hover:bg-white/10",
-                          )}
-                        >
-                          {day}
-                        </button>
-                      );
-                    })}
-                  </div>
-                )}
-              />
-              {errors.weekdays && (
-                <p className="text-sm text-red-500 mt-1">
-                  {errors.weekdays.message}
-                </p>
-              )}
-            </div>
-
-            <div className="flex items-end gap-4">
-              <div className="w-48 space-y-1">
-                <label className="text-sm font-medium text-gray-700 dark:text-gray-300">
-                  Grace Period (Minutes)
-                </label>
-                <Input
-                  type="number"
-                  error={errors.gracePeriod?.message}
-                  {...register("gracePeriod", { valueAsNumber: true })}
-                />
-              </div>
-              <Button
-                type="submit"
-                isLoading={isSubmitting}
-                className="ml-auto"
-              >
-                Save Schedule
-              </Button>
-            </div>
-          </form>
-        </CardContent>
-      </Card>
-
-      {/* Schedule Table */}
       <Card>
         <CardContent className="p-0">
           <div className="p-4 border-b border-gray-200 dark:border-gray-700 flex justify-between items-center">
@@ -309,7 +115,6 @@ export default function ScheduleCourse() {
                 ) : (
                   filteredSchedules.map((schedule) => {
                     const course = getCourse(schedule.courseId);
-
                     return (
                       <TableRow
                         key={schedule.id}
@@ -349,9 +154,7 @@ export default function ScheduleCourse() {
                             />
                             <button
                               type="button"
-                              onClick={() =>
-                                openModal("schedule", "edit", schedule)
-                              }
+                              onClick={() => openModal("schedule", "edit", schedule)}
                               className="p-1.5 rounded-lg text-amber-500 hover:text-amber-600 hover:bg-amber-50 dark:hover:bg-amber-500/10 transition-colors"
                               title="Edit"
                             >
@@ -384,12 +187,8 @@ export default function ScheduleCourse() {
         onClose={() => setDeleteId(null)}
         onConfirm={async () => {
           if (deleteId) {
-            try {
-              await deleteSchedule(deleteId);
-              await fetchData();
-            } finally {
-              setDeleteId(null);
-            }
+            await deleteSchedule(deleteId);
+            setDeleteId(null);
           }
         }}
         title="Delete Schedule"
@@ -405,8 +204,7 @@ export default function ScheduleCourse() {
             ? [
                 {
                   label: "Course",
-                  value:
-                    getCourse(viewSchedule.courseId)?.title || "Unknown Course",
+                  value: getCourse(viewSchedule.courseId)?.title || "Unknown Course",
                 },
                 {
                   label: "Course Code",

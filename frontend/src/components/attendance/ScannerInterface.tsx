@@ -159,6 +159,14 @@ export default function ScannerInterface({ cameraIndex }: { cameraIndex?: number
     // Invalidate all attendance list queries so every attendance-list page
     // (admin, teacher, faculty) automatically re-fetches fresh data.
     queryClient.invalidateQueries({ queryKey: attendanceKeys.all });
+    // Also invalidate teacher-specific caches so Dashboard stats and
+    // AttendanceList refresh immediately instead of waiting for the
+    // 15-second polling interval.
+    queryClient.invalidateQueries({ queryKey: ["teacherSessions"] });
+    queryClient.invalidateQueries({ queryKey: ["teacherAttendanceRecords"] });
+    // Invalidate the active-sessions query so the "You have an active session
+    // running" banner disappears immediately instead of waiting up to 15s.
+    queryClient.invalidateQueries({ queryKey: ["teacherActiveSessions"] });
     resetSession();
   };
 

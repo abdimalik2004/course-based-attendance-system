@@ -1,5 +1,12 @@
 import { useState, useEffect, useRef } from 'react';
-import { Outlet, useNavigate } from 'react-router-dom';
+import { Outlet, useNavigate, useLocation } from 'react-router-dom';
+
+const PAGE_TITLES: Record<string, string> = {
+  '/student/dashboard': 'Overview',
+  '/student/attendance': 'Attendance Record',
+  '/student/schedule': 'Class Schedule',
+  '/student/profile': 'My Profile',
+};
 import StudentSidebar from './Sidebar';
 import { useSidebarStore } from '@/store/useSidebarStore';
 import { cn } from '@/utils/cn';
@@ -26,8 +33,11 @@ function getDisplayName(user: { full_name?: string | null; username?: string } |
 function StudentTopbar() {
   const { logout, user } = useAuthStore();
   const navigate = useNavigate();
+  const location = useLocation();
   const { toggleSidebar } = useSidebarStore();
   const { openEditProfile, openChangePassword } = useUIStore();
+
+  const pageTitle = PAGE_TITLES[location.pathname] ?? 'Student Portal';
 
   const [profileDropdownOpen, setProfileDropdownOpen] = useState(false);
 
@@ -64,7 +74,7 @@ function StudentTopbar() {
             <span className="font-semibold text-gray-900 dark:text-white">Heegan</span>
         </div>
         <h1 className="text-xl font-semibold text-gray-800 dark:text-white sm:hidden lg:block">
-          Student Portal
+          {pageTitle}
         </h1>
       </div>
 

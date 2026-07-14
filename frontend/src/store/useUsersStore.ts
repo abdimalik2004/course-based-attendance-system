@@ -98,14 +98,12 @@ export const useUsersStore = create<UsersState>((set) => ({
   },
 
   deleteUser: async (id) => {
-    // Attempt server delete then update local state
     try {
       await usersService.deleteUser(id);
       set((state) => ({ users: state.users.filter((u) => u.id !== id) }));
-    } catch (err) {
-      // If delete failed, still remove locally to keep UI responsive; caller may refresh later
-      console.error("Failed to delete user on server", err);
-      set((state) => ({ users: state.users.filter((u) => u.id !== id) }));
+    } catch (err: any) {
+      const detail = err?.response?.data?.detail;
+      throw new Error(typeof detail === "string" ? detail : "Failed to delete user");
     }
   },
 

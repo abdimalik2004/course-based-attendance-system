@@ -7,15 +7,16 @@ export const facultyService = {
   getSummary: async () =>
     api.get("/reports/summary").then((response) => response.data),
 
-  getCourses: async () => courseService.listCourses({ skip: 0, limit: 200 }),
+  getCourses: async (facultyId?: number) =>
+    courseService.listCourses({ faculty_id: facultyId, skip: 0, limit: 200 }),
 
   getTeachers: async () => hrService.getTeachers(),
 
   getDepartments: async () => hrService.getDepartments(),
 
-  getClasses: async () =>
+  getClasses: async (facultyId?: number) =>
     api
-      .get("/classes", { params: { skip: 0, limit: 200 } })
+      .get("/classes", { params: { faculty_id: facultyId, skip: 0, limit: 200 } })
       .then((response) => response.data),
 
   listAssignments: async () =>
@@ -46,20 +47,8 @@ export const facultyService = {
     end_time: string;
     grace_period_minutes: number;
   }) => {
-    try {
-      console.log("SENDING PAYLOAD:", JSON.stringify(payload, null, 2));
-
-      const response = await api.post("/schedules", payload);
-
-      return response.data;
-    } catch (error: any) {
-      console.log(
-        "FASTAPI VALIDATION:",
-        JSON.stringify(error.response?.data, null, 2),
-      );
-
-      throw error;
-    }
+    const response = await api.post("/schedules", payload);
+    return response.data;
   },
 
   updateSchedule: async (
@@ -88,6 +77,13 @@ export const facultyService = {
 
   updateAttendanceStatus: async (recordId: string) =>
     attendanceService.updateAttendanceStatus(recordId, "EXCUSED"),
+
+  // ── Excuse requests (faculty side) ───────────────────────────────────────
+  listExcuseRequests: async () =>
+    api.get('/excuse-requests').then((r) => r.data ?? []),
+
+  reviewExcuseRequest: async (requestId: number, action: 'approve' | 'deny') =>
+    api.patch(`/excuse-requests/${requestId}`, { action }).then((r) => r.data),
 };
 
 export default facultyService;

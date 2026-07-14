@@ -1,35 +1,66 @@
 import { create } from 'zustand';
 import { hrService, type Teacher, type Faculty, type Department } from '@/services/hrService';
 
+const STALE_MS = 30_000; // 30 seconds
+
 interface HrState {
   teachers: Teacher[];
   faculties: Faculty[];
   departments: Department[];
   isLoading: boolean;
   error: string | null;
-  
+  lastFetchedAt: number | null;
+
+  /** Fetch all HR data in one parallel shot. Skips if data is < 30 s old. */
+  fetchAll: () => Promise<void>;
+  /** Force-refetch (ignores stale window — use after mutations). */
+  refetchAll: () => Promise<void>;
+
+  // Kept for components that need individual slices (e.g. TeacherModal dropdowns)
   fetchTeachers: () => Promise<void>;
   fetchFaculties: () => Promise<void>;
   fetchDepartments: () => Promise<void>;
-  
-  addTeacher: (data: Omit<Teacher, 'id' | 'status' | 'userId'>) => Promise<void>;
-  updateTeacher: (id: string, data: Partial<Teacher>) => Promise<void>;
+
+  addTeacher: (data: Omit<Teacher, 'id' | 'status' | 'userId' | 'linkedUsername'>) => Promise<void>; // phone/email/hireDate are optional inside Teacher
+  updateTeacher: (id: string, data: Partial<Teacher>) => Promise<Teacher>;
   deleteTeacher: (id: string) => Promise<void>;
+  linkUser: (teacherId: string, userId: string | null) => Promise<void>;
 }
 
-export const useHrStore = create<HrState>((set) => ({
+export const useHrStore = create<HrState>((set, get) => ({
   teachers: [],
   faculties: [],
   departments: [],
   isLoading: false,
   error: null,
+  lastFetchedAt: null,
+
+  fetchAll: async () => {
+    const { lastFetchedAt } = get();
+    if (lastFetchedAt && Date.now() - lastFetchedAt < STALE_MS) return;
+    await get().refetchAll();
+  },
+
+  refetchAll: async () => {
+    set({ isLoading: true, error: null });
+    try {
+      const [teachers, faculties, departments] = await Promise.all([
+        hrService.getTeachers(),
+        hrService.getFaculties(),
+        hrService.getDepartments(),
+      ]);
+      set({ teachers, faculties, departments, isLoading: false, lastFetchedAt: Date.now() });
+    } catch {
+      set({ error: 'Failed to load HR data', isLoading: false });
+    }
+  },
 
   fetchTeachers: async () => {
     set({ isLoading: true, error: null });
     try {
       const teachers = await hrService.getTeachers();
       set({ teachers, isLoading: false });
-    } catch (error) {
+    } catch {
       set({ error: 'Failed to fetch teachers', isLoading: false });
     }
   },
@@ -38,7 +69,7 @@ export const useHrStore = create<HrState>((set) => ({
     try {
       const faculties = await hrService.getFaculties();
       set({ faculties });
-    } catch (error) {
+    } catch {
       set({ error: 'Failed to fetch faculties' });
     }
   },
@@ -47,7 +78,7 @@ export const useHrStore = create<HrState>((set) => ({
     try {
       const departments = await hrService.getDepartments();
       set({ departments });
-    } catch (error) {
+    } catch {
       set({ error: 'Failed to fetch departments' });
     }
   },
@@ -56,12 +87,14 @@ export const useHrStore = create<HrState>((set) => ({
     set({ isLoading: true, error: null });
     try {
       const newTeacher = await hrService.addTeacher(data);
-      set((state) => ({ 
+      set((state) => ({
         teachers: [...state.teachers, newTeacher],
-        isLoading: false 
+        isLoading: false,
+        lastFetchedAt: null, // bust cache so next visit re-fetches
       }));
     } catch (error) {
-      set({ error: (error as Error).message, isLoading: false });
+      set({ isLoading: false });
+      throw error;
     }
   },
 
@@ -73,8 +106,10 @@ export const useHrStore = create<HrState>((set) => ({
         teachers: state.teachers.map((t) => (t.id === id ? updatedTeacher : t)),
         isLoading: false,
       }));
+      return updatedTeacher;
     } catch (error) {
-      set({ error: (error as Error).message, isLoading: false });
+      set({ isLoading: false });
+      throw error;
     }
   },
 
@@ -82,12 +117,28 @@ export const useHrStore = create<HrState>((set) => ({
     set({ isLoading: true, error: null });
     try {
       await hrService.deleteTeacher(id);
-      set((state) => ({ 
+      set((state) => ({
         teachers: state.teachers.filter(t => t.id !== id),
-        isLoading: false 
+        isLoading: false,
+        lastFetchedAt: null,
       }));
     } catch (error) {
-      set({ error: 'Failed to delete teacher', isLoading: false });
+      set({ isLoading: false });
+      throw error;
     }
-  }
+  },
+
+  linkUser: async (teacherId, userId) => {
+    set({ isLoading: true, error: null });
+    try {
+      const updatedTeacher = await hrService.linkUser(teacherId, userId);
+      set((state) => ({
+        teachers: state.teachers.map((t) => (t.id === teacherId ? updatedTeacher : t)),
+        isLoading: false,
+      }));
+    } catch (error) {
+      set({ isLoading: false });
+      throw error;
+    }
+  },
 }));

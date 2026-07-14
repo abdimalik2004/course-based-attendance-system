@@ -4,7 +4,6 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { Modal } from "@/components/ui/Modal";
 import { Input } from "@/components/ui/Input";
-import { Select } from "@/components/ui/Select";
 import { Button } from "@/components/ui/Button";
 import { useAcademiaStore } from "@/store/useAcademiaStore";
 
@@ -13,15 +12,13 @@ const structureSchema = z.object({
   term: z.string().min(3, "Term name required"),
   startDate: z.string().min(1, "Start Date is required"),
   endDate: z.string().min(1, "End Date is required"),
-  status: z.enum(["Active", "Inactive", "Draft"]),
 });
 
 type StructureFormData = z.infer<typeof structureSchema>;
 
-/** Convert an ISO date string or Date to "YYYY-MM-DD" for <input type="date"> */
+/** Convert an ISO date string to "YYYY-MM-DD" for <input type="date"> */
 function toDateInput(value: string | undefined): string {
   if (!value) return "";
-  // Already in YYYY-MM-DD form
   if (/^\d{4}-\d{2}-\d{2}$/.test(value)) return value;
   const d = new Date(value);
   if (isNaN(d.getTime())) return "";
@@ -45,7 +42,6 @@ export function AddStructureModal() {
     reset,
   } = useForm<StructureFormData>({
     resolver: zodResolver(structureSchema),
-    defaultValues: { status: "Draft" },
   });
 
   // Pre-fill form when editing, clear when creating
@@ -60,10 +56,9 @@ export function AddStructureModal() {
         term: record.term ?? "",
         startDate: toDateInput(record.startDate),
         endDate: toDateInput(record.endDate),
-        status: record.status ?? "Draft",
       });
     } else {
-      reset({ academicYear: "", term: "", startDate: "", endDate: "", status: "Draft" });
+      reset({ academicYear: "", term: "", startDate: "", endDate: "" });
     }
   }, [isOpen, isEdit, record, reset]);
 
@@ -78,7 +73,6 @@ export function AddStructureModal() {
       }
       closeModal("structure");
     } catch (error: any) {
-      console.error(error);
       const msg =
         error?.response?.data?.detail ??
         error?.response?.data?.error?.message ??
@@ -103,6 +97,7 @@ export function AddStructureModal() {
             {submitError}
           </div>
         )}
+
         <div>
           <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5 ml-1">
             Academic Year
@@ -113,6 +108,7 @@ export function AddStructureModal() {
             error={errors.academicYear?.message}
           />
         </div>
+
         <div>
           <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5 ml-1">
             Term Name
@@ -123,6 +119,7 @@ export function AddStructureModal() {
             error={errors.term?.message}
           />
         </div>
+
         <div className="grid grid-cols-2 gap-4">
           <div>
             <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5 ml-1">
@@ -147,26 +144,14 @@ export function AddStructureModal() {
             />
           </div>
         </div>
-        <div>
-          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5 ml-1">
-            Status
-          </label>
-          <Select
-            options={[
-              { value: "Active", label: "Active" },
-              { value: "Draft", label: "Draft" },
-              { value: "Inactive", label: "Inactive" },
-            ]}
-            {...register("status")}
-            error={errors.status?.message}
-          />
-        </div>
-        <div className="flex items-center justify-end gap-3 pt-6 mt-6">
-          <Button
-            type="button"
-            variant="ghost"
-            onClick={() => closeModal("structure")}
-          >
+
+        <p className="text-xs text-gray-500 dark:text-gray-400 px-1">
+          Status is set automatically: <strong>Active</strong> while today falls between the dates,{" "}
+          <strong>Inactive</strong> once the end date passes, <strong>Draft</strong> before the start date.
+        </p>
+
+        <div className="flex items-center justify-end gap-3 pt-4 mt-2">
+          <Button type="button" variant="ghost" onClick={() => closeModal("structure")}>
             Cancel
           </Button>
           <Button type="submit" isLoading={isSubmitting}>

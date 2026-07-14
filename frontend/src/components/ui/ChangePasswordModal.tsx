@@ -79,8 +79,8 @@ export function ChangePasswordModal() {
       setError("All fields are required.");
       return;
     }
-    if (next.length < 8) {
-      setError("New password must be at least 8 characters.");
+    if (next.length < 6) {
+      setError("New password must be at least 6 characters.");
       return;
     }
     if (next !== confirm) {
@@ -121,20 +121,35 @@ export function ChangePasswordModal() {
           label="Current Password"
           value={current}
           onChange={setCurrent}
-          placeholder="Enter current password"
+          placeholder="Enter your current password"
         />
         <PasswordField
           label="New Password"
           value={next}
           onChange={setNext}
-          placeholder="At least 8 characters"
+          placeholder="Minimum 6 characters"
         />
-        <PasswordField
-          label="Confirm New Password"
-          value={confirm}
-          onChange={setConfirm}
-          placeholder="Repeat new password"
-        />
+        <div className="space-y-1">
+          <PasswordField
+            label="Confirm New Password"
+            value={confirm}
+            onChange={setConfirm}
+            placeholder="Re-enter your new password"
+          />
+          {confirm.length > 0 && (
+            confirm !== next ? (
+              <p className="text-xs text-red-400 ml-1 flex items-center gap-1">
+                <AlertCircle size={11} />
+                Passwords do not match.
+              </p>
+            ) : (
+              <p className="text-xs text-emerald-500 ml-1 flex items-center gap-1">
+                <CheckCircle size={11} />
+                Passwords matched.
+              </p>
+            )
+          )}
+        </div>
 
         {error && (
           <div className="flex items-center gap-2 text-sm text-rose-500 dark:text-rose-400">

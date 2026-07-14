@@ -97,11 +97,6 @@ def create_department(
     db.add(obj)
     try:
         db.commit()
-        log_activity(
-            action=f"Department Created - {payload.name}",
-            user=current_user,
-            db=db,
-        )
     except IntegrityError as exc:
         db.rollback()
         error_kind = classify_integrity_error(exc)
@@ -135,6 +130,11 @@ def create_department(
         logger.exception("Unexpected integrity error while creating department")
         raise HTTPException(status_code=400, detail="Department could not be created due to invalid data") from exc
     db.refresh(obj)
+    log_activity(
+        action=f"Department Created - {obj.name}",
+        user=current_user,
+        db=db,
+    )
     notify_faculty_admins(
         db, obj.faculty_id,
         title="New Department Created",

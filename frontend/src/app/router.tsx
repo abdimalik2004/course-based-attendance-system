@@ -9,12 +9,16 @@ const UsersManagement = lazy(() => import('@/pages/admin/UsersManagement'));
 const SystemReports = lazy(() => import('@/pages/admin/SystemReports'));
 const Attendance = lazy(() => import('@/pages/admin/Attendance'));
 const AdminAttendanceList = lazy(() => import('@/pages/admin/AttendanceList'));
+const AdminActivityLog = lazy(() => import('@/pages/admin/ActivityLog'));
 const RolesManagement = lazy(() => import('@/pages/admin/RolesManagement'));
 const SettingsLayout = lazy(() => import('@/pages/admin/settings/SettingsLayout'));
 // Admin cross-module views (reuse existing page components)
 const AdminStudents = lazy(() => import('@/pages/admission/Students'));
 const AdminTeachers = lazy(() => import('@/pages/hr/Teachers'));
 const AdminFaculties = lazy(() => import('@/pages/academia/Faculties'));
+
+// Shared profile page (Admin, HR, Academia, Admissions, Faculty)
+const UserProfile = lazy(() => import('@/pages/shared/UserProfile'));
 
 // Academia Imports
 const AcademiaLayout = lazy(() => import('@/components/academia/Layout'));
@@ -24,6 +28,7 @@ const Departments = lazy(() => import('@/pages/academia/Departments'));
 const Courses = lazy(() => import('@/pages/academia/Courses'));
 const Classes = lazy(() => import('@/pages/academia/Classes'));
 const AcademicStructure = lazy(() => import('@/pages/academia/Academic-Structure'));
+const AcademiaReports = lazy(() => import('@/pages/academia/Reports'));
 
 // HR Imports
 const HRLayout = lazy(() => import('@/components/hr/Layout'));
@@ -51,6 +56,7 @@ const FacultyTeachers = lazy(() => import('@/pages/faculty/Teachers'));
 const FacultyDepartments = lazy(() => import('@/pages/faculty/Departments'));
 const FacultyClasses = lazy(() => import('@/pages/faculty/Classes'));
 const FacultyCourses = lazy(() => import('@/pages/faculty/Courses'));
+const FacultyExcuseRequests = lazy(() => import('@/pages/faculty/ExcuseRequests'));
 
 // Teacher Imports
 const TeacherLayout = lazy(() => import('@/components/teacher/Layout'));
@@ -58,12 +64,15 @@ const TeacherDashboard = lazy(() => import('@/pages/teacher/Dashboard'));
 const TeacherAttendance = lazy(() => import('@/pages/teacher/Attendance'));
 const TeacherAttendanceList = lazy(() => import('@/pages/teacher/AttendanceList'));
 const TeacherSchedule = lazy(() => import('@/pages/teacher/Schedule'));
+const TeacherProfile = lazy(() => import('@/pages/teacher/Profile'));
+const TeacherCourses = lazy(() => import('@/pages/teacher/Courses'));
 
 // Student Imports
 const StudentLayout = lazy(() => import('@/components/student/Layout'));
 const StudentDashboard = lazy(() => import('@/pages/student/Dashboard'));
 const StudentAttendance = lazy(() => import('@/pages/student/Attendance'));
 const StudentSchedule = lazy(() => import('@/pages/student/Schedule'));
+const StudentProfile = lazy(() => import('@/pages/student/Profile'));
 
 export const router = createBrowserRouter([
   {
@@ -120,6 +129,14 @@ export const router = createBrowserRouter([
             element: <FacultyCourses />,
           },
           {
+            path: 'excuse-requests',
+            element: <FacultyExcuseRequests />,
+          },
+          {
+            path: 'profile',
+            element: <UserProfile />,
+          },
+          {
             path: '*',
             element: <AccessDenied />,
           },
@@ -165,6 +182,10 @@ export const router = createBrowserRouter([
             element: <AdminAttendanceList />,
           },
           {
+            path: 'activity-log',
+            element: <AdminActivityLog />,
+          },
+          {
             path: 'settings',
             element: <SettingsLayout />,
           },
@@ -180,6 +201,10 @@ export const router = createBrowserRouter([
           {
             path: 'faculties',
             element: <AdminFaculties />,
+          },
+          {
+            path: 'profile',
+            element: <UserProfile />,
           },
           {
             path: '*',
@@ -227,6 +252,14 @@ export const router = createBrowserRouter([
             element: <AcademicStructure />,
           },
           {
+            path: 'reports',
+            element: <AcademiaReports />,
+          },
+          {
+            path: 'profile',
+            element: <UserProfile />,
+          },
+          {
             path: '*',
             element: <AccessDenied />,
           },
@@ -269,6 +302,10 @@ export const router = createBrowserRouter([
             element: <HRSettings />,
           },
           {
+            path: 'profile',
+            element: <UserProfile />,
+          },
+          {
             path: '*',
             element: <AccessDenied />,
           },
@@ -304,6 +341,10 @@ export const router = createBrowserRouter([
           {
             path: 'face-registration',
             element: <AdmissionFaceRegistration />,
+          },
+          {
+            path: 'profile',
+            element: <UserProfile />,
           },
           {
             path: '*',
@@ -343,6 +384,14 @@ export const router = createBrowserRouter([
             element: <TeacherSchedule />,
           },
           {
+            path: 'profile',
+            element: <TeacherProfile />,
+          },
+          {
+            path: 'courses',
+            element: <TeacherCourses />,
+          },
+          {
             path: '*',
             element: <AccessDenied />,
           },
@@ -374,6 +423,10 @@ export const router = createBrowserRouter([
           {
             path: 'schedule',
             element: <StudentSchedule />,
+          },
+          {
+            path: 'profile',
+            element: <StudentProfile />,
           },
           {
             path: '*',

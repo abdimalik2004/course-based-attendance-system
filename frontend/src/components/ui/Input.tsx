@@ -12,6 +12,7 @@ const Input = forwardRef<HTMLInputElement, InputProps>(
       <div className="w-full relative">
         <input
           ref={ref}
+          dir="ltr"
           className={cn(
             'flex h-12 w-full rounded-xl glass-input px-4 py-2 text-sm text-gray-100 placeholder:text-gray-400 disabled:cursor-not-allowed disabled:opacity-50 transition-all',
             error && 'border-red-500 focus:border-red-500 focus:ring-red-500',

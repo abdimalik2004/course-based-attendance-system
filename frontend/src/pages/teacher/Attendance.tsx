@@ -3,7 +3,7 @@ import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import * as z from "zod";
 import { motion, AnimatePresence } from "framer-motion";
-import { Play, X } from "lucide-react";
+import { Play, X, Plus, ChevronDown, ChevronUp } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
@@ -11,9 +11,10 @@ import { useAttendanceStore } from "@/store/useAttendanceStore";
 import ScannerInterface from "@/components/attendance/ScannerInterface";
 import { cn } from "@/utils/cn";
 import { useQuery } from "@tanstack/react-query";
-import courseService from "@/services/courseService";
+import { useLocation, useNavigate } from "react-router-dom";
+import teacherService from "@/services/teacherService";
 import attendanceService from "@/services/attendanceService";
-import { useAuthStore } from '@/store/useAuthStore';
+import { useTeacherId } from "@/store/useTeacherStore";
 
 const attendanceSchema = z.object({
   course_id: z.string().min(1, "Course is required"),
@@ -32,20 +33,26 @@ const attendanceSchema = z.object({
 type AttendanceForm = z.infer<typeof attendanceSchema>;
 
 export default function TeacherAttendance() {
+  const location = useLocation();
+  const navigate = useNavigate();
   const {
     sessionState,
     startSession,
     resetSession,
     setActiveSession,
+    activeSessionId,
+    justEndedSession,
+    lastEndedCourseName,
+    dismissEndedBanner,
   } = useAttendanceStore();
   const [sessionError, setSessionError] = useState<string | null>(null);
+  const [showNotes, setShowNotes] = useState(false);
   const { data: activeSessions } = useQuery({
     queryKey: ["teacherActiveSessions"],
     queryFn: () => attendanceService.listActiveSessions(),
-    refetchInterval: 15_000,
+    refetchInterval: 5_000,
   });
-  const { user } = useAuthStore();
-  const teacherId = Number(user?.teacherId ?? user?.id ?? 0);
+  const { teacherId, isUnlinked: isTeacherUnlinked } = useTeacherId();
 
   const {
     data: coursesData,
@@ -54,37 +61,26 @@ export default function TeacherAttendance() {
     error: coursesErrorObj,
     refetch: refetchCourses,
   } = useQuery({
-    queryKey: ["teacherAttendanceCourses", teacherId],
-    queryFn: () =>
-      courseService.listAssignments({ teacher_id: teacherId, skip: 0, limit: 200 }),
+    queryKey: ["teacherCourses", teacherId],
+    queryFn: () => teacherService.getAssignedCourses(teacherId),
     enabled: !!teacherId,
     retry: false,
   });
 
-  // Fetch the full course list (TEACHER role is scoped to their faculty by the backend)
-  // so we can look up course titles from the assignment's course_id.
-  // Note: GET /courses/{id} does not exist, so we fetch all courses in one call instead.
-  const { data: allCoursesData } = useQuery({
-    queryKey: ["teacherAllCourses"],
-    queryFn: () => courseService.listCourses({ limit: 200 }),
-    staleTime: 1000 * 60 * 5,
-  });
-
+  // listAssignments already returns course_title from the backend join —
+  // no need for a separate full-catalogue fetch.
   const teacherCourses = useMemo(() => {
     const assignments = coursesData?.items ?? coursesData ?? [];
-    const allCourses: any[] = allCoursesData?.items ?? allCoursesData ?? [];
-
     return assignments.map((assignment: any) => {
-      // assignment = { id, course_id, teacher_id, is_primary }
+      // assignment = { id, course_id, teacher_id, is_primary, course_title, course_code }
       const courseId = String(assignment.course_id ?? assignment.id);
-      const courseDetail = allCourses.find((c: any) => String(c.id) === courseId);
       return {
         id: courseId,
-        name: courseDetail?.title ?? courseDetail?.name ?? `Course ${courseId}`,
-        class_name: courseDetail?.department_name ?? "",
+        name: assignment.course_title ?? assignment.course_name ?? `Course ${courseId}`,
+        class_name: assignment.department_name ?? "",
       };
     });
-  }, [coursesData, allCoursesData]);
+  }, [coursesData]);
 
   // Only the session THIS teacher personally started (teacher_id matches their DB id)
   const myActiveSession = useMemo(() => {
@@ -101,10 +97,37 @@ export default function TeacherAttendance() {
   const hasCourses = teacherCourses.length > 0;
   const courseQueryError = coursesError ? (coursesErrorObj as Error)?.message ?? 'Unable to load assigned courses.' : null;
 
-  // Reset session when navigating to this page
+  // Auto-select the course when the teacher has exactly one assigned course —
+  // no point making them click through a one-item dropdown on every session.
   useEffect(() => {
-    resetSession();
-  }, [resetSession]);
+    if (teacherCourses.length === 1 && !watch("course_id")) {
+      setValue("course_id", teacherCourses[0].id, { shouldValidate: true });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [teacherCourses]);
+
+  // Pre-select a course when navigated from Dashboard "Start" shortcut.
+  // The state is { course_id: number }; only apply once courses have loaded.
+  useEffect(() => {
+    const navCourseId = (location.state as any)?.course_id;
+    if (!navCourseId || teacherCourses.length === 0) return;
+    const match = teacherCourses.find((c) => c.id === String(navCourseId));
+    if (match && !watch("course_id")) {
+      setValue("course_id", match.id, { shouldValidate: true });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [location.state, teacherCourses]);
+
+  // Only reset session state when navigating to this page if there is no
+  // active session already tracked in the store. Without this guard,
+  // navigating away mid-session and coming back would clear the scanner state
+  // even though the server-side session is still ACTIVE.
+  useEffect(() => {
+    if (!activeSessionId) {
+      resetSession();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const {
     register,
@@ -119,7 +142,7 @@ export default function TeacherAttendance() {
       course_id: "",
       schedule_id: "",
       class_id: "",
-      session_type: "" as any,
+      session_type: "Lecture", // Most common type; teacher changes if different
       camera_index: 0,
       notes: "",
     },
@@ -162,10 +185,8 @@ export default function TeacherAttendance() {
   }, [courseActiveSession]);
 
   const handleResumeSession = (session: any) => {
-    const allCourses: any[] = allCoursesData?.items ?? allCoursesData ?? [];
     const courseName =
       teacherCourses.find((c) => c.id === String(session.course_id))?.name ??
-      allCourses.find((c: any) => String(c.id) === String(session.course_id))?.title ??
       `Course ${session.course_id}`;
     setActiveSession(Number(session.id), courseName);
     startSession({ sessionId: Number(session.id), courseName });
@@ -312,6 +333,7 @@ export default function TeacherAttendance() {
         course_id: Number(formData.course_id),
         schedule_id: formData.schedule_id ? Number(formData.schedule_id) : null,
         session_type: formData.session_type,
+        notes: formData.notes?.trim() || null,
       });
 
       // Backend returns { session, ok, message } or the session object directly
@@ -371,6 +393,46 @@ export default function TeacherAttendance() {
                 Create a new attendance session for your class.
               </p>
             </div>
+
+            {/* Session-ended confirmation banner — shown right after the teacher ends a session */}
+            {justEndedSession && (
+              <div className="mb-6 rounded-2xl border border-emerald-200 dark:border-emerald-500/20 bg-emerald-50 dark:bg-emerald-500/10 p-4 text-sm text-emerald-800 dark:text-emerald-200">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="space-y-1">
+                    <div className="font-semibold flex items-center gap-2">
+                      <span>✓</span>
+                      <span>Session ended{lastEndedCourseName ? ` — ${lastEndedCourseName}` : ""}</span>
+                    </div>
+                    <div className="text-emerald-700 dark:text-emerald-300 text-xs">
+                      Attendance records have been saved.
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2 shrink-0">
+                    <button
+                      type="button"
+                      onClick={() => navigate("/teacher/attendance-list")}
+                      className="px-3 py-1.5 text-xs font-semibold rounded-lg bg-emerald-600 text-white hover:bg-emerald-700 transition-colors"
+                    >
+                      View Records
+                    </button>
+                    <button
+                      type="button"
+                      onClick={dismissEndedBanner}
+                      className="text-emerald-500 hover:text-emerald-700 transition-colors p-0.5"
+                      aria-label="Dismiss"
+                    >
+                      <X size={16} />
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {isTeacherUnlinked && (
+              <div className="mb-6 rounded-2xl border border-amber-200 dark:border-amber-500/20 bg-amber-50 dark:bg-amber-500/10 p-4 text-sm text-amber-800 dark:text-amber-200">
+                Your account is not yet linked to a teacher profile. Contact HR to link your login account before you can start attendance sessions.
+              </div>
+            )}
 
             {sessionError && (
               <div className="mb-6 rounded-2xl border border-rose-300 dark:border-rose-500/30 bg-rose-50 dark:bg-rose-500/10 p-4 text-sm text-rose-800 dark:text-rose-200 space-y-1">
@@ -586,7 +648,7 @@ export default function TeacherAttendance() {
                     {/* Camera Index */}
                     <div className="space-y-2">
                       <label className="text-sm font-medium text-gray-700 dark:text-gray-300 ml-1">
-                        Camera Index <span className="text-red-500">*</span>
+                        Camera
                       </label>
                       <Input
                         {...register("camera_index")}
@@ -596,17 +658,45 @@ export default function TeacherAttendance() {
                         className="glass-input"
                         error={errors.camera_index?.message}
                       />
+                      <p className="text-xs text-gray-400 dark:text-gray-500 ml-1">
+                        0 = built-in / default camera · 1, 2, … = external cameras
+                      </p>
                     </div>
 
-                    <div className="space-y-2">
-                      <label className="text-sm font-medium text-gray-700 dark:text-gray-300 ml-1">
-                        Notes (Optional)
-                      </label>
-                      <textarea
-                        {...register("notes")}
-                        placeholder="Add any specific notes for this session..."
-                        className="w-full rounded-xl glass-input px-4 py-3 text-sm text-gray-900 dark:text-gray-100 transition-all min-h-[120px] resize-y placeholder:text-gray-400 focus:border-primary focus:ring-primary dark:focus:border-primary-accent dark:focus:ring-primary-accent"
-                      />
+                    {/* Notes — collapsed by default; expand on demand */}
+                    <div>
+                      {!showNotes ? (
+                        <button
+                          type="button"
+                          onClick={() => setShowNotes(true)}
+                          className="inline-flex items-center gap-1.5 text-sm text-primary hover:text-primary/80 transition-colors"
+                        >
+                          <Plus size={14} />
+                          Add session notes
+                          <ChevronDown size={14} className="text-gray-400" />
+                        </button>
+                      ) : (
+                        <div className="space-y-2">
+                          <div className="flex items-center justify-between">
+                            <label className="text-sm font-medium text-gray-700 dark:text-gray-300 ml-1">
+                              Notes <span className="text-gray-400 font-normal">(optional)</span>
+                            </label>
+                            <button
+                              type="button"
+                              onClick={() => { setShowNotes(false); setValue("notes", ""); }}
+                              className="inline-flex items-center gap-1 text-xs text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 transition-colors"
+                            >
+                              <ChevronUp size={12} />
+                              Hide
+                            </button>
+                          </div>
+                          <textarea
+                            {...register("notes")}
+                            placeholder="Add any specific notes for this session..."
+                            className="w-full rounded-xl glass-input px-4 py-3 text-sm text-gray-900 dark:text-gray-100 transition-all min-h-[80px] resize-y placeholder:text-gray-400 focus:border-primary focus:ring-primary dark:focus:border-primary-accent dark:focus:ring-primary-accent"
+                          />
+                        </div>
+                      )}
                     </div>
                   </div>
 
@@ -617,7 +707,7 @@ export default function TeacherAttendance() {
                       onClick={() => reset()}
                     >
                       <X size={18} className="mr-2" />
-                      Cancel
+                      Clear
                     </Button>
                     <Button
                       type="submit"

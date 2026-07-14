@@ -49,12 +49,14 @@ class AttendanceSessionRead(BaseModel):
     course_name: str | None = None
     course_code: str | None = None
     grace_period_minutes: int | None = None
+    notes: str | None = None
 
 
 class AttendanceSessionStartRequest(BaseModel):
     course_id: int = Field(gt=0)
     schedule_id: int | None = None
     session_type: SessionType = Field(default=SessionType.LECTURE)
+    notes: str | None = None
 
 
 class AttendanceSessionEndRequest(BaseModel):

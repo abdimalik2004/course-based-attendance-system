@@ -1,6 +1,10 @@
 from __future__ import annotations
 
+import logging
+
 from fastapi import APIRouter, Depends, HTTPException, status, Request, Response
+
+logger = logging.getLogger(__name__)
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -18,7 +22,7 @@ from app.core.security import (
     TokenPayloadError,
     verify_password,
 )
-from app.db.models import Role, User
+from app.db.models import Faculty, Role, User
 from app.db.session import get_db
 from app.db.reset_database import reset_database_to_clean_state
 from app.schemas.auth import (
@@ -262,6 +266,9 @@ def login_for_access_token(
     dependencies=[Depends(rate_limit_dependency(settings.auth_rate_limit_requests, settings.auth_rate_limit_window_seconds))],
 )
 def refresh_tokens(request: Request, response: Response, db: Session = Depends(get_db)):
+    from datetime import datetime, timezone
+    from jose import jwt as jose_jwt, JWTError
+
     # Read refresh token from httpOnly cookie
     cookie_token = request.cookies.get("refresh_token")
     if not cookie_token:
@@ -275,6 +282,25 @@ def refresh_tokens(request: Request, response: Response, db: Session = Depends(g
     user = db.query(User).filter(User.username == username).first()
     if not user or not user.is_active:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid refresh token")
+
+    # Enforce session timeout — a refresh must not resurrect a session that exceeded the limit
+    try:
+        refresh_payload = jose_jwt.decode(cookie_token, settings.secret_key, algorithms=[settings.jwt_algorithm])
+        iat: int | None = refresh_payload.get("iat")
+        if iat is not None:
+            from app.db.models import SystemSetting
+            from app.core.security import _TIMEOUT_SECONDS
+            setting = db.query(SystemSetting).filter(SystemSetting.key == "security.session_timeout").first()
+            if setting and setting.value in _TIMEOUT_SECONDS:
+                timeout_secs = _TIMEOUT_SECONDS[setting.value]
+                if datetime.now(timezone.utc).timestamp() > iat + timeout_secs:
+                    response.delete_cookie("refresh_token", path="/")
+                    raise HTTPException(
+                        status_code=status.HTTP_401_UNAUTHORIZED,
+                        detail="Session expired. Please log in again.",
+                    )
+    except JWTError:
+        pass  # already validated above; decoding again just for iat — ignore errors
 
     access_token = create_access_token(subject=user.username)
     refresh_token = create_refresh_token(subject=user.username)
@@ -308,8 +334,25 @@ def logout(response: Response, current_user: User = Depends(get_current_user)):
 
 
 @router.get("/me", response_model=UserRead)
-def read_current_user(user: User = Depends(get_current_user)):
-    return user
+def read_current_user(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    faculty_name: str | None = None
+    if user.faculty_id:
+        faculty = db.query(Faculty).filter(Faculty.id == user.faculty_id).first()
+        faculty_name = faculty.name if faculty else None
+    return {
+        "id": user.id,
+        "username": user.username,
+        "email": user.email,
+        "is_active": user.is_active,
+        "faculty_id": user.faculty_id,
+        "faculty_name": faculty_name,
+        "teacher_id": user.teacher_id,
+        "student_id": user.student_id,
+        "student_number": user.student_number,
+        "role_names": user.role_names,
+        "profile_image_url": user.profile_image_url,
+        "full_name": user.full_name,
+    }
 
 
 @router.post(
@@ -358,6 +401,13 @@ def forgot_password(payload: ForgotPasswordRequest, db: Session = Depends(get_db
             # be tested without a Gmail account set up. In production this field
             # is never returned (SMTP must be properly configured there).
             dev_code = code
+            logger.warning(
+                "\n%s\n  DEV — Password Reset Code\n  Email : %s\n  Code  : %s\n%s",
+                "=" * 55, email, code, "=" * 55,
+            )
+    else:
+        if settings.app_env != "production":
+            logger.warning("Forgot-password: no account found with email '%s' — check users.email in DB", email)
 
     response: dict = {"ok": True, "message": "If that email is registered, a reset code has been sent."}
     if dev_code:

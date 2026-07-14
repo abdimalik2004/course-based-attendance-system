@@ -1,6 +1,8 @@
 from __future__ import annotations
 
-from pydantic import BaseModel, ConfigDict, Field
+from datetime import date
+
+from pydantic import BaseModel, ConfigDict, EmailStr, Field
 
 from app.db.models import TeacherRole, TeacherStatus
 
@@ -23,6 +25,9 @@ class TeacherCreate(BaseModel):
                 "status": "Active",
                 "faculty_id": 1,
                 "department_id": 1,
+                "phone": "+252 61 234 5678",
+                "email": "s.ahmed@university.edu",
+                "hire_date": "2023-09-01",
             }
         }
     )
@@ -32,6 +37,9 @@ class TeacherCreate(BaseModel):
     status: TeacherStatus = TeacherStatus.ACTIVE
     faculty_id: int = Field(gt=0)
     department_id: int = Field(gt=0)
+    phone: str | None = Field(default=None, max_length=30)
+    email: EmailStr | None = None
+    hire_date: date | None = None
 
 
 class TeacherUpdate(BaseModel):
@@ -40,7 +48,7 @@ class TeacherUpdate(BaseModel):
             "example": {
                 "full_name": "Dr. Updated Name",
                 "role": "Professor",
-                "status": "Onleave",
+                "status": "On Leave",
                 "faculty_id": 1,
                 "department_id": 1,
             }
@@ -53,12 +61,30 @@ class TeacherUpdate(BaseModel):
     status: TeacherStatus | None = None
     faculty_id: int | None = Field(default=None, gt=0)
     department_id: int | None = Field(default=None, gt=0)
+    phone: str | None = Field(default=None, max_length=30)
+    email: EmailStr | None = None
+    hire_date: date | None = None
 
 
 class TeacherRead(TeacherBase):
     model_config = ConfigDict(from_attributes=True)
 
     id: int
+    user_id: int | None = None
+    linked_username: str | None = None
+    phone: str | None = None
+    email: str | None = None
+    hire_date: date | None = None
+    faculty_name: str | None = None
+    department_name: str | None = None
+
+
+class LinkUserPayload(BaseModel):
+    """Payload for PATCH /teachers/{id}/link-user.
+
+    Pass user_id to link an account, or null to unlink the current one.
+    """
+    user_id: int | None = None
 
 
 class PaginatedTeacherRead(BaseModel):

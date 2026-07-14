@@ -104,7 +104,7 @@ class TeacherRole(str, enum.Enum):
 
 class TeacherStatus(str, enum.Enum):
     ACTIVE = "Active"
-    ONLEAVE = "Onleave"
+    ONLEAVE = "On Leave"
     INACTIVE = "Inactive"
 
 
@@ -261,6 +261,9 @@ class Student(Base):
     faculty_id: Mapped[int] = mapped_column(ForeignKey("faculties.id", ondelete="CASCADE"), nullable=False)
     department_id: Mapped[int] = mapped_column(ForeignKey("departments.id", ondelete="CASCADE"), nullable=False)
     embedding_ref: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    date_of_birth: Mapped[date | None] = mapped_column(Date, nullable=True)
+    phone: Mapped[str | None] = mapped_column(String(30), nullable=True)
+    email: Mapped[str | None] = mapped_column(String(180), nullable=True)
     status: Mapped[StudentAdmissionStatus] = mapped_column(
         Enum(
             StudentAdmissionStatus,
@@ -306,11 +309,19 @@ class Teacher(Base):
     faculty_id: Mapped[int] = mapped_column(ForeignKey("faculties.id", ondelete="CASCADE"), nullable=False)
     department_id: Mapped[int] = mapped_column(ForeignKey("departments.id", ondelete="CASCADE"), nullable=False)
     user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    phone: Mapped[str | None] = mapped_column(String(30), nullable=True)
+    email: Mapped[str | None] = mapped_column(String(180), nullable=True)
+    hire_date: Mapped[date | None] = mapped_column(Date, nullable=True)
 
     faculty: Mapped[Faculty] = relationship(back_populates="teachers")
     department: Mapped[Department] = relationship(back_populates="teachers")
     course_assignments: Mapped[list["CourseAssignment"]] = relationship(back_populates="teacher")
     user: Mapped[Optional["User"]] = relationship(back_populates="teacher", foreign_keys=[user_id])
+
+    @property
+    def linked_username(self) -> str | None:
+        """Username of the login account linked to this teacher, or None."""
+        return self.user.username if self.user is not None else None
 
 
 class Course(Base):
@@ -660,6 +671,7 @@ class AttendanceSession(Base):
         nullable=False,
     )
     status: Mapped[SessionStatus] = mapped_column(Enum(SessionStatus), default=SessionStatus.ACTIVE, nullable=False)
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     course: Mapped[Course] = relationship(back_populates="sessions")
     teacher: Mapped[Teacher | None] = relationship(foreign_keys=[teacher_id])
@@ -697,6 +709,44 @@ class AttendanceRecord(Base):
 
     student: Mapped[Student] = relationship(back_populates="attendance_records")
     session: Mapped[AttendanceSession] = relationship(back_populates="records")
+
+
+class ExcuseRequestStatus(str, enum.Enum):
+    PENDING = "PENDING"
+    APPROVED = "APPROVED"
+    DENIED = "DENIED"
+
+
+class ExcuseRequest(Base):
+    """Student-initiated excuse request for an absence on a specific date.
+
+    course_id is NULL when the student requests an excuse for ALL courses on
+    that day (e.g. illness).  When faculty approves, every matching ABSENT
+    AttendanceRecord for that student on that date (filtered by course_id if
+    provided) is automatically flipped to EXCUSED.
+    """
+
+    __tablename__ = "excuse_requests"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True, autoincrement=True)
+    student_id: Mapped[int] = mapped_column(ForeignKey("students.id", ondelete="CASCADE"), nullable=False, index=True)
+    # NULL = all courses that day; non-null = specific course
+    course_id: Mapped[int | None] = mapped_column(ForeignKey("courses.id", ondelete="CASCADE"), nullable=True, index=True)
+    request_date: Mapped[date] = mapped_column(Date, nullable=False)
+    reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    status: Mapped[ExcuseRequestStatus] = mapped_column(
+        Enum(ExcuseRequestStatus, name="excuse_request_status", native_enum=False,
+             values_callable=lambda obj: [e.value for e in obj]),
+        nullable=False,
+        default=ExcuseRequestStatus.PENDING,
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), nullable=False, index=True)
+    reviewed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    reviewed_by: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+
+    student: Mapped["Student"] = relationship(foreign_keys=[student_id])
+    course: Mapped["Course | None"] = relationship(foreign_keys=[course_id])
+    reviewer: Mapped["User | None"] = relationship(foreign_keys=[reviewed_by])
 
 
 class ActivityLogStatus(str, enum.Enum):

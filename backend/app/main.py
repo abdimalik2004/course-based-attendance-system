@@ -22,6 +22,8 @@ from app.core.startup_checks import (
     assert_required_model_files_exist,
     assert_secret_key_is_strong,
     assert_weekday_storage_schema_is_ready,
+    migrate_teacher_contact_fields,
+    migrate_teacher_status_onleave,
 )
 from app.db.models import Role, SystemSetting
 from app.db.session import SessionLocal
@@ -33,7 +35,9 @@ from app.routers import (
     classes,
     courses,
     departments,
+    excuse_requests,
     faculties,
+    notifications,
     reports,
     schedules,
     student_portal,
@@ -43,6 +47,7 @@ from app.routers import (
     # training router included separately below
 )
 from app.services.face_service import face_service
+from app.services.notification_service import set_app_event_loop
 from app.services.schedule_service import schedule_service
 from app.routers import training
 
@@ -139,8 +144,24 @@ def seed_roles() -> None:
         db.close()
 
 
+def run_pending_migrations() -> None:
+    """Auto-apply any pending Alembic migrations at startup."""
+    try:
+        from alembic.config import Config
+        from alembic import command as alembic_command
+        import os
+        # alembic.ini lives two directories above this file (backend/)
+        cfg_path = Path(__file__).parent.parent / "alembic.ini"
+        cfg = Config(str(cfg_path))
+        alembic_command.upgrade(cfg, "head")
+        logger.info("Alembic migrations applied (or already up-to-date).")
+    except Exception as exc:
+        logger.error(f"Alembic migration failed: {exc}")
+
+
 @asynccontextmanager
 async def lifespan(_: FastAPI):
+    run_pending_migrations()
     assert_secret_key_is_strong()
     assert_db_reachable()
     assert_weekday_storage_schema_is_ready()
@@ -151,6 +172,8 @@ async def lifespan(_: FastAPI):
     seed_roles()
     seed_settings()
     migrate_timezone_setting()
+    migrate_teacher_status_onleave()
+    migrate_teacher_contact_fields()
     load_timezone_from_db()
 
     # Load AI models exactly once during startup.
@@ -162,6 +185,10 @@ async def lifespan(_: FastAPI):
     face_service.load_models()
     face_service._ensure_detect_recognizer()  # keeps SCRFD + FaceNet in memory
     logger.info("Face models loaded")
+
+    # Capture the running event loop so sync route handlers can schedule
+    # coroutines via run_coroutine_threadsafe (e.g., WebSocket notification push).
+    set_app_event_loop(asyncio.get_running_loop())
 
     await schedule_service.start()
     logger.info("Startup checks passed and scheduler started")
@@ -211,8 +238,10 @@ app.include_router(schedules.router)
 app.include_router(sessions.router)
 app.include_router(attendance.router)
 app.include_router(student_portal.router)
+app.include_router(excuse_requests.router)
 app.include_router(reports.router)
 app.include_router(activity.router)
+app.include_router(notifications.router)
 from app.routers import users
 from app.routers import app_settings
 

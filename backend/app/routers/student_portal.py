@@ -1,6 +1,9 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException
+from datetime import date
+
+from fastapi import APIRouter, Body, Depends, HTTPException
+from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from app.core.security import get_current_user, require_roles
@@ -8,6 +11,12 @@ from app.db.models import User
 from app.db.role_scoped import get_role_scoped_db
 from app.schemas.student_portal import AttendanceCreate, AttendanceResponse, ScheduleCreate, ScheduleResponse
 from app.services.student_portal_service import student_portal_service
+
+
+class ExcuseRequestCreate(BaseModel):
+    request_date: date
+    course_id: int | None = None   # None = all courses that day
+    reason: str | None = None
 
 
 router = APIRouter(tags=["student-portal"])
@@ -32,6 +41,21 @@ async def get_my_attendance(
 
 
 @router.get(
+    "/student-portal/me/profile",
+    dependencies=[Depends(require_roles(*_STUDENT_ALLOWED_ROLES))],
+)
+async def get_my_profile(
+    db: Session = Depends(get_role_scoped_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Return the profile for the logged-in student."""
+    profile = student_portal_service.get_my_profile(db, current_user)
+    if profile is None:
+        return {}
+    return profile
+
+
+@router.get(
     "/student-portal/me/schedule",
     dependencies=[Depends(require_roles(*_STUDENT_ALLOWED_ROLES))],
 )
@@ -41,6 +65,80 @@ async def get_my_schedule(
 ):
     """Return the class schedule for the logged-in student."""
     return student_portal_service.get_my_schedule(db, current_user)
+
+
+@router.post(
+    "/student-portal/me/excuse-requests",
+    dependencies=[Depends(require_roles(*_STUDENT_ALLOWED_ROLES))],
+    status_code=201,
+)
+async def create_excuse_request(
+    payload: ExcuseRequestCreate,
+    db: Session = Depends(get_role_scoped_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Student submits an excuse request."""
+    from app.services.notification_service import (
+        create_notification,
+        notify_faculty_admins,
+        NotificationType,
+    )
+    result = student_portal_service.create_excuse_request(
+        db, current_user,
+        payload.request_date, payload.reason, payload.course_id,
+    )
+
+    course_label = result.get("course_name") or "all courses"
+    request_date = result.get("request_date", str(payload.request_date))
+
+    # 1. Notify all faculty users in this faculty so they see it immediately
+    if current_user.faculty_id:
+        student_name = result.get("student_name") or current_user.username
+        notify_faculty_admins(
+            db,
+            current_user.faculty_id,
+            "New Excuse Request",
+            f"{student_name} submitted an excuse request for {request_date} ({course_label}).",
+            NotificationType.INFO,
+            link="/faculty/excuse-requests",
+        )
+
+    # 2. Send the student a confirmation notification so it appears in their bell
+    create_notification(
+        db,
+        current_user.id,
+        "Excuse Request Submitted",
+        f"Your excuse request for {request_date} ({course_label}) has been submitted and is pending faculty review.",
+        NotificationType.INFO,
+        link="/student/attendance",
+    )
+
+    return result
+
+
+@router.get(
+    "/student-portal/me/excuse-requests",
+    dependencies=[Depends(require_roles(*_STUDENT_ALLOWED_ROLES))],
+)
+async def list_my_excuse_requests(
+    db: Session = Depends(get_role_scoped_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Return all excuse requests for the logged-in student."""
+    return student_portal_service.list_my_excuse_requests(db, current_user)
+
+
+@router.get(
+    "/student-portal/me/attendance/{course_id}/sessions",
+    dependencies=[Depends(require_roles(*_STUDENT_ALLOWED_ROLES))],
+)
+async def get_my_session_history(
+    course_id: int,
+    db: Session = Depends(get_role_scoped_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Return individual session-level attendance records for a specific course."""
+    return student_portal_service.get_my_session_history(db, current_user, course_id)
 
 
 # ------------------------------------------------------------------

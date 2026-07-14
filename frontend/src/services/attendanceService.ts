@@ -5,6 +5,7 @@ export const attendanceService = {
     course_id: number;
     schedule_id?: number | null;
     session_type?: string;
+    notes?: string | null;
   }) => {
     return api.post("/sessions/start", payload).then((r) => r.data);
   },

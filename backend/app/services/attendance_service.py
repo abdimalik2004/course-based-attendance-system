@@ -179,7 +179,7 @@ class AttendanceService:
             "processing_time": recognition.get("processing_time"),
         }
 
-    def start_session(self, db: Session, course_id: int, schedule_id: int | None, session_type: "SessionType", actor_id: int) -> dict:
+    def start_session(self, db: Session, course_id: int, schedule_id: int | None, session_type: "SessionType", actor_id: int, notes: str | None = None) -> dict:
         if course_id <= 0 or actor_id <= 0:
             return {"ok": False, "message": "Invalid session start payload"}
 
@@ -319,6 +319,7 @@ class AttendanceService:
             end_time=None,
             session_type=session_type,
             status=SessionStatus.ACTIVE,
+            notes=notes or None,
         )
         db.add(session)
         db.commit()

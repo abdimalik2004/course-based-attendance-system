@@ -30,6 +30,8 @@ export interface User {
   email: string;
   role: UserRole;
   facultyId: string | null;
+  teacherId?: string | null;
+  studentId?: string | null;
   identifier?: string | null;
   status: UserStatus;
   createdAt: string;

@@ -1,5 +1,6 @@
 import { useEffect, useState, useMemo } from "react";
 import { Plus, Edit2, Trash2, Users } from "lucide-react";
+import { Pagination } from "@/components/academia/Pagination";
 import { Card, CardContent } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
 import {
@@ -33,6 +34,8 @@ export default function Classes() {
   const [deleteId, setDeleteId] = useState<string | null>(null);
   const [viewClass, setViewClass] = useState<Class | null>(null);
   const [searchTerm, setSearchTerm] = useState("");
+  const [page, setPage] = useState(1);
+  const PAGE_SIZE = 10;
 
   useEffect(() => {
     fetchData();
@@ -47,6 +50,7 @@ export default function Classes() {
   };
 
   const filteredClasses = useMemo(() => {
+    setPage(1);
     return classes.filter((cls) => {
       const searchMatch = cls.name
         .toLowerCase()
@@ -60,6 +64,12 @@ export default function Classes() {
       return searchMatch || facultyMatch || deptMatch;
     });
   }, [classes, searchTerm, faculties, departments]);
+
+  const totalPages = Math.max(1, Math.ceil(filteredClasses.length / PAGE_SIZE));
+  const paginatedClasses = filteredClasses.slice(
+    (page - 1) * PAGE_SIZE,
+    page * PAGE_SIZE,
+  );
 
   return (
     <div className="space-y-6">
@@ -125,7 +135,7 @@ export default function Classes() {
                     </TableCell>
                   </TableRow>
                 ) : (
-                  filteredClasses.map((cls) => (
+                  paginatedClasses.map((cls) => (
                     <TableRow key={cls.id}>
                       <TableCell className="font-medium text-gray-900 dark:text-white">
                         {cls.name}
@@ -170,6 +180,13 @@ export default function Classes() {
               </TableBody>
             </Table>
           </div>
+          <Pagination
+            page={page}
+            totalPages={totalPages}
+            totalItems={filteredClasses.length}
+            pageSize={PAGE_SIZE}
+            onPageChange={setPage}
+          />
         </CardContent>
       </Card>
 
@@ -177,7 +194,7 @@ export default function Classes() {
       <ConfirmDeleteModal
         isOpen={!!deleteId}
         onClose={() => setDeleteId(null)}
-        onConfirm={() => deleteId && deleteClass(deleteId)}
+        onConfirm={async () => { if (deleteId) await deleteClass(deleteId); }}
       />
 
       <ViewModal

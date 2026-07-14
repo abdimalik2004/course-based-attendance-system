@@ -6,6 +6,7 @@
  */
 
 import { api } from "./api";
+import { useAuthStore } from "@/store/useAuthStore";
 
 export interface ActivityLog {
   id: number;
@@ -135,7 +136,11 @@ class ActivityService {
     // Strip scheme (http:// or https://) from the env var — we only need host[:port][/path].
     // If VITE_API_URL is empty we fall back to the current window host (production).
     const backendHost = apiBase.replace(/^https?:\/\//, "") || window.location.host;
-    const wsUrl = `${protocol}//${backendHost}/activity/ws/recent`;
+
+    // Pass the access token as a query param — WebSocket connections can't carry
+    // an Authorization header, so this is the standard alternative.
+    const token = useAuthStore.getState().accessToken ?? "";
+    const wsUrl = `${protocol}//${backendHost}/activity/ws/recent?token=${encodeURIComponent(token)}`;
 
     console.log("Connecting to WebSocket:", wsUrl);
 

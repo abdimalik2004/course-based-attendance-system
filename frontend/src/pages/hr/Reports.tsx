@@ -24,22 +24,20 @@ export default function Reports() {
     teachers,
     faculties,
     departments,
-    fetchTeachers,
-    fetchFaculties,
-    fetchDepartments,
+    fetchAll,
     isLoading,
   } = useHrStore();
 
   const [filterFaculty, setFilterFaculty] = useState("All");
   const [filterDepartment, setFilterDepartment] = useState("All");
   const [filterRole, setFilterRole] = useState("All");
+  const [startDate, setStartDate] = useState("");
+  const [endDate, setEndDate] = useState("");
   const [generateTriggered, setGenerateTriggered] = useState(false);
 
   useEffect(() => {
-    fetchTeachers();
-    fetchFaculties();
-    fetchDepartments();
-  }, [fetchTeachers, fetchFaculties, fetchDepartments]);
+    fetchAll();
+  }, [fetchAll]);
 
   const getFacultyName = (id: string) =>
     faculties.find((f) => f.id === id)?.name || id;
@@ -62,36 +60,41 @@ export default function Reports() {
   const roles = Array.from(new Set(teachers.map((teacher) => teacher.role)));
 
   const teacherPerformanceQuery = useQuery({
-    queryKey: ["hr", "teacher-performance"],
+    queryKey: ["hr", "teacher-performance", startDate, endDate],
     enabled: generateTriggered,
     queryFn: async () => {
-      const fetchAllAttendanceRecords = async () => {
+      const fetchAllSessions = async () => {
         const lim = 200;
-        let pg = 1;
-        let total = Number.POSITIVE_INFINITY;
-        const records: any[] = [];
-        while (records.length < total) {
-          const response = await api.get("/attendance/records", { params: { page: pg, limit: lim } });
-          const pageRecords = response.data?.data ?? [];
-          records.push(...pageRecords);
-          total = Number(response.data?.total ?? records.length);
-          if (pageRecords.length < lim) break;
-          pg += 1;
+        let sk = 0;
+        const results: any[] = [];
+        while (true) {
+          const r = await api.get("/sessions", { params: { limit: lim, skip: sk } });
+          const page: any[] = Array.isArray(r.data) ? r.data : (r.data?.items ?? r.data?.data ?? []);
+          results.push(...page);
+          if (page.length < lim) break;
+          sk += lim;
         }
-        return records;
+        return results;
       };
 
-      const [assignmentsResponse, attendanceRecords, sessionsData] = await Promise.all([
+      const [assignmentsResponse, sessionsData] = await Promise.all([
         courseService.listAssignments(),
-        fetchAllAttendanceRecords(),
-        api.get("/sessions", { params: { limit: 500 } })
-          .then(r => Array.isArray(r.data) ? r.data : (r.data?.items ?? []))
-          .catch(() => [] as any[]),
+        fetchAllSessions().catch(() => [] as any[]),
       ]);
 
       const assignments = Array.isArray(assignmentsResponse)
         ? assignmentsResponse
         : (assignmentsResponse?.items ?? assignmentsResponse?.data ?? []);
+
+      // Apply date range filter to sessions if dates are set.
+      // Sessions have a session_date field (ISO date string, e.g. "2025-01-15").
+      const filteredSessions = sessionsData.filter((session: any) => {
+        const sessionDate: string | null = session.session_date ?? null;
+        if (!sessionDate) return true; // keep sessions with no date
+        if (startDate && sessionDate < startDate) return false;
+        if (endDate && sessionDate > endDate) return false;
+        return true;
+      });
 
       // course_id → Set<teacher_id>
       const courseTeachers = new Map<string, Set<string>>();
@@ -103,41 +106,41 @@ export default function Reports() {
         courseTeachers.get(courseId)!.add(teacherId);
       }
 
-      // Attended: sessions that have ≥1 attendance record, mapped per teacher
-      const attendedByTeacher = new Map<string, Set<string>>();
-      for (const record of attendanceRecords) {
-        const courseId = String(record.courseId ?? record.course_id ?? "");
-        const sessionId = String(record.sessionId ?? record.session_id ?? "");
-        if (!courseId || !sessionId) continue;
-        const teachers = courseTeachers.get(courseId);
-        if (!teachers) continue;
-        teachers.forEach(tid => {
-          if (!attendedByTeacher.has(tid)) attendedByTeacher.set(tid, new Set());
-          attendedByTeacher.get(tid)!.add(sessionId);
-        });
-      }
+      // For each session:
+      //   total     → every session ever started for any course the teacher is assigned to
+      //   attended  → only sessions where session.teacher_id matches THIS teacher
+      //               (i.e. the teacher personally started it; admin sessions are excluded)
+      const statsByTeacher = new Map<string, { total: Set<string>; teacherStarted: Set<string> }>();
 
-      // Total: all sessions (started/ended) for each teacher's courses
-      const totalByTeacher = new Map<string, Set<string>>();
-      for (const session of sessionsData) {
+      for (const session of filteredSessions) {
         const courseId = String(session.course_id ?? session.courseId ?? "");
         const sessionId = String(session.id ?? "");
+        const sessionTeacherId = session.teacher_id != null ? String(session.teacher_id) : null;
         if (!courseId || !sessionId) continue;
+
         const teachers = courseTeachers.get(courseId);
         if (!teachers) continue;
+
         teachers.forEach(tid => {
-          if (!totalByTeacher.has(tid)) totalByTeacher.set(tid, new Set());
-          totalByTeacher.get(tid)!.add(sessionId);
+          if (!statsByTeacher.has(tid)) {
+            statsByTeacher.set(tid, { total: new Set(), teacherStarted: new Set() });
+          }
+          const stats = statsByTeacher.get(tid)!;
+          // Every session for this course counts toward the teacher's total
+          stats.total.add(sessionId);
+          // Only count as teacher's own session if they personally started it
+          if (sessionTeacherId === tid) {
+            stats.teacherStarted.add(sessionId);
+          }
         });
       }
 
-      const allIds = new Set([...attendedByTeacher.keys(), ...totalByTeacher.keys()]);
       return Object.fromEntries(
-        Array.from(allIds).map(tid => [
+        Array.from(statsByTeacher.entries()).map(([tid, stats]) => [
           tid,
           {
-            attended: attendedByTeacher.get(tid)?.size ?? 0,
-            total: totalByTeacher.get(tid)?.size ?? 0,
+            attended: stats.teacherStarted.size,
+            total: stats.total.size,
           },
         ])
       ) as Record<string, { attended: number; total: number }>;
@@ -145,7 +148,8 @@ export default function Reports() {
   });
 
   const getPerformance = (id: string) => {
-    const data = teacherPerformanceQuery.data?.[id];
+    if (!generateTriggered || !teacherPerformanceQuery.data) return "—";
+    const data = teacherPerformanceQuery.data[id];
     const attended = data?.attended ?? 0;
     const total = data?.total ?? 0;
     return `${attended}/${total}`;
@@ -159,6 +163,8 @@ export default function Reports() {
     setFilterFaculty("All");
     setFilterDepartment("All");
     setFilterRole("All");
+    setStartDate("");
+    setEndDate("");
     setGenerateTriggered(false);
   };
 
@@ -178,7 +184,15 @@ export default function Reports() {
     doc.text("HR Teacher Attendance Report", 14, 18);
     doc.setFontSize(10);
     doc.setTextColor(100);
-    doc.text(`Generated: ${new Date().toLocaleDateString()}`, 14, 26);
+    const dateRangeLabel =
+      startDate && endDate
+        ? `Period: ${startDate} — ${endDate}`
+        : startDate
+        ? `From: ${startDate}`
+        : endDate
+        ? `Until: ${endDate}`
+        : "All time";
+    doc.text(`Generated: ${new Date().toLocaleDateString()}  |  ${dateRangeLabel}`, 14, 26);
     autoTable(doc, {
       head: [["Name", "Role", "Faculty", "Department", "Performance", "Status"]],
       body: buildTableRows(),
@@ -303,6 +317,11 @@ export default function Reports() {
               </label>
               <Input
                 type="date"
+                value={startDate}
+                onChange={(e) => {
+                  setStartDate(e.target.value);
+                  setGenerateTriggered(false); // require re-generate when dates change
+                }}
                 className="text-gray-900 dark:text-white dark:[color-scheme:dark]"
               />
             </div>
@@ -312,6 +331,12 @@ export default function Reports() {
               </label>
               <Input
                 type="date"
+                value={endDate}
+                min={startDate || undefined}
+                onChange={(e) => {
+                  setEndDate(e.target.value);
+                  setGenerateTriggered(false); // require re-generate when dates change
+                }}
                 className="text-gray-900 dark:text-white dark:[color-scheme:dark]"
               />
             </div>

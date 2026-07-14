@@ -4,45 +4,28 @@ import {
   Search,
   Filter,
   Calendar as CalendarIcon,
+  Play,
   ChevronLeft,
   ChevronRight,
 } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
-import { useLocation } from "react-router-dom";
-import facultyService from "@/services/facultyService";
-import courseService from "@/services/courseService";
+import { useLocation, useNavigate } from "react-router-dom";
 import attendanceService from "@/services/attendanceService";
-import { useAuthStore } from "@/store/useAuthStore";
-
-// Weekday code → JS getDay() (0=Sun … 6=Sat)
-const WD_TO_DAY: Record<string, number> = {
-  sat: 6, sun: 0, mon: 1, tue: 2, wed: 3, thu: 4, fri: 5,
-  saturday: 6, sunday: 0, monday: 1, tuesday: 2, wednesday: 3, thursday: 4, friday: 5,
-};
-
-function formatTime(timeStr: string): string {
-  if (!timeStr || timeStr === "TBA") return "TBA";
-  const [hh, mm] = timeStr.split(":").map(Number);
-  if (isNaN(hh)) return timeStr;
-  const period = hh >= 12 ? "PM" : "AM";
-  const h = hh % 12 || 12;
-  return `${h}:${String(mm ?? 0).padStart(2, "0")} ${period}`;
-}
+import teacherService from "@/services/teacherService";
+import { useTeacherId } from "@/store/useTeacherStore";
+import { WD_TO_DAY, formatTime } from "@/utils/scheduleUtils";
 
 export default function TeacherSchedule() {
   const location = useLocation();
+  const navigate = useNavigate();
   const initialFilter = (location.state as any)?.filter ?? "All";
   const [searchTerm, setSearchTerm] = useState("");
   const [filterDate, setFilterDate] = useState<string>(initialFilter);
 
-  const { user } = useAuthStore();
-  const teacherId = Number(user?.teacherId ?? user?.id ?? 0);
+  const { teacherId, isUnlinked: isTeacherUnlinked } = useTeacherId();
 
-  const schedulesQuery = useQuery({
-    queryKey: ["teacherSchedules", teacherId],
-    queryFn: () => facultyService.listSchedules(),
-    enabled: !!teacherId,
-  });
+  // weekOffset: 0 = current week, -1 = last week, +1 = next week …
+  const [weekOffset, setWeekOffset] = useState(0);
 
   // Poll active sessions every 10 s so "Ongoing Now" appears/disappears
   // as soon as a teacher or admin starts/ends a session.
@@ -54,16 +37,61 @@ export default function TeacherSchedule() {
   });
 
   const coursesQuery = useQuery({
-    queryKey: ["teacherScheduleCourses", teacherId],
-    queryFn: () =>
-      courseService.listAssignments({ teacher_id: teacherId, skip: 0, limit: 200 }),
+    queryKey: ["teacherCourses", teacherId],
+    queryFn: () => teacherService.getAssignedCourses(teacherId),
     enabled: !!teacherId,
     retry: false,
   });
 
+  // Derive the teacher's course IDs so we can fetch schedules per-course.
+  // Doing this rather than pulling the entire catalogue avoids paginated
+  // truncation and removes the wrong-layer facultyService dependency.
+  const courseIds = useMemo(() => {
+    const assignments: any[] = coursesQuery.data?.items ?? coursesQuery.data ?? [];
+    return assignments
+      .map((a: any) => Number(a.course_id))
+      .filter((id) => Number.isFinite(id) && id > 0);
+  }, [coursesQuery.data]);
+
+  // Fetch schedules for each assigned course in parallel, annotating
+  // each result with its course_id so the memo below can match them.
+  const schedulesQuery = useQuery({
+    queryKey: ["teacherSchedules", teacherId, courseIds],
+    queryFn: () => teacherService.getSchedulesForCourses(courseIds),
+    enabled: !!teacherId && courseIds.length > 0,
+    staleTime: 60_000,
+  });
+
+  // Computed week bounds based on offset (Sat–Fri grid)
+  const { displayWeekStart, displayWeekEnd, displayWeekLabel } = useMemo(() => {
+    const now = new Date();
+    const day = now.getDay();
+    const daysFromSat = day === 6 ? 0 : day + 1;
+    const ws = new Date(now);
+    ws.setDate(now.getDate() - daysFromSat + weekOffset * 7);
+    ws.setHours(0, 0, 0, 0);
+    const we = new Date(ws);
+    we.setDate(ws.getDate() + 6);
+    we.setHours(23, 59, 59, 999);
+
+    const fmt = (d: Date) =>
+      d.toLocaleDateString([], { month: "short", day: "numeric" });
+    const label =
+      weekOffset === 0
+        ? "This Week"
+        : weekOffset === -1
+          ? "Last Week"
+          : weekOffset === 1
+            ? "Next Week"
+            : `${fmt(ws)} – ${fmt(we)}`;
+
+    return { displayWeekStart: ws, displayWeekEnd: we, displayWeekLabel: label };
+  }, [weekOffset]);
+
   const scheduleData = useMemo(() => {
-    const scheduleResponse: any[] =
-      schedulesQuery.data?.items ?? schedulesQuery.data ?? [];
+    // schedulesQuery now returns only this teacher's course schedules (fetched
+    // per-course via Promise.all) — no client-side course filter is needed.
+    const teacherSchedules: any[] = schedulesQuery.data ?? [];
     const assignments: any[] =
       coursesQuery.data?.items ?? coursesQuery.data ?? [];
 
@@ -85,31 +113,24 @@ export default function TeacherSchedule() {
       }
     });
 
-    // Teacher's assigned course IDs
-    const teacherCourseIds = new Set(assignments.map((a: any) => String(a.course_id)));
+    if (assignments.length === 0) return [];
 
-    if (teacherCourseIds.size === 0) return [];
-
-    // Filter schedules to only those belonging to teacher's courses
-    const teacherSchedules = scheduleResponse.filter((s: any) =>
-      teacherCourseIds.has(String(s.course_id)),
-    );
-
-    // Week bounds (Sat–Fri)
+    // Use the display week bounds (shifted by weekOffset)
+    const weekStart = displayWeekStart;
     const now = new Date();
-    const day = now.getDay();
-    const daysFromSat = day === 6 ? 0 : day + 1;
-    const weekStart = new Date(now);
-    weekStart.setDate(now.getDate() - daysFromSat);
-    weekStart.setHours(0, 0, 0, 0);
 
     const rows: any[] = [];
     teacherSchedules.forEach((schedule: any) => {
-      const weekdays: string[] = Array.isArray(schedule.weekday)
-        ? schedule.weekday
-        : schedule.weekday_summary
-          ? schedule.weekday_summary.split(",")
-          : [];
+      // getSchedulesForCourse returns weekday_raw (lowercase array like
+      // ["sat", "sun"]) and weekday (display string). Prefer weekday_raw for
+      // day-of-week math; fall back to legacy array or summary formats.
+      const weekdays: string[] = Array.isArray(schedule.weekday_raw)
+        ? schedule.weekday_raw
+        : Array.isArray(schedule.weekday)
+          ? schedule.weekday
+          : schedule.weekday_summary
+            ? schedule.weekday_summary.split(",")
+            : [];
 
       weekdays.forEach((wdRaw: string) => {
         const wd = wdRaw.trim().toLowerCase();
@@ -152,6 +173,7 @@ export default function TeacherSchedule() {
         rows.push({
           id: `${schedule.id}-${wd}`,
           scheduleId: schedule.id,
+          course_id: schedule.course_id,
           course:
             courseNames.get(String(schedule.course_id)) ??
             `Course ${schedule.course_id}`,
@@ -163,6 +185,7 @@ export default function TeacherSchedule() {
           grace: schedule.grace_period_minutes ?? 0,
           isCurrent,
           isNext,
+          isToday,
         });
       });
     });
@@ -175,9 +198,9 @@ export default function TeacherSchedule() {
     });
 
     return rows;
-  }, [schedulesQuery.data, coursesQuery.data, activeSessionsQuery.data]);
+  }, [schedulesQuery.data, coursesQuery.data, activeSessionsQuery.data, displayWeekStart]);
 
-  // Date filter helpers
+  // Date filter helpers — these always reference the real today regardless of weekOffset
   const todayDate = useMemo(() => {
     const d = new Date();
     d.setHours(0, 0, 0, 0);
@@ -202,9 +225,6 @@ export default function TeacherSchedule() {
       } else if (filterDate === "Tomorrow") {
         matchesDate =
           item.occurrenceDate.toDateString() === tomorrowDate.toDateString();
-      } else if (filterDate === "This Week") {
-        // already showing this week's rows by default, so same as All in weekly view
-        matchesDate = true;
       }
 
       return matchesSearch && matchesDate;
@@ -223,6 +243,41 @@ export default function TeacherSchedule() {
           </p>
         </div>
 
+        {/* Week navigation */}
+        <div className="flex items-center gap-1 bg-gray-100 dark:bg-white/5 rounded-xl p-1 border border-gray-200 dark:border-white/10 shrink-0">
+          <button
+            type="button"
+            onClick={() => setWeekOffset((o) => o - 1)}
+            className="p-1.5 rounded-lg text-gray-500 hover:bg-white dark:hover:bg-white/10 hover:text-gray-900 dark:hover:text-white transition-colors"
+            title="Previous week"
+          >
+            <ChevronLeft size={16} />
+          </button>
+          <span className="px-3 text-sm font-medium text-gray-700 dark:text-gray-200 min-w-[100px] text-center">
+            {displayWeekLabel}
+          </span>
+          <button
+            type="button"
+            onClick={() => setWeekOffset((o) => o + 1)}
+            className="p-1.5 rounded-lg text-gray-500 hover:bg-white dark:hover:bg-white/10 hover:text-gray-900 dark:hover:text-white transition-colors"
+            title="Next week"
+          >
+            <ChevronRight size={16} />
+          </button>
+          {weekOffset !== 0 && (
+            <button
+              type="button"
+              onClick={() => setWeekOffset(0)}
+              className="ml-1 px-2 py-1 text-xs font-medium rounded-lg bg-primary/10 text-primary hover:bg-primary/20 transition-colors"
+            >
+              Today
+            </button>
+          )}
+        </div>
+      </div>
+
+      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+        <div className="flex-1" />
         <div className="flex items-center gap-3 w-full sm:w-auto">
           <div className="relative flex-1 sm:flex-none">
             <Search
@@ -267,6 +322,12 @@ export default function TeacherSchedule() {
         </div>
       </div>
 
+      {isTeacherUnlinked && (
+        <div className="rounded-2xl border border-amber-200 dark:border-amber-500/20 bg-amber-50 dark:bg-amber-500/10 p-4 text-sm text-amber-800 dark:text-amber-200">
+          Your account is not yet linked to a teacher profile. Contact HR to link your login account before your schedule will appear here.
+        </div>
+      )}
+
       {(schedulesQuery.isError || coursesQuery.isError) && (
         <div className="rounded-2xl border border-rose-200 dark:border-rose-500/20 bg-rose-50 dark:bg-rose-500/10 p-4 text-sm text-rose-700 dark:text-rose-200">
           Failed to load schedule data. Please try refreshing.
@@ -289,22 +350,31 @@ export default function TeacherSchedule() {
                 <th className="px-6 py-4 font-semibold">Start Time</th>
                 <th className="px-6 py-4 font-semibold">End Time</th>
                 <th className="px-6 py-4 font-semibold">Grace Period</th>
+                <th className="px-6 py-4 font-semibold">Action</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-200 dark:divide-white/10">
               {schedulesQuery.isLoading || coursesQuery.isLoading ? (
-                <tr>
-                  <td
-                    colSpan={6}
-                    className="px-6 py-10 text-center text-sm text-gray-500 dark:text-gray-400"
-                  >
-                    Loading schedule…
-                  </td>
-                </tr>
+                Array.from({ length: 5 }).map((_, i) => (
+                  <tr key={i} className="animate-pulse border-b border-gray-100 dark:border-white/5">
+                    <td className="px-6 py-4">
+                      <div className="flex items-center gap-3">
+                        <div className="h-8 w-8 rounded-lg bg-gray-200 dark:bg-white/10 shrink-0" />
+                        <div className="h-4 bg-gray-200 dark:bg-white/10 rounded w-40" />
+                      </div>
+                    </td>
+                    <td className="px-6 py-4"><div className="h-4 bg-gray-200 dark:bg-white/10 rounded w-16" /></td>
+                    <td className="px-6 py-4"><div className="h-4 bg-gray-200 dark:bg-white/10 rounded w-20" /></td>
+                    <td className="px-6 py-4"><div className="h-4 bg-gray-200 dark:bg-white/10 rounded w-16" /></td>
+                    <td className="px-6 py-4"><div className="h-4 bg-gray-200 dark:bg-white/10 rounded w-16" /></td>
+                    <td className="px-6 py-4"><div className="h-5 bg-gray-200 dark:bg-white/10 rounded-full w-14" /></td>
+                    <td className="px-6 py-4"><div className="h-8 bg-gray-200 dark:bg-white/10 rounded-xl w-20" /></td>
+                  </tr>
+                ))
               ) : filteredSchedule.length === 0 ? (
                 <tr>
                   <td
-                    colSpan={6}
+                    colSpan={7}
                     className="px-6 py-10 text-center text-sm text-gray-500 dark:text-gray-400"
                   >
                     {scheduleData.length === 0
@@ -368,6 +438,31 @@ export default function TeacherSchedule() {
                         {item.grace} mins
                       </span>
                     </td>
+                    <td className="px-6 py-4">
+                      {item.isCurrent ? (
+                        <button
+                          type="button"
+                          onClick={() => navigate("/teacher/attendance")}
+                          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold bg-primary/10 text-primary hover:bg-primary/20 dark:bg-primary/20 dark:text-primary-accent dark:hover:bg-primary/30 transition-colors"
+                        >
+                          <Play size={12} className="fill-current" />
+                          Resume
+                        </button>
+                      ) : item.isToday ? (
+                        <button
+                          type="button"
+                          onClick={() =>
+                            navigate("/teacher/attendance", {
+                              state: { course_id: item.course_id },
+                            })
+                          }
+                          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold bg-emerald-50 text-emerald-700 hover:bg-emerald-100 dark:bg-emerald-500/10 dark:text-emerald-400 dark:hover:bg-emerald-500/20 transition-colors"
+                        >
+                          <Play size={12} className="fill-current" />
+                          Start
+                        </button>
+                      ) : null}
+                    </td>
                   </tr>
                 ))
               )}
@@ -376,7 +471,7 @@ export default function TeacherSchedule() {
         </div>
 
         {/* Pagination info */}
-        <div className="px-6 py-4 border-t border-gray-200 dark:border-white/10 flex items-center justify-between">
+        <div className="px-6 py-4 border-t border-gray-200 dark:border-white/10 flex items-center justify-between flex-wrap gap-2">
           <p className="text-sm text-gray-500 dark:text-gray-400">
             Showing{" "}
             <span className="font-medium text-gray-900 dark:text-white">
@@ -386,16 +481,32 @@ export default function TeacherSchedule() {
             <span className="font-medium text-gray-900 dark:text-white">
               {scheduleData.length}
             </span>{" "}
-            classes this week
+            classes
+            {" · "}
+            <span className="text-gray-400 dark:text-gray-500">{displayWeekLabel}</span>
           </p>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-1">
             <button
-              className="p-2 rounded-lg border border-gray-200 dark:border-white/10 text-gray-500 hover:bg-gray-50 dark:hover:bg-white/5 disabled:opacity-50 transition-colors"
-              disabled
+              type="button"
+              onClick={() => setWeekOffset((o) => o - 1)}
+              className="p-1 rounded-lg text-gray-400 hover:text-gray-700 dark:hover:text-white hover:bg-gray-100 dark:hover:bg-white/10 transition-colors"
             >
               <ChevronLeft size={16} />
             </button>
-            <button className="p-2 rounded-lg border border-gray-200 dark:border-white/10 text-gray-500 hover:bg-gray-50 dark:hover:bg-white/5 disabled:opacity-50 transition-colors" disabled>
+            {weekOffset !== 0 && (
+              <button
+                type="button"
+                onClick={() => setWeekOffset(0)}
+                className="px-2 py-0.5 text-xs rounded-lg text-primary hover:bg-primary/10 transition-colors"
+              >
+                Current
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={() => setWeekOffset((o) => o + 1)}
+              className="p-1 rounded-lg text-gray-400 hover:text-gray-700 dark:hover:text-white hover:bg-gray-100 dark:hover:bg-white/10 transition-colors"
+            >
               <ChevronRight size={16} />
             </button>
           </div>

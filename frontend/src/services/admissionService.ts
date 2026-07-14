@@ -11,6 +11,10 @@ export interface AdmissionStudentDto {
   embedding_ref?: string | null;
   status: AdmissionStatus;
   created_at: string;
+  date_of_birth?: string | null;
+  phone?: string | null;
+  email?: string | null;
+  face_images_count: number;
   generated_password?: string | null;
 }
 
@@ -105,6 +109,9 @@ export const admissionService = {
     full_name: string;
     faculty_id: number;
     department_id: number;
+    date_of_birth?: string | null;
+    phone?: string | null;
+    email?: string | null;
   }): Promise<AdmissionStudentDto> => {
     const response = await api.post<AdmissionStudentDto>("/students", payload);
     return response.data;
@@ -117,6 +124,9 @@ export const admissionService = {
       faculty_id?: number;
       department_id?: number;
       status?: AdmissionStatus;
+      date_of_birth?: string | null;
+      phone?: string | null;
+      email?: string | null;
     },
   ): Promise<AdmissionStudentDto> => {
     const response = await api.put<AdmissionStudentDto>(

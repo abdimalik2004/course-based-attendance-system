@@ -1,22 +1,57 @@
 import { useEffect, useMemo } from 'react';
 import { motion } from 'framer-motion';
-import { Users, UserCheck, UserX, UserMinus, Activity } from 'lucide-react';
+import { Users, UserCheck, UserX, UserMinus, UserPlus, RefreshCw, Trash2, Edit2 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
+import { useQuery } from '@tanstack/react-query';
 import { useHrStore } from '@/store/useHrStore';
-import { 
-  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, 
+import { api } from '@/services/api';
+import {
+  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
   PieChart, Pie, Cell
 } from 'recharts';
 
+interface ActivityEntry {
+  id: number;
+  username: string;
+  action: string;
+  status: string;
+  created_at: string | null;
+}
+
+function timeAgo(isoString: string | null): string {
+  if (!isoString) return '—';
+  const diff = Date.now() - new Date(isoString).getTime();
+  const mins = Math.floor(diff / 60_000);
+  if (mins < 1) return 'Just now';
+  if (mins < 60) return `${mins}m ago`;
+  const hrs = Math.floor(mins / 60);
+  if (hrs < 24) return `${hrs}h ago`;
+  const days = Math.floor(hrs / 24);
+  return `${days}d ago`;
+}
+
+function actionIcon(action: string) {
+  const a = action.toLowerCase();
+  if (a.includes('deleted')) return { icon: Trash2, color: 'text-red-500', bg: 'bg-red-500/10' };
+  if (a.includes('status changed')) return { icon: RefreshCw, color: 'text-amber-500', bg: 'bg-amber-500/10' };
+  if (a.includes('updated')) return { icon: Edit2, color: 'text-blue-500', bg: 'bg-blue-500/10' };
+  return { icon: UserPlus, color: 'text-green-500', bg: 'bg-green-500/10' };
+}
+
 export default function Dashboard() {
   const navigate = useNavigate();
-  const { teachers, faculties, departments, fetchTeachers, fetchFaculties, fetchDepartments, isLoading, error } = useHrStore();
+  const { teachers, faculties, departments, fetchAll, isLoading, error } = useHrStore();
+
+  const activityQuery = useQuery<ActivityEntry[]>({
+    queryKey: ['hr', 'recent-activity'],
+    queryFn: () => api.get('/activity/hr-recent', { params: { limit: 8 } }).then(r => r.data),
+    refetchInterval: 30_000,
+    initialData: [],
+  });
 
   useEffect(() => {
-    fetchTeachers();
-    fetchFaculties();
-    fetchDepartments();
-  }, [fetchTeachers, fetchFaculties, fetchDepartments]);
+    fetchAll();
+  }, [fetchAll]);
 
   const totalTeachers = teachers.length;
   const activeTeachers = teachers.filter((teacher) => teacher.status === 'Active').length;
@@ -168,32 +203,50 @@ export default function Dashboard() {
           >
             <div className="flex items-center justify-between mb-6">
               <h3 className="text-lg font-semibold text-gray-900 dark:text-white">Recent HR Activity</h3>
-              <button className="text-sm font-medium text-primary hover:text-primary-accent transition-colors flex items-center gap-1">
-                View All <Activity size={16} />
-              </button>
+              {activityQuery.isFetching && (
+                <RefreshCw size={14} className="text-gray-400 animate-spin" />
+              )}
             </div>
-            
-            <div className="space-y-4">
-              {(teachers.slice(0, 3).map((teacher, idx) => ({
-                title: teacher.fullName,
-                desc: `${teacher.role} in faculty ${teacher.facultyId || 'unassigned'}`,
-                time: idx === 0 ? 'Recent' : `${idx + 1} entries back`,
-                icon: idx === 0 ? UserCheck : idx === 1 ? Activity : Users,
-                color: idx === 0 ? 'text-green-500' : idx === 1 ? 'text-blue-500' : 'text-purple-500',
-                bg: idx === 0 ? 'bg-green-500/10' : idx === 1 ? 'bg-blue-500/10' : 'bg-purple-500/10',
-              }))).map((item, idx) => (
-                <div key={idx} className="flex items-start gap-4 p-3 hover:bg-gray-50 dark:hover:bg-white/5 rounded-xl transition-colors">
-                  <div className={`p-2 rounded-lg ${item.bg}`}>
-                    <item.icon className={`w-5 h-5 ${item.color}`} />
+
+            {activityQuery.isLoading ? (
+              <div className="space-y-3">
+                {Array.from({ length: 4 }).map((_, i) => (
+                  <div key={i} className="flex items-center gap-4 p-3">
+                    <div className="w-9 h-9 rounded-lg bg-gray-200 dark:bg-white/10 animate-pulse shrink-0" />
+                    <div className="flex-1 space-y-2">
+                      <div className="h-3 bg-gray-200 dark:bg-white/10 rounded animate-pulse w-3/4" />
+                      <div className="h-3 bg-gray-200 dark:bg-white/10 rounded animate-pulse w-1/2" />
+                    </div>
                   </div>
-                  <div className="flex-1">
-                    <p className="text-sm font-medium text-gray-900 dark:text-white">{item.title}</p>
-                    <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">{item.desc}</p>
-                  </div>
-                  <span className="text-xs font-medium text-gray-400">{item.time}</span>
-                </div>
-              ))}
-            </div>
+                ))}
+              </div>
+            ) : activityQuery.data && activityQuery.data.length > 0 ? (
+              <div className="space-y-1">
+                {activityQuery.data.map((entry) => {
+                  const { icon: Icon, color, bg } = actionIcon(entry.action);
+                  return (
+                    <div key={entry.id} className="flex items-start gap-3 p-3 hover:bg-gray-50 dark:hover:bg-white/5 rounded-xl transition-colors">
+                      <div className={`p-2 rounded-lg ${bg} shrink-0`}>
+                        <Icon className={`w-4 h-4 ${color}`} />
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-medium text-gray-900 dark:text-white truncate">{entry.action}</p>
+                        <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">by {entry.username}</p>
+                      </div>
+                      <span className="text-xs font-medium text-gray-400 shrink-0 mt-0.5">
+                        {timeAgo(entry.created_at)}
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
+            ) : (
+              <div className="flex flex-col items-center justify-center py-10 text-center">
+                <Users className="w-10 h-10 text-gray-300 dark:text-gray-600 mb-3" />
+                <p className="text-sm text-gray-500 dark:text-gray-400">No teacher activity yet.</p>
+                <p className="text-xs text-gray-400 dark:text-gray-500 mt-1">Events will appear here after teachers are added or edited.</p>
+              </div>
+            )}
           </motion.div>
         </>
       )}

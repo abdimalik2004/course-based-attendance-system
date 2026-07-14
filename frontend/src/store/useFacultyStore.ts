@@ -1,5 +1,14 @@
 import { create } from "zustand";
 import { facultyService } from "@/services/facultyService";
+import { hrService } from "@/services/hrService";
+import { useAuthStore } from "@/store/useAuthStore";
+
+const STALE_MS = 30_000; // 30 seconds
+
+export interface FacultyTeacher {
+  id: string;
+  fullName: string;
+}
 
 export interface TeacherAssignment {
   id: string;
@@ -49,8 +58,10 @@ interface ModalState<T> {
 
 interface FacultyState {
   courses: Course[];
+  teachers: FacultyTeacher[];
   assignments: TeacherAssignment[];
   schedules: CourseSchedule[];
+  lastFetchedAt: number | null;
 
   stats: {
     totalStudents: number;
@@ -66,27 +77,24 @@ interface FacultyState {
   assignModal: ModalState<TeacherAssignment>;
   scheduleModal: ModalState<CourseSchedule>;
 
+  /** Fetch all data. Skips if data is < 30 s old. */
   fetchData: () => Promise<void>;
+  /** Force-refetch all 5 collections — bypasses stale window. */
+  refetchAll: () => Promise<void>;
+  /** Targeted: re-fetch only the assignments list (1 API call). Used after assignment mutations. */
+  refetchAssignments: () => Promise<void>;
+  /** Targeted: re-fetch only the schedules list (1 API call). Used after schedule mutations. */
+  refetchSchedules: () => Promise<void>;
 
-  openModal: (
-    type: "assign" | "schedule",
-    mode: ModalMode,
-    record?: any,
-  ) => void;
+  openModal: (type: "assign" | "schedule", mode: ModalMode, record?: any) => void;
   closeModal: (type: "assign" | "schedule") => void;
 
   addAssignment: (data: AssignmentFormData) => Promise<void>;
-  updateAssignment: (
-    id: string,
-    data: Partial<AssignmentFormData>,
-  ) => Promise<void>;
+  updateAssignment: (id: string, data: Partial<AssignmentFormData>) => Promise<void>;
   deleteAssignment: (id: string) => Promise<void>;
 
   addSchedule: (data: ScheduleFormData) => Promise<void>;
-  updateSchedule: (
-    id: string,
-    data: Partial<ScheduleFormData>,
-  ) => Promise<void>;
+  updateSchedule: (id: string, data: Partial<ScheduleFormData>) => Promise<void>;
   deleteSchedule: (id: string) => Promise<void>;
 }
 
@@ -110,10 +118,9 @@ const mapAssignment = (assignment: any): TeacherAssignment => ({
   createdAt: assignment.created_at ?? new Date().toISOString(),
 });
 
-// Normalize a time string from the backend ("HH:MM:SS") to "HH:MM" for HTML time inputs
+// Normalize "HH:MM:SS" → "HH:MM" for HTML time inputs
 const normalizeTime = (t: string | null | undefined): string => {
   if (!t) return "";
-  // If seconds are present (HH:MM:SS), strip them
   const parts = t.split(":");
   return parts.length >= 2 ? `${parts[0]}:${parts[1]}` : t;
 };
@@ -128,17 +135,23 @@ const mapSchedule = (schedule: any): CourseSchedule => ({
   createdAt: schedule.created_at ?? new Date().toISOString(),
 });
 
+// Ensure seconds suffix for backend ("HH:MM" → "HH:MM:SS")
+const toBackendTime = (t: string): string =>
+  t.length === 5 ? `${t}:00` : t;
+
 export const useFacultyStore = create<FacultyState>((set, get) => ({
   courses: [],
+  teachers: [],
   assignments: [],
   schedules: [],
+  lastFetchedAt: null,
 
   stats: {
-    totalStudents: 1250,
-    totalTeachers: 45,
-    totalDepartments: 4,
-    totalClasses: 32,
-    totalCourses: 48,
+    totalStudents: 0,
+    totalTeachers: 0,
+    totalDepartments: 0,
+    totalClasses: 0,
+    totalCourses: 0,
   },
 
   isLoading: false,
@@ -161,18 +174,28 @@ export const useFacultyStore = create<FacultyState>((set, get) => ({
     })),
 
   fetchData: async () => {
+    const { lastFetchedAt } = get();
+    if (lastFetchedAt && Date.now() - lastFetchedAt < STALE_MS) return;
+    await get().refetchAll();
+  },
+
+  refetchAll: async () => {
     set({ isLoading: true, error: null });
+    const facultyId = useAuthStore.getState().user?.facultyId;
+    const fid = facultyId ? Number(facultyId) : undefined;
     try {
-      const [summary, coursesRes, assignmentsRes, schedulesRes] =
+      const [summary, coursesRes, assignmentsRes, schedulesRes, teachersData] =
         await Promise.all([
           facultyService.getSummary(),
-          facultyService.getCourses(),
+          facultyService.getCourses(fid),
           facultyService.listAssignments(),
           facultyService.listSchedules(),
+          hrService.getTeachers(),
         ]);
 
       set({
         courses: (coursesRes.items ?? []).map(mapCourse),
+        teachers: teachersData.map((t) => ({ id: t.id, fullName: t.fullName })),
         assignments: (assignmentsRes.items ?? []).map(mapAssignment),
         schedules: (schedulesRes.items ?? []).map(mapSchedule),
         stats: {
@@ -183,15 +206,39 @@ export const useFacultyStore = create<FacultyState>((set, get) => ({
           totalCourses: Number(summary.totalCourses ?? coursesRes.total ?? 0),
         },
         isLoading: false,
+        lastFetchedAt: Date.now(),
       });
     } catch (error) {
       set({
         isLoading: false,
-        error:
-          error instanceof Error
-            ? error.message
-            : "Failed to load faculty data",
+        error: error instanceof Error ? error.message : "Failed to load faculty data",
       });
+    }
+  },
+
+  refetchAssignments: async () => {
+    try {
+      const assignmentsRes = await facultyService.listAssignments();
+      set({
+        assignments: (assignmentsRes.items ?? []).map(mapAssignment),
+        lastFetchedAt: Date.now(),
+      });
+    } catch (error) {
+      set({ error: error instanceof Error ? error.message : "Failed to refresh assignments" });
+      throw error;
+    }
+  },
+
+  refetchSchedules: async () => {
+    try {
+      const schedulesRes = await facultyService.listSchedules();
+      set({
+        schedules: (schedulesRes.items ?? []).map(mapSchedule),
+        lastFetchedAt: Date.now(),
+      });
+    } catch (error) {
+      set({ error: error instanceof Error ? error.message : "Failed to refresh schedules" });
+      throw error;
     }
   },
 
@@ -202,45 +249,37 @@ export const useFacultyStore = create<FacultyState>((set, get) => ({
         teacher_id: Number(data.teacherId),
         is_primary: data.status !== "inactive",
       });
-      await get().fetchData();
+      await get().refetchAssignments();
     } catch (error) {
       set({
-        error:
-          error instanceof Error
-            ? error.message
-            : "Failed to create assignment",
+        error: error instanceof Error ? error.message : "Failed to create assignment",
       });
       throw error;
     }
   },
+
   updateAssignment: async (id, data) => {
     try {
       await facultyService.updateAssignment(id, {
         teacher_id: data.teacherId ? Number(data.teacherId) : undefined,
-        is_primary:
-          data.status !== undefined ? data.status !== "inactive" : undefined,
+        is_primary: data.status !== undefined ? data.status !== "inactive" : undefined,
       });
-      await get().fetchData();
+      await get().refetchAssignments();
     } catch (error) {
       set({
-        error:
-          error instanceof Error
-            ? error.message
-            : "Failed to update assignment",
+        error: error instanceof Error ? error.message : "Failed to update assignment",
       });
       throw error;
     }
   },
+
   deleteAssignment: async (id) => {
     try {
       await facultyService.deleteAssignment(id);
-      await get().fetchData();
+      await get().refetchAssignments();
     } catch (error) {
       set({
-        error:
-          error instanceof Error
-            ? error.message
-            : "Failed to delete assignment",
+        error: error instanceof Error ? error.message : "Failed to delete assignment",
       });
       throw error;
     }
@@ -248,51 +287,48 @@ export const useFacultyStore = create<FacultyState>((set, get) => ({
 
   addSchedule: async (data) => {
     try {
-      console.log("STORE RECEIVED:", data);
-
-      await facultyService.createSchedule(data);
-
-      await get().fetchData();
+      await facultyService.createSchedule({
+        course_id: Number(data.courseId),
+        weekday: data.weekdays,
+        start_time: toBackendTime(data.startTime),
+        end_time: toBackendTime(data.endTime),
+        grace_period_minutes: Number(data.gracePeriod),
+      });
+      await get().refetchSchedules();
     } catch (error) {
       set({
-        error:
-          error instanceof Error ? error.message : "Failed to create schedule",
+        error: error instanceof Error ? error.message : "Failed to create schedule",
       });
       throw error;
     }
   },
+
   updateSchedule: async (id, data) => {
     const payload: Record<string, unknown> = {};
     if (data.courseId !== undefined) payload.course_id = Number(data.courseId);
     if (data.weekdays !== undefined) payload.weekday = data.weekdays;
-    // Ensure seconds are always included — backend expects "HH:MM:SS"
-    if (data.startTime !== undefined)
-      payload.start_time = data.startTime.length === 5 ? `${data.startTime}:00` : data.startTime;
-    if (data.endTime !== undefined)
-      payload.end_time = data.endTime.length === 5 ? `${data.endTime}:00` : data.endTime;
-    if (data.gracePeriod !== undefined) {
-      payload.grace_period_minutes = Number(data.gracePeriod);
-    }
+    if (data.startTime !== undefined) payload.start_time = toBackendTime(data.startTime);
+    if (data.endTime !== undefined) payload.end_time = toBackendTime(data.endTime);
+    if (data.gracePeriod !== undefined) payload.grace_period_minutes = Number(data.gracePeriod);
 
     try {
       await facultyService.updateSchedule(id, payload as any);
-      await get().fetchData();
+      await get().refetchSchedules();
     } catch (error) {
       set({
-        error:
-          error instanceof Error ? error.message : "Failed to update schedule",
+        error: error instanceof Error ? error.message : "Failed to update schedule",
       });
       throw error;
     }
   },
+
   deleteSchedule: async (id) => {
     try {
       await facultyService.deleteSchedule(id);
-      await get().fetchData();
+      await get().refetchSchedules();
     } catch (error) {
       set({
-        error:
-          error instanceof Error ? error.message : "Failed to delete schedule",
+        error: error instanceof Error ? error.message : "Failed to delete schedule",
       });
       throw error;
     }

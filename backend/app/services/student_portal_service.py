@@ -7,6 +7,8 @@ from sqlalchemy.orm import Session
 
 logger = logging.getLogger(__name__)
 
+from datetime import date
+
 from app.db.models import (
     AttendanceRecord,
     AttendanceSession,
@@ -16,12 +18,16 @@ from app.db.models import (
     Course,
     CourseSchedule,
     Enrollment,
+    ExcuseRequest,
+    ExcuseRequestStatus,
     SessionStatus,
     Student,
     StudentAttendance,
     StudentSchedule,
     User,
 )
+from sqlalchemy.orm import joinedload
+
 from app.schemas.student_portal import AttendanceCreate, ScheduleCreate
 
 
@@ -130,7 +136,7 @@ class StudentPortalService:
                 "total_classes": total,
                 "attendance_percentage": pct,
                 "status": display_status,
-                "created_at": entry["last_updated"].isoformat() if entry["last_updated"] else None,
+                "last_updated": entry["last_updated"].isoformat() if entry["last_updated"] else None,
             })
 
         return sorted(result, key=lambda r: r["course_name"])
@@ -273,6 +279,138 @@ class StudentPortalService:
             }
             for schedule, course in rows
         ]
+
+    def get_my_session_history(self, db: Session, user: User, course_id: int) -> list[dict]:
+        """
+        Return every individual attendance record for the logged-in student
+        in a specific course, ordered newest-first.
+        Joins AttendanceSession so we can return session date, type, and time.
+        """
+        student = self._find_student_for_user(db, user)
+        if student is None:
+            return []
+
+        rows = (
+            db.query(AttendanceRecord, AttendanceSession)
+            .join(AttendanceSession, AttendanceSession.id == AttendanceRecord.session_id)
+            .filter(
+                AttendanceRecord.student_id == student.id,
+                AttendanceRecord.course_id == course_id,
+            )
+            .order_by(AttendanceSession.session_date.desc(), AttendanceSession.start_time.desc())
+            .all()
+        )
+
+        return [
+            {
+                "record_id": record.id,
+                "session_id": session.id,
+                "date": session.session_date.isoformat(),
+                "start_time": session.start_time.strftime("%H:%M"),
+                "session_type": session.session_type.value if session.session_type else "Lecture",
+                "status": record.status.value if record.status else None,
+                "recognized_at": record.recognized_at.strftime("%H:%M") if record.recognized_at else None,
+            }
+            for record, session in rows
+        ]
+
+    def get_my_profile(self, db: Session, user: User) -> dict | None:
+        """
+        Return the full student profile for the logged-in user.
+        Uses joinedload to fetch Faculty and Department in a single query
+        (avoids the 3-query N+1 that lazy-loading would produce).
+        """
+        # Build the same lookup as _find_student_for_user but with eager loads
+        if user.student_id is not None:
+            student = (
+                db.query(Student)
+                .options(joinedload(Student.faculty), joinedload(Student.department))
+                .filter(Student.id == user.student_id)
+                .first()
+            )
+        else:
+            student = (
+                db.query(Student)
+                .options(joinedload(Student.faculty), joinedload(Student.department))
+                .filter(Student.student_number == user.username)
+                .first()
+            )
+        if student is None:
+            return None
+
+        return {
+            "id": student.id,
+            "student_number": student.student_number,
+            "full_name": student.full_name,
+            "email": student.email,
+            "phone": student.phone,
+            "date_of_birth": student.date_of_birth.isoformat() if student.date_of_birth else None,
+            "status": student.status.value if student.status else None,
+            "faculty_id": student.faculty_id,
+            "faculty_name": student.faculty.name if student.faculty else None,
+            "department_id": student.department_id,
+            "department_name": student.department.name if student.department else None,
+            "enrolled_at": student.created_at.isoformat() if student.created_at else None,
+            "username": user.username,
+        }
+
+    def create_excuse_request(
+        self,
+        db: Session,
+        user: User,
+        request_date: date,
+        reason: str | None,
+        course_id: int | None,
+    ) -> dict:
+        """Student submits an excuse request.
+
+        course_id=None means "excuse me for ALL courses on this date".
+        Returns the serialised ExcuseRequest dict.
+        """
+        student = self._find_student_for_user(db, user)
+        if student is None:
+            raise HTTPException(status_code=404, detail="Student record not found")
+
+        req = ExcuseRequest(
+            student_id=student.id,
+            course_id=course_id,
+            request_date=request_date,
+            reason=reason,
+            status=ExcuseRequestStatus.PENDING,
+        )
+        db.add(req)
+        db.commit()
+        db.refresh(req)
+        return self._excuse_to_dict(req)
+
+    def list_my_excuse_requests(self, db: Session, user: User) -> list[dict]:
+        """Return all excuse requests for the logged-in student, newest-first."""
+        student = self._find_student_for_user(db, user)
+        if student is None:
+            return []
+        rows = (
+            db.query(ExcuseRequest)
+            .options(joinedload(ExcuseRequest.course))
+            .filter(ExcuseRequest.student_id == student.id)
+            .order_by(ExcuseRequest.created_at.desc())
+            .all()
+        )
+        return [self._excuse_to_dict(r) for r in rows]
+
+    @staticmethod
+    def _excuse_to_dict(r: ExcuseRequest) -> dict:
+        return {
+            "id": r.id,
+            "student_id": r.student_id,
+            "course_id": r.course_id,
+            "course_name": r.course.title if r.course else None,
+            "course_code": r.course.code if r.course else None,
+            "request_date": r.request_date.isoformat(),
+            "reason": r.reason,
+            "status": r.status.value,
+            "created_at": r.created_at.isoformat(),
+            "reviewed_at": r.reviewed_at.isoformat() if r.reviewed_at else None,
+        }
 
     # ------------------------------------------------------------------
     # Legacy snapshot-based methods (kept for backward compatibility)

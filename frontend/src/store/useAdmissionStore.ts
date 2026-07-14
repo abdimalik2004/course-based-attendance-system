@@ -16,15 +16,29 @@ export interface Student {
   faculty: string;
   department: string;
   class: string;
-  imagesCaptured?: number;
+  faceImagesCount: number;
   status: AdmissionStatus;
   createdAt: string;
+  dateOfBirth?: string | null;
+  phone?: string | null;
+  email?: string | null;
 }
 
 interface AdmissionState {
   students: Student[];
+  /** Human-readable display lists (derived from raw DTOs) */
   faculties: string[];
   departments: Record<string, string[]>;
+  /** Raw DTO caches — used by addStudent/updateStudent to avoid re-fetching */
+  facultyDtos: FacultyDto[];
+  departmentDtos: DepartmentDto[];
+  /** Pagination */
+  total: number;
+  currentPage: number;
+  pageSize: number;
+  /** Last applied server-side filters — persisted so page navigation preserves them */
+  currentSearch: string;
+  currentStatus: string;
   isLoading: boolean;
   isSaving: boolean;
   error: string | null;
@@ -35,11 +49,14 @@ interface AdmissionState {
     rejectedApplications: number;
   };
 
-  fetchAdmissionData: () => Promise<void>;
+  fetchAdmissionData: (opts?: { page?: number; pageSize?: number; search?: string; status?: string }) => Promise<void>;
   addStudent: (student: {
     fullName: string;
     faculty: string;
     department: string;
+    dateOfBirth?: string | null;
+    phone?: string | null;
+    email?: string | null;
   }) => Promise<{ studentNumber: string; generatedPassword: string | null } | null>;
   updateStudent: (
     id: string,
@@ -48,6 +65,9 @@ interface AdmissionState {
       faculty?: string;
       department?: string;
       status?: AdmissionStatus;
+      dateOfBirth?: string | null;
+      phone?: string | null;
+      email?: string | null;
     },
   ) => Promise<void>;
   deleteStudent: (id: string) => Promise<void>;
@@ -97,8 +117,12 @@ const normalizeAdmissionState = (
       faculty: facultyName,
       department: departmentName,
       class: toClassLabel(student.created_at),
+      faceImagesCount: student.face_images_count ?? 0,
       status: student.status,
       createdAt: student.created_at,
+      dateOfBirth: student.date_of_birth ?? null,
+      phone: student.phone ?? null,
+      email: student.email ?? null,
     };
   });
 
@@ -148,10 +172,19 @@ const resolveDepartmentIdByName = (
   return match.id;
 };
 
+const DEFAULT_PAGE_SIZE = 50;
+
 export const useAdmissionStore = create<AdmissionState>((set, get) => ({
   students: [],
   faculties: [],
   departments: {},
+  facultyDtos: [],
+  departmentDtos: [],
+  total: 0,
+  currentPage: 1,
+  pageSize: DEFAULT_PAGE_SIZE,
+  currentSearch: '',
+  currentStatus: 'All',
   isLoading: false,
   isSaving: false,
   error: null,
@@ -162,15 +195,34 @@ export const useAdmissionStore = create<AdmissionState>((set, get) => ({
     rejectedApplications: 0,
   },
 
-  fetchAdmissionData: async () => {
-    set({ isLoading: true, error: null });
+  fetchAdmissionData: async (opts) => {
+    const page = opts?.page ?? get().currentPage;
+    const pageSize = opts?.pageSize ?? get().pageSize;
+    const skip = (page - 1) * pageSize;
+    // Preserve existing search/status if not explicitly overridden
+    const search = opts?.search !== undefined ? opts.search : get().currentSearch;
+    const status = opts?.status !== undefined ? opts.status : get().currentStatus;
+
+    set({ isLoading: true, error: null, currentPage: page, pageSize, currentSearch: search, currentStatus: status });
     try {
-      const [studentsResult, facultiesResult, departmentsResult, statsResult] =
+      // Only re-fetch faculties/departments if the cache is empty
+      const state = get();
+      const needsDtos =
+        state.facultyDtos.length === 0 || state.departmentDtos.length === 0;
+
+      const resolvedStatus = status && status !== 'All' ? (status.toLowerCase() as AdmissionStatus) : undefined;
+
+      const [studentsResult, statsResult, facultiesResult, departmentsResult] =
         await Promise.all([
-          admissionService.listStudents({ skip: 0, limit: 200 }),
-          admissionService.listFaculties(),
-          admissionService.listDepartments(),
+          admissionService.listStudents({
+            skip,
+            limit: pageSize,
+            search: search || undefined,
+            status: resolvedStatus,
+          }),
           admissionService.getDashboardStats(),
+          needsDtos ? admissionService.listFaculties() : Promise.resolve(state.facultyDtos),
+          needsDtos ? admissionService.listDepartments() : Promise.resolve(state.departmentDtos),
         ]);
 
       const normalized = normalizeAdmissionState(
@@ -183,6 +235,9 @@ export const useAdmissionStore = create<AdmissionState>((set, get) => ({
         students: normalized.mappedStudents,
         faculties: normalized.facultyNames,
         departments: normalized.departmentsByFaculty,
+        facultyDtos: facultiesResult,
+        departmentDtos: departmentsResult,
+        total: studentsResult.total,
         dashboardStats: mapDashboardStats(statsResult),
         isLoading: false,
         error: null,
@@ -199,16 +254,15 @@ export const useAdmissionStore = create<AdmissionState>((set, get) => ({
   addStudent: async (student) => {
     set({ isSaving: true, error: null });
     try {
-      const [facultiesResult, departmentsResult] = await Promise.all([
-        admissionService.listFaculties(),
-        admissionService.listDepartments(),
-      ]);
-      const facultyId = resolveFacultyIdByName(
-        facultiesResult,
-        student.faculty,
-      );
+      // Use cached DTOs — no extra network request
+      const { facultyDtos, departmentDtos } = get();
+      if (facultyDtos.length === 0 || departmentDtos.length === 0) {
+        throw new Error("Faculty and department data not loaded. Please refresh the page.");
+      }
+
+      const facultyId = resolveFacultyIdByName(facultyDtos, student.faculty);
       const departmentId = resolveDepartmentIdByName(
-        departmentsResult,
+        departmentDtos,
         student.department,
         facultyId,
       );
@@ -217,7 +271,11 @@ export const useAdmissionStore = create<AdmissionState>((set, get) => ({
         full_name: student.fullName,
         faculty_id: facultyId,
         department_id: departmentId,
+        date_of_birth: student.dateOfBirth ?? null,
+        phone: student.phone ?? null,
+        email: student.email ?? null,
       });
+
       await get().fetchAdmissionData();
       return {
         studentNumber: created.student_number,
@@ -241,14 +299,12 @@ export const useAdmissionStore = create<AdmissionState>((set, get) => ({
         throw new Error("Invalid student id.");
       }
 
-      const [facultiesResult, departmentsResult] = await Promise.all([
-        admissionService.listFaculties(),
-        admissionService.listDepartments(),
-      ]);
+      // Use cached DTOs — no extra network request
+      const { facultyDtos, departmentDtos } = get();
 
       let facultyId: number | undefined;
       if (updates.faculty) {
-        facultyId = resolveFacultyIdByName(facultiesResult, updates.faculty);
+        facultyId = resolveFacultyIdByName(facultyDtos, updates.faculty);
       }
 
       let departmentId: number | undefined;
@@ -265,7 +321,7 @@ export const useAdmissionStore = create<AdmissionState>((set, get) => ({
           );
         }
         departmentId = resolveDepartmentIdByName(
-          departmentsResult,
+          departmentDtos,
           updates.department,
           resolvedFacultyId,
         );
@@ -276,6 +332,9 @@ export const useAdmissionStore = create<AdmissionState>((set, get) => ({
         faculty_id: facultyId,
         department_id: departmentId,
         status: updates.status,
+        date_of_birth: updates.dateOfBirth,
+        phone: updates.phone,
+        email: updates.email,
       });
 
       await get().fetchAdmissionData();

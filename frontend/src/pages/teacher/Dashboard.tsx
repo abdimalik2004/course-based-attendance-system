@@ -8,6 +8,11 @@ import {
   List,
   ChevronRight,
   CheckCircle2,
+  ClipboardList,
+  Building2,
+  GraduationCap,
+  Briefcase,
+  UserCircle2,
 } from "lucide-react";
 import {
   PieChart,
@@ -25,15 +30,9 @@ import { useNavigate } from "react-router-dom";
 import { useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import attendanceService from "@/services/attendanceService";
-import facultyService from "@/services/facultyService";
-import courseService from "@/services/courseService";
-import { useAuthStore } from "@/store/useAuthStore";
-
-// Weekday code → JS getDay() (0=Sun … 6=Sat)
-const WD_TO_DAY: Record<string, number> = {
-  sat: 6, sun: 0, mon: 1, tue: 2, wed: 3, thu: 4, fri: 5,
-  saturday: 6, sunday: 0, monday: 1, tuesday: 2, wednesday: 3, thursday: 4, friday: 5,
-};
+import teacherService from "@/services/teacherService";
+import { useTeacherId, useTeacherStore } from "@/store/useTeacherStore";
+import { WD_TO_DAY, formatTime, getWeekBounds } from "@/utils/scheduleUtils";
 
 function formatTimeAgo(date: Date): string {
   const diff = Date.now() - date.getTime();
@@ -46,38 +45,41 @@ function formatTimeAgo(date: Date): string {
   return `${days}d ago`;
 }
 
-function formatTime(timeStr: string): string {
-  if (!timeStr || timeStr === "TBA") return "TBA";
-  const [hh, mm] = timeStr.split(":").map(Number);
-  if (isNaN(hh)) return timeStr;
-  const period = hh >= 12 ? "PM" : "AM";
-  const h = hh % 12 || 12;
-  return `${h}:${String(mm ?? 0).padStart(2, "0")} ${period}`;
-}
-
 export default function TeacherDashboard() {
   const navigate = useNavigate();
-  const { user } = useAuthStore();
-  const teacherId = Number(user?.teacherId ?? user?.id ?? 0);
+  const { teacherId, isUnlinked: isTeacherUnlinked } = useTeacherId();
+  const profile = useTeacherStore(s => s.profile);
 
   const sessionsQuery = useQuery({
-    queryKey: ["teacherSessions"],
+    // Include teacherId in the key so two different teachers on the same device
+    // never share a stale cache.
+    queryKey: ["teacherSessions", teacherId],
     queryFn: () => attendanceService.listSessions({ skip: 0, limit: 200 }),
-    retry: false,
-  });
-
-  const schedulesQuery = useQuery({
-    queryKey: ["teacherSchedules", teacherId],
-    queryFn: () => facultyService.listSchedules(),
     enabled: !!teacherId,
     retry: false,
   });
 
   const assignmentsQuery = useQuery({
-    queryKey: ["teacherCoursesCount", teacherId],
-    queryFn: () =>
-      courseService.listAssignments({ teacher_id: teacherId, skip: 0, limit: 200 }),
+    queryKey: ["teacherCourses", teacherId],
+    queryFn: () => teacherService.getAssignedCourses(teacherId),
     enabled: !!teacherId,
+    retry: false,
+  });
+
+  // Derive course IDs from assignments so we can fetch schedules per-course —
+  // same pattern as Schedule.tsx to avoid pulling the entire catalogue.
+  const courseIds = useMemo(() => {
+    const list: any[] = assignmentsQuery.data?.items ?? assignmentsQuery.data ?? [];
+    return list
+      .map((a: any) => Number(a.course_id))
+      .filter((id) => Number.isFinite(id) && id > 0);
+  }, [assignmentsQuery.data]);
+
+  const schedulesQuery = useQuery({
+    queryKey: ["teacherSchedules", teacherId, courseIds],
+    queryFn: () => teacherService.getSchedulesForCourses(courseIds),
+    enabled: !!teacherId && courseIds.length > 0,
+    staleTime: 60_000,
     retry: false,
   });
 
@@ -85,8 +87,10 @@ export default function TeacherDashboard() {
     () => sessionsQuery.data ?? [],
     [sessionsQuery.data],
   );
-  const allSchedules: any[] = useMemo(
-    () => schedulesQuery.data?.items ?? schedulesQuery.data ?? [],
+  // schedulesQuery now returns a flat array scoped to teacher's courses —
+  // no items wrapper, no client-side filter needed.
+  const teacherSchedules: any[] = useMemo(
+    () => schedulesQuery.data ?? [],
     [schedulesQuery.data],
   );
   const assignments: any[] = useMemo(
@@ -105,39 +109,31 @@ export default function TeacherDashboard() {
     return map;
   }, [assignments]);
 
-  // Set of course IDs assigned to this teacher
+  // Set of course IDs assigned to this teacher (used for stats count)
   const teacherCourseIds = useMemo(
     () => new Set(assignments.map((a: any) => Number(a.course_id))),
     [assignments],
   );
 
-  // Schedules filtered to teacher's assigned courses
-  const teacherSchedules = useMemo(
-    () => allSchedules.filter((s: any) => teacherCourseIds.has(Number(s.course_id))),
-    [allSchedules, teacherCourseIds],
-  );
-
   // ── Week bounds (Sat–Fri) ──────────────────────────────────────────────
-  const { weekStart, weekEnd, today } = useMemo(() => {
-    const now = new Date();
-    now.setHours(0, 0, 0, 0);
-    const day = now.getDay(); // 0=Sun … 6=Sat
-    const daysFromSat = day === 6 ? 0 : day + 1;
-    const wStart = new Date(now);
-    wStart.setDate(now.getDate() - daysFromSat);
-    const wEnd = new Date(wStart);
-    wEnd.setDate(wStart.getDate() + 6);
-    wEnd.setHours(23, 59, 59, 999);
-    return { weekStart: wStart, weekEnd: wEnd, today: now };
-  }, []);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const { weekStart, weekEnd, today } = useMemo(() => getWeekBounds(), []);
 
   // ── Today's schedules ─────────────────────────────────────────────────
   const todayScheduleRows = useMemo(() => {
     const todayDay = today.getDay();
     return teacherSchedules
       .filter((s: any) => {
-        const weekdays: string[] = Array.isArray(s.weekday) ? s.weekday : [];
-        return weekdays.some((w: string) => WD_TO_DAY[w.toLowerCase().trim()] === todayDay);
+        // getSchedulesForCourse returns weekday_raw (lowercase array); fall back
+        // to a plain weekday array for any legacy shapes.
+        const weekdays: string[] = Array.isArray(s.weekday_raw)
+          ? s.weekday_raw
+          : Array.isArray(s.weekday)
+            ? s.weekday
+            : [];
+        return weekdays.some(
+          (w: string) => (WD_TO_DAY[w.toLowerCase().trim()] ?? -1) === todayDay,
+        );
       })
       .map((s: any) => {
         const courseTitle = courseNamesMap.get(String(s.course_id)) ?? `Course ${s.course_id}`;
@@ -151,11 +147,18 @@ export default function TeacherDashboard() {
         const status = todaySession
           ? String(todaySession.status ?? "").toUpperCase()
           : "SCHEDULED";
+        // weekday is the display string from getSchedulesForCourse ("SAT / SUN")
+        const dayLabel = typeof s.weekday === "string"
+          ? s.weekday
+          : Array.isArray(s.weekday_raw)
+            ? s.weekday_raw.map((w: string) => w.toUpperCase()).join(" / ")
+            : "";
         return {
           id: s.id,
+          course_id: s.course_id,
           time: `${formatTime(s.start_time)} – ${formatTime(s.end_time)}`,
           course: courseTitle,
-          class_section: Array.isArray(s.weekday) ? s.weekday.map((w: string) => w.toUpperCase()).join(" / ") : "",
+          class_section: dayLabel,
           status,
         };
       });
@@ -186,7 +189,11 @@ export default function TeacherDashboard() {
     // where no session has been started yet for that course on that date.
     let upcomingCount = 0;
     teacherSchedules.forEach((schedule: any) => {
-      const weekdays: string[] = Array.isArray(schedule.weekday) ? schedule.weekday : [];
+      const weekdays: string[] = Array.isArray(schedule.weekday_raw)
+        ? schedule.weekday_raw
+        : Array.isArray(schedule.weekday)
+          ? schedule.weekday
+          : [];
       weekdays.forEach((wd: string) => {
         const dayNum = WD_TO_DAY[wd.toLowerCase().trim()];
         if (dayNum === undefined) return;
@@ -308,10 +315,32 @@ export default function TeacherDashboard() {
     });
   }, [sessions, courseNamesMap]);
 
-  const hasError =
-    sessionsQuery.isError || schedulesQuery.isError || assignmentsQuery.isError;
+  // ── Last Session summary ──────────────────────────────────────────────────
+  const lastSession = useMemo(() => {
+    const closed = sessions
+      .filter((s: any) => String(s.status ?? "").toUpperCase() === "CLOSED")
+      .sort((a: any, b: any) => {
+        const ta = a.end_time ? new Date(a.end_time).getTime() : 0;
+        const tb = b.end_time ? new Date(b.end_time).getTime() : 0;
+        return tb - ta;
+      });
+    if (closed.length === 0) return null;
+    const s = closed[0];
+    const courseTitle = courseNamesMap.get(String(s.course_id)) ?? `Course ${s.course_id}`;
+    const endedAt = s.end_time ? new Date(s.end_time) : null;
+    return {
+      courseTitle,
+      endedAt,
+      timeAgo: endedAt ? formatTimeAgo(endedAt) : "—",
+      sessionType: s.session_type ?? "Session",
+    };
+  }, [sessions, courseNamesMap]);
+
+  // Only surface an error banner when the core structural queries fail.
+  // Sessions failing is non-fatal — the dashboard degrades gracefully to
+  // zero counts / empty recent-activity rather than showing a red banner.
+  const hasError = schedulesQuery.isError || assignmentsQuery.isError;
   const errorMsg =
-    (sessionsQuery.error as Error)?.message ||
     (schedulesQuery.error as Error)?.message ||
     (assignmentsQuery.error as Error)?.message;
 
@@ -325,6 +354,12 @@ export default function TeacherDashboard() {
           Dashboard Overview
         </h2>
       </div>
+
+      {isTeacherUnlinked && (
+        <div className="rounded-2xl border border-amber-200 dark:border-amber-500/20 bg-amber-50 dark:bg-amber-500/10 p-4 text-sm text-amber-800 dark:text-amber-200">
+          Your account is not yet linked to a teacher profile. Contact HR to link your login account to a teacher record before data will appear here.
+        </div>
+      )}
 
       {hasError && (
         <div className="rounded-2xl border border-rose-200 dark:border-rose-500/20 bg-rose-50 dark:bg-rose-500/10 p-4 text-sm text-rose-700 dark:text-rose-200">
@@ -508,18 +543,19 @@ export default function TeacherDashboard() {
                     <th className="px-6 py-4 font-medium">Course</th>
                     <th className="px-6 py-4 font-medium">Day</th>
                     <th className="px-6 py-4 font-medium">Status</th>
+                    <th className="px-6 py-4 font-medium"></th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-200 dark:divide-white/10">
                   {isLoading ? (
                     <tr>
-                      <td colSpan={4} className="px-6 py-10 text-center text-sm text-gray-500 dark:text-gray-400">
+                      <td colSpan={5} className="px-6 py-10 text-center text-sm text-gray-500 dark:text-gray-400">
                         Loading schedule…
                       </td>
                     </tr>
                   ) : todayScheduleRows.length === 0 ? (
                     <tr>
-                      <td colSpan={4} className="px-6 py-10 text-center text-sm text-gray-500 dark:text-gray-400">
+                      <td colSpan={5} className="px-6 py-10 text-center text-sm text-gray-500 dark:text-gray-400">
                         No classes scheduled for today.
                       </td>
                     </tr>
@@ -550,6 +586,30 @@ export default function TeacherDashboard() {
                           >
                             {item.status === "CLOSED" ? "Done" : item.status === "ACTIVE" ? "Live" : "Scheduled"}
                           </span>
+                        </td>
+                        <td className="px-6 py-4 text-right">
+                          {item.status === "SCHEDULED" && (
+                            <button
+                              onClick={() =>
+                                navigate("/teacher/attendance", {
+                                  state: { course_id: item.course_id },
+                                })
+                              }
+                              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-primary/10 text-primary hover:bg-primary hover:text-white transition-colors"
+                            >
+                              <Play size={11} className="fill-current" />
+                              Start
+                            </button>
+                          )}
+                          {item.status === "ACTIVE" && (
+                            <button
+                              onClick={() => navigate("/teacher/attendance")}
+                              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-blue-500/10 text-blue-600 dark:text-blue-400 hover:bg-blue-500 hover:text-white transition-colors"
+                            >
+                              <Play size={11} className="fill-current" />
+                              Resume
+                            </button>
+                          )}
                         </td>
                       </tr>
                     ))
@@ -637,7 +697,144 @@ export default function TeacherDashboard() {
                 className="text-gray-400 group-hover:text-gray-900 dark:group-hover:text-white group-hover:translate-x-1 transition-all"
               />
             </button>
+
+            <button
+              onClick={() => navigate("/teacher/courses")}
+              className="w-full group flex items-center justify-between p-4 rounded-xl bg-gray-50 hover:bg-gray-100 dark:bg-white/5 dark:hover:bg-white/10 border border-gray-200 dark:border-white/10 transition-all duration-300"
+            >
+              <div className="flex items-center gap-4">
+                <div className="p-2 bg-gray-200 dark:bg-white/10 rounded-lg text-gray-600 dark:text-gray-300 group-hover:scale-110 transition-transform">
+                  <BookOpen size={20} />
+                </div>
+                <div className="text-left">
+                  <p className="font-semibold text-gray-900 dark:text-white">
+                    My Courses
+                  </p>
+                  <p className="text-xs text-gray-500 dark:text-gray-400">
+                    Roster, sessions & stats
+                  </p>
+                </div>
+              </div>
+              <ChevronRight
+                size={20}
+                className="text-gray-400 group-hover:text-gray-900 dark:group-hover:text-white group-hover:translate-x-1 transition-all"
+              />
+            </button>
           </motion.div>
+
+          {/* Faculty / Department context widget (#36) */}
+          {profile && (
+            <motion.div
+              initial={{ opacity: 0, x: 20 }}
+              animate={{ opacity: 1, x: 0 }}
+              transition={{ duration: 0.4, delay: 0.03 }}
+              className="glass-card p-6 rounded-2xl"
+            >
+              <h3 className="text-sm font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-4 flex items-center gap-2">
+                <UserCircle2 size={15} />
+                My Context
+              </h3>
+              <div className="space-y-3">
+                <div className="flex items-center gap-3">
+                  <div className="p-2 rounded-lg bg-blue-500/10 text-blue-500 shrink-0">
+                    <GraduationCap size={16} />
+                  </div>
+                  <div className="min-w-0">
+                    <p className="text-[10px] uppercase tracking-wider text-gray-400 dark:text-gray-500">Teacher No.</p>
+                    <p className="text-sm font-medium text-gray-900 dark:text-white truncate">{profile.teacher_number}</p>
+                  </div>
+                </div>
+                <div className="flex items-center gap-3">
+                  <div className="p-2 rounded-lg bg-purple-500/10 text-purple-500 shrink-0">
+                    <Building2 size={16} />
+                  </div>
+                  <div className="min-w-0">
+                    <p className="text-[10px] uppercase tracking-wider text-gray-400 dark:text-gray-500">Faculty</p>
+                    <p className="text-sm font-medium text-gray-900 dark:text-white truncate">
+                      {profile.faculty_name ?? '—'}
+                    </p>
+                  </div>
+                </div>
+                <div className="flex items-center gap-3">
+                  <div className="p-2 rounded-lg bg-emerald-500/10 text-emerald-500 shrink-0">
+                    <Briefcase size={16} />
+                  </div>
+                  <div className="min-w-0">
+                    <p className="text-[10px] uppercase tracking-wider text-gray-400 dark:text-gray-500">Department</p>
+                    <p className="text-sm font-medium text-gray-900 dark:text-white truncate">
+                      {profile.department_name ?? '—'}
+                    </p>
+                  </div>
+                </div>
+                <div className="flex items-center gap-3">
+                  <div className="p-2 rounded-lg bg-orange-500/10 text-orange-500 shrink-0">
+                    <Briefcase size={16} />
+                  </div>
+                  <div className="min-w-0">
+                    <p className="text-[10px] uppercase tracking-wider text-gray-400 dark:text-gray-500">Role / Status</p>
+                    <p className="text-sm font-medium text-gray-900 dark:text-white truncate capitalize">
+                      {profile.role ?? '—'} · <span className={`${profile.status === 'Active' ? 'text-emerald-500' : 'text-orange-400'}`}>{profile.status ?? '—'}</span>
+                    </p>
+                  </div>
+                </div>
+                {profile.hire_date && (
+                  <div className="pt-2 border-t border-gray-100 dark:border-white/5">
+                    <p className="text-[10px] text-gray-400 dark:text-gray-500">
+                      Hired {new Date(profile.hire_date).toLocaleDateString([], { year: 'numeric', month: 'long', day: 'numeric' })}
+                    </p>
+                  </div>
+                )}
+              </div>
+              <button
+                onClick={() => navigate("/teacher/profile")}
+                className="mt-4 w-full text-xs text-primary hover:underline text-left"
+              >
+                View full profile →
+              </button>
+            </motion.div>
+          )}
+
+          {/* Last Session summary */}
+          {lastSession && (
+            <motion.div
+              initial={{ opacity: 0, x: 20 }}
+              animate={{ opacity: 1, x: 0 }}
+              transition={{ duration: 0.4, delay: 0.05 }}
+              className="glass-card p-6 rounded-2xl"
+            >
+              <h3 className="text-sm font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-4 flex items-center gap-2">
+                <ClipboardList size={15} />
+                Last Session
+              </h3>
+              <div className="flex items-start gap-3">
+                <div className="p-2.5 rounded-xl bg-indigo-500/10 text-indigo-500 shrink-0 mt-0.5">
+                  <CheckCircle2 size={18} />
+                </div>
+                <div className="min-w-0">
+                  <p className="font-semibold text-gray-900 dark:text-white truncate">
+                    {lastSession.courseTitle}
+                  </p>
+                  <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
+                    {lastSession.sessionType}
+                  </p>
+                  <p className="text-xs text-gray-400 dark:text-gray-500 mt-1">
+                    Ended {lastSession.timeAgo}
+                    {lastSession.endedAt && (
+                      <span className="ml-1">
+                        · {lastSession.endedAt.toLocaleDateString([], { month: "short", day: "numeric" })}
+                      </span>
+                    )}
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => navigate("/teacher/attendance-list")}
+                className="mt-4 w-full text-xs text-primary hover:underline text-left"
+              >
+                View attendance records →
+              </button>
+            </motion.div>
+          )}
 
           {/* Recent Activity */}
           <motion.div

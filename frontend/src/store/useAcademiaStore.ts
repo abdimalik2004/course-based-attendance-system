@@ -29,6 +29,7 @@ interface AcademiaState {
 
   isLoading: boolean;
   error: string | null;
+  lastFetchedAt: number | null;
 
   facultyModal: ModalState<Faculty>;
   departmentModal: ModalState<Department>;
@@ -170,8 +171,6 @@ const mapAcademicYear = (year: any): AcademicStructure => ({
   createdAt: year.created_at ?? new Date().toISOString(),
 });
 
-const academicYearStatusToApi = (status: AcademicStructure["status"]) =>
-  status.toLowerCase();
 
 const mapCourseAssignment = (assignment: any): CourseAssignment => ({
   id: String(assignment.id),
@@ -192,7 +191,7 @@ const mapClassAssignment = (assignment: any): ClassAssignment => ({
   createdAt: assignment.created_at ?? new Date().toISOString(),
 });
 
-export const useAcademiaStore = create<AcademiaState>((set) => ({
+export const useAcademiaStore = create<AcademiaState>((set, get) => ({
   faculties: [],
   departments: [],
   courses: [],
@@ -203,6 +202,7 @@ export const useAcademiaStore = create<AcademiaState>((set) => ({
 
   isLoading: false,
   error: null,
+  lastFetchedAt: null,
 
   facultyModal: { ...defaultModalState },
   departmentModal: { ...defaultModalState },
@@ -226,6 +226,9 @@ export const useAcademiaStore = create<AcademiaState>((set) => ({
     })),
 
   fetchData: async () => {
+    // Skip if data was fetched within the last 30 seconds
+    const { lastFetchedAt } = get();
+    if (lastFetchedAt && Date.now() - lastFetchedAt < 30_000) return;
     set({ isLoading: true, error: null });
     try {
       const [
@@ -265,6 +268,7 @@ export const useAcademiaStore = create<AcademiaState>((set) => ({
           mapClassAssignment,
         ),
         isLoading: false,
+        lastFetchedAt: Date.now(),
       });
     } catch (error) {
       set({
@@ -401,7 +405,7 @@ export const useAcademiaStore = create<AcademiaState>((set) => ({
       term_name: data.term,
       start_date: data.startDate,
       end_date: data.endDate,
-      status: academicYearStatusToApi(data.status),
+      // status is intentionally omitted — the backend derives it from the dates
     });
     set((state) => ({
       structures: [...state.structures, mapAcademicYear(response.data)],
@@ -413,9 +417,7 @@ export const useAcademiaStore = create<AcademiaState>((set) => ({
       term_name: updates.term,
       start_date: updates.startDate,
       end_date: updates.endDate,
-      status: updates.status
-        ? academicYearStatusToApi(updates.status)
-        : undefined,
+      // status is intentionally omitted — the backend derives it from the dates
     });
     set((state) => ({
       structures: state.structures.map((structure) =>

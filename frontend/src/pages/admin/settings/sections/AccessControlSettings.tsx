@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Plus } from 'lucide-react';
+import { Plus, CheckCircle, AlertCircle } from 'lucide-react';
 import { Card, CardContent } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import { Badge } from '@/components/ui/Badge';
@@ -7,6 +7,7 @@ import { Switch } from '@/components/ui/Switch';
 import { Modal } from '@/components/ui/Modal';
 import { Input } from '@/components/ui/Input';
 import { useUsersStore } from '@/store/useUsersStore';
+import { fetchSettings, saveSettings } from '@/services/settingsService';
 
 interface RolePerms {
   manageUsers: boolean;
@@ -69,15 +70,30 @@ export function AccessControlSettings() {
   const [selectedRole, setSelectedRole] = useState<string>('');
   const [permissions, setPermissions] = useState<Record<string, RolePerms>>({});
   const [hasChanges, setHasChanges] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
+  const [saveSuccess, setSaveSuccess] = useState(false);
+  const [saveError, setSaveError] = useState('');
 
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [newRoleName, setNewRoleName] = useState('');
   const [isAdding, setIsAdding] = useState(false);
   const [addError, setAddError] = useState('');
 
-  // Load roles from the DB on mount
+  // Load roles from the DB on mount, and restore any saved permissions from system_settings
   useEffect(() => {
     fetchRolesAndFaculties();
+    fetchSettings()
+      .then((data) => {
+        if (data['access_control.permissions']) {
+          try {
+            const saved = JSON.parse(data['access_control.permissions']) as Record<string, RolePerms>;
+            setPermissions((prev) => ({ ...prev, ...saved }));
+          } catch {
+            // ignore malformed JSON
+          }
+        }
+      })
+      .catch(() => {});
   }, [fetchRolesAndFaculties]);
 
   // Initialise permission map whenever roles list changes
@@ -106,6 +122,22 @@ export function AccessControlSettings() {
       },
     }));
     setHasChanges(true);
+  };
+
+  const handleSavePermissions = async () => {
+    setIsSaving(true);
+    setSaveError('');
+    setSaveSuccess(false);
+    try {
+      await saveSettings({ 'access_control.permissions': JSON.stringify(permissions) });
+      setHasChanges(false);
+      setSaveSuccess(true);
+      setTimeout(() => setSaveSuccess(false), 3000);
+    } catch {
+      setSaveError('Failed to save permissions. Please try again.');
+    } finally {
+      setIsSaving(false);
+    }
   };
 
   const handleAddRole = async (e: React.FormEvent) => {
@@ -206,10 +238,23 @@ export function AccessControlSettings() {
                   ))}
                 </div>
 
-                <div className="pt-6">
+                <div className="pt-6 space-y-3">
+                  {saveSuccess && (
+                    <div className="flex items-center gap-2 text-sm text-emerald-400">
+                      <CheckCircle size={14} />
+                      <span>Permissions saved.</span>
+                    </div>
+                  )}
+                  {saveError && (
+                    <div className="flex items-center gap-2 text-sm text-red-400">
+                      <AlertCircle size={14} />
+                      <span>{saveError}</span>
+                    </div>
+                  )}
                   <Button
-                    disabled={!hasChanges || isSuperAdmin}
-                    onClick={() => setHasChanges(false)}
+                    disabled={!hasChanges || isSuperAdmin || isSaving}
+                    isLoading={isSaving}
+                    onClick={handleSavePermissions}
                   >
                     Save Permissions
                   </Button>

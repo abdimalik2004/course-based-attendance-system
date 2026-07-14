@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
-import { Outlet, useNavigate } from 'react-router-dom';
+import { Outlet, useLocation, useNavigate } from 'react-router-dom';
+import { Link as LinkIcon } from 'lucide-react';
 import Sidebar from './Sidebar';
 import { useSidebarStore } from '@/store/useSidebarStore';
 import { cn } from '@/utils/cn';
@@ -7,6 +8,7 @@ import { ThemeToggle } from '@/components/ui/ThemeToggle';
 import { LogOut, User, UserCog, Menu } from 'lucide-react';
 import { KeyRound } from 'lucide-react';
 import { useAuthStore } from '@/store/useAuthStore';
+import { useTeacherId, useTeacherStore } from '@/store/useTeacherStore';
 import { UserAvatar } from '@/components/ui/UserAvatar';
 import { useUIStore } from '@/store/useUIStore';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -23,10 +25,22 @@ function getDisplayName(user: { full_name?: string | null; username?: string } |
   return user.username ?? '';
 }
 
+const ROUTE_TITLES: Record<string, string> = {
+  '/teacher/dashboard': 'Dashboard',
+  '/teacher/attendance': 'Start Attendance',
+  '/teacher/attendance-list': 'Attendance Records',
+  '/teacher/schedule': 'My Schedule',
+  '/teacher/courses': 'My Courses',
+  '/teacher/profile': 'My Profile',
+};
+
 function TeacherTopbar() {
   const { logout, user } = useAuthStore();
   const navigate = useNavigate();
+  const location = useLocation();
   const { toggleSidebar } = useSidebarStore();
+
+  const pageTitle = ROUTE_TITLES[location.pathname] ?? 'Teacher Dashboard';
   const { openEditProfile, openChangePassword } = useUIStore();
   
   const [profileDropdownOpen, setProfileDropdownOpen] = useState(false);
@@ -65,7 +79,7 @@ function TeacherTopbar() {
             <span className="font-semibold text-gray-900 dark:text-white">Heegan</span>
         </div>
         <h1 className="text-xl font-semibold text-gray-800 dark:text-white sm:hidden lg:block">
-          Teacher Dashboard
+          {pageTitle}
         </h1>
       </div>
 
@@ -152,6 +166,15 @@ function TeacherTopbar() {
 export default function TeacherLayout() {
   const { isCollapsed } = useSidebarStore();
   const [isMobile, setIsMobile] = useState(false);
+  const { isUnlinked } = useTeacherId();
+  const fetchProfile = useTeacherStore(s => s.fetchProfile);
+  const profileLoading = useTeacherStore(s => s.profileLoading);
+
+  // Fetch profile once on layout mount so all teacher pages share the result.
+  useEffect(() => {
+    fetchProfile();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   useEffect(() => {
     const handleResize = () => {
@@ -165,25 +188,47 @@ export default function TeacherLayout() {
   return (
     <div className="min-h-screen bg-gray-50 dark:bg-dark-bg text-gray-900 dark:text-gray-100 transition-colors duration-300">
       <Sidebar />
-      
-      <div 
+
+      <div
         className={cn(
           "flex flex-col min-h-screen transition-all duration-300 ease-out relative",
           isMobile ? "ml-0" : (isCollapsed ? "ml-[80px]" : "ml-[280px]")
         )}
       >
         <TeacherTopbar />
-        
-        <main className="flex-1 p-4 sm:p-6 lg:p-8 overflow-x-hidden relative">
-          {/* Ambient Background Accents */}
-          <div className="absolute top-[-10%] right-[-10%] w-[40%] h-[40%] bg-blue-500/10 rounded-full blur-[120px] pointer-events-none" />
-          <div className="absolute bottom-[-10%] left-[-10%] w-[40%] h-[40%] bg-purple-500/10 rounded-full blur-[120px] pointer-events-none" />
 
-          {/* Main content wrapper with max width and centered */}
-          <div className="max-w-7xl mx-auto w-full relative z-10">
-            <Outlet />
+        {/* Route guard — show blocking screen if account is not linked (#29).
+            Only blocks after the profile fetch has settled (profileLoading = false)
+            so we don't flash the screen during the initial token check. */}
+        {!profileLoading && isUnlinked ? (
+          <div className="flex-1 flex items-center justify-center p-8">
+            <div className="max-w-sm text-center space-y-5">
+              <div className="w-16 h-16 rounded-2xl bg-amber-500/10 text-amber-500 flex items-center justify-center mx-auto">
+                <LinkIcon size={28} />
+              </div>
+              <div>
+                <h2 className="text-xl font-semibold text-gray-900 dark:text-white">
+                  Account Not Linked
+                </h2>
+                <p className="mt-2 text-sm text-gray-500 dark:text-gray-400 leading-relaxed">
+                  Your login account hasn't been linked to a teacher profile yet.
+                  Contact HR to link your account before you can use the teacher portal.
+                </p>
+              </div>
+            </div>
           </div>
-        </main>
+        ) : (
+          <main className="flex-1 p-4 sm:p-6 lg:p-8 overflow-x-hidden relative">
+            {/* Ambient Background Accents */}
+            <div className="absolute top-[-10%] right-[-10%] w-[40%] h-[40%] bg-blue-500/10 rounded-full blur-[120px] pointer-events-none" />
+            <div className="absolute bottom-[-10%] left-[-10%] w-[40%] h-[40%] bg-purple-500/10 rounded-full blur-[120px] pointer-events-none" />
+
+            {/* Main content wrapper with max width and centered */}
+            <div className="max-w-7xl mx-auto w-full relative z-10">
+              <Outlet />
+            </div>
+          </main>
+        )}
       </div>
     </div>
   );

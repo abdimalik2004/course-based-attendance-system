@@ -15,7 +15,6 @@ import { Badge } from "@/components/ui/Badge";
 import { ViewButton } from "@/components/ui/ViewButton";
 import { ViewModal } from "@/components/ui/ViewModal";
 import { useFacultyStore } from "@/store/useFacultyStore";
-import { useHrStore } from "@/store/useHrStore";
 import { AssignTeacherModal } from "@/components/faculty/AssignTeacherModal";
 import { ConfirmDeleteModal } from "@/components/academia/ConfirmDeleteModal";
 import type { TeacherAssignment } from "@/store/useFacultyStore";
@@ -24,13 +23,13 @@ export default function AssignTeacher() {
   const {
     assignments,
     courses,
+    teachers,
     isLoading,
     error,
     fetchData,
     openModal,
     deleteAssignment,
   } = useFacultyStore();
-  const { teachers, fetchTeachers } = useHrStore();
   const [deleteId, setDeleteId] = useState<string | null>(null);
   const [viewAssignment, setViewAssignment] =
     useState<TeacherAssignment | null>(null);
@@ -38,8 +37,7 @@ export default function AssignTeacher() {
 
   useEffect(() => {
     fetchData();
-    fetchTeachers();
-  }, [fetchData, fetchTeachers]);
+  }, [fetchData]);
 
   const getCourse = (id: string) => courses.find((c) => c.id === id);
   const getTeacher = (id: string) => teachers.find((t) => t.id === id);
@@ -146,10 +144,10 @@ export default function AssignTeacher() {
                         <TableCell>
                           <Badge
                             variant={
-                              assignment.isPrimary ? "success" : "danger"
+                              assignment.isPrimary ? "success" : "neutral"
                             }
                           >
-                            {assignment.isPrimary ? "Active" : "Inactive"}
+                            {assignment.isPrimary ? "Primary" : "Secondary"}
                           </Badge>
                         </TableCell>
                         <TableCell className="text-right">
@@ -225,12 +223,12 @@ export default function AssignTeacher() {
                     "Unknown Teacher",
                 },
                 {
-                  label: "Status",
+                  label: "Role",
                   value: (
                     <Badge
-                      variant={viewAssignment.isPrimary ? "success" : "danger"}
+                      variant={viewAssignment.isPrimary ? "success" : "neutral"}
                     >
-                      {viewAssignment.isPrimary ? "Active" : "Inactive"}
+                      {viewAssignment.isPrimary ? "Primary" : "Secondary"}
                     </Badge>
                   ),
                 },

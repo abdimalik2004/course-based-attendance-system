@@ -90,13 +90,25 @@ export function AddUserModal() {
     addUser,
     roles,
     faculties,
+    users,
     fetchRolesAndFaculties,
+    fetchUsers,
   } = useUsersStore();
   const { teachers, fetchTeachers } = useHrStore();
   const { students, fetchAdmissionData } = useAdmissionStore();
   const [showPassword, setShowPassword] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
+
+  // Build sets of already-linked IDs so we can filter dropdowns
+  const linkedTeacherIds = new Set(users.map((u) => u.teacherId).filter(Boolean) as string[]);
+  const linkedStudentIds = new Set(users.map((u) => u.studentId).filter(Boolean) as string[]);
+  const linkedFacultyIds = new Set(
+    users
+      .filter((u) => String(u.role).toUpperCase() === "FACULTY")
+      .map((u) => u.facultyId)
+      .filter(Boolean) as string[]
+  );
 
   const {
     register,
@@ -135,6 +147,7 @@ export function AddUserModal() {
       fetchRolesAndFaculties();
       fetchTeachers();
       fetchAdmissionData();
+      fetchUsers();
       reset();
       setSubmitError(null);
     }
@@ -143,6 +156,7 @@ export function AddUserModal() {
     fetchRolesAndFaculties,
     fetchTeachers,
     fetchAdmissionData,
+    fetchUsers,
     reset,
   ]);
 
@@ -203,7 +217,7 @@ export function AddUserModal() {
           <div className="relative">
             <Input
               type={showPassword ? "text" : "password"}
-              placeholder="••••••••"
+              placeholder="Minimum 6 characters"
               {...register("password")}
               error={errors.password?.message}
             />
@@ -244,7 +258,9 @@ export function AddUserModal() {
             </label>
             <Select
               placeholder="Select Faculty"
-              options={faculties.map((f) => ({ value: f.id, label: f.name }))}
+              options={faculties
+                .filter((f) => !linkedFacultyIds.has(String(f.id)))
+                .map((f) => ({ value: f.id, label: f.name }))}
               {...register("facultyId")}
               error={errors.facultyId?.message}
             />
@@ -263,10 +279,12 @@ export function AddUserModal() {
             </label>
             <Select
               placeholder="Select Teacher"
-              options={teachers.map((teacher) => ({
-                value: teacher.id,
-                label: `${teacher.id} - ${teacher.fullName}`,
-              }))}
+              options={teachers
+                .filter((teacher) => !linkedTeacherIds.has(String(teacher.id)))
+                .map((teacher) => ({
+                  value: teacher.id,
+                  label: `${teacher.id} - ${teacher.fullName}`,
+                }))}
               {...register("teacherId")}
               error={errors.teacherId?.message}
             />
@@ -285,10 +303,15 @@ export function AddUserModal() {
             </label>
             <Select
               placeholder="Select Student"
-              options={students.map((student) => ({
-                value: student.id,
-                label: `${student.studentNumber} - ${student.fullName}`,
-              }))}
+              options={students
+                .filter((student) =>
+                  student.status === "approved" &&
+                  !linkedStudentIds.has(String(student.id))
+                )
+                .map((student) => ({
+                  value: student.id,
+                  label: `${student.studentNumber} - ${student.fullName}`,
+                }))}
               {...register("studentId")}
               error={errors.studentId?.message}
             />

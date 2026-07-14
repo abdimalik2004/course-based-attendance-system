@@ -1,5 +1,6 @@
 import { useEffect, useState, useMemo } from "react";
 import { Plus, Edit2, Trash2, Network } from "lucide-react";
+import { Pagination } from "@/components/academia/Pagination";
 import { Card, CardContent } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
 import {
@@ -32,6 +33,8 @@ export default function Departments() {
   const [deleteId, setDeleteId] = useState<string | null>(null);
   const [viewDepartment, setViewDepartment] = useState<Department | null>(null);
   const [searchTerm, setSearchTerm] = useState("");
+  const [page, setPage] = useState(1);
+  const PAGE_SIZE = 10;
 
   useEffect(() => {
     fetchData();
@@ -42,6 +45,7 @@ export default function Departments() {
   };
 
   const filteredDepartments = useMemo(() => {
+    setPage(1);
     return departments.filter((d) => {
       const searchMatch =
         d.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -52,6 +56,12 @@ export default function Departments() {
       return searchMatch || facultyMatch;
     });
   }, [departments, searchTerm, faculties]);
+
+  const totalPages = Math.max(1, Math.ceil(filteredDepartments.length / PAGE_SIZE));
+  const paginatedDepartments = filteredDepartments.slice(
+    (page - 1) * PAGE_SIZE,
+    page * PAGE_SIZE,
+  );
 
   return (
     <div className="space-y-6">
@@ -119,7 +129,7 @@ export default function Departments() {
                     </TableCell>
                   </TableRow>
                 ) : (
-                  filteredDepartments.map((dept) => (
+                  paginatedDepartments.map((dept) => (
                     <TableRow key={dept.id}>
                       <TableCell className="text-gray-600 dark:text-gray-300">
                         {getFacultyName(dept.facultyId)}
@@ -161,6 +171,13 @@ export default function Departments() {
               </TableBody>
             </Table>
           </div>
+          <Pagination
+            page={page}
+            totalPages={totalPages}
+            totalItems={filteredDepartments.length}
+            pageSize={PAGE_SIZE}
+            onPageChange={setPage}
+          />
         </CardContent>
       </Card>
 
@@ -168,7 +185,7 @@ export default function Departments() {
       <ConfirmDeleteModal
         isOpen={!!deleteId}
         onClose={() => setDeleteId(null)}
-        onConfirm={() => deleteId && deleteDepartment(deleteId)}
+        onConfirm={async () => { if (deleteId) await deleteDepartment(deleteId); }}
       />
 
       <ViewModal

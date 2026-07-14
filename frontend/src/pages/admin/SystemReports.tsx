@@ -71,12 +71,24 @@ export default function SystemReports() {
         }
         return records;
       };
+      const fetchAllSessions = async () => {
+        const lim = 200;
+        let sk = 0;
+        const results: any[] = [];
+        while (true) {
+          const r = await api.get('/sessions', { params: { limit: lim, skip: sk } });
+          const page: any[] = Array.isArray(r.data) ? r.data : (r.data?.items ?? r.data?.data ?? []);
+          results.push(...page);
+          if (page.length < lim) break;
+          sk += lim;
+        }
+        return results;
+      };
+
       const [assignmentsResponse, attendanceRecords, sessionsData] = await Promise.all([
         courseService.listAssignments(),
         fetchAllAttendanceRecords(),
-        api.get('/sessions', { params: { limit: 500 } })
-          .then(r => Array.isArray(r.data) ? r.data : (r.data?.items ?? []))
-          .catch(() => [] as any[]),
+        fetchAllSessions().catch(() => [] as any[]),
       ]);
       const assignments = Array.isArray(assignmentsResponse)
         ? assignmentsResponse

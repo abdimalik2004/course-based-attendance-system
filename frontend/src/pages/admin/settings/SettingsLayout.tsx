@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { SettingsSidebar, type SettingsTab } from './components/SettingsSidebar';
 import { GeneralSettings } from './sections/GeneralSettings';
 import { AccountSettings } from './sections/AccountSettings';
@@ -8,8 +8,16 @@ import { SystemPreferences } from './sections/SystemPreferences';
 import { AccessControlSettings } from './sections/AccessControlSettings';
 import { AISettings } from './sections/AISettings';
 
+const VALID_TABS: SettingsTab[] = ['general', 'account', 'security', 'notifications', 'preferences', 'access', 'ai'];
+
 export default function SettingsLayout() {
-  const [activeTab, setActiveTab] = useState<SettingsTab>('general');
+  const [searchParams, setSearchParams] = useSearchParams();
+  const tabParam = searchParams.get('tab') as SettingsTab | null;
+  const activeTab: SettingsTab = tabParam && VALID_TABS.includes(tabParam) ? tabParam : 'general';
+
+  const setActiveTab = (tab: SettingsTab) => {
+    setSearchParams({ tab }, { replace: true });
+  };
 
   const renderContent = () => {
     switch (activeTab) {

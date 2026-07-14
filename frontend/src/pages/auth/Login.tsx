@@ -356,13 +356,6 @@ export default function Login() {
                   <div className="space-y-1.5">
                     <div className="flex items-center justify-between ml-1">
                       <label className="text-sm font-medium text-gray-700 dark:text-gray-300">Password</label>
-                      <button
-                        type="button"
-                        onClick={() => setFpStep("fp_email")}
-                        className="text-xs text-primary-accent hover:text-primary transition-colors"
-                      >
-                        Forgot Password?
-                      </button>
                     </div>
                     <div className="relative group">
                       <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none text-gray-500 z-10 transition-colors group-focus-within:text-primary">

@@ -1,13 +1,13 @@
 """Notifications router — REST CRUD + per-user WebSocket."""
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, WebSocket, WebSocketDisconnect, status
+from fastapi import APIRouter, Depends, HTTPException, Query, WebSocket, WebSocketDisconnect, status
 from pydantic import BaseModel, ConfigDict
 from sqlalchemy.orm import Session
 
-from app.core.security import get_current_user
+from app.core.security import decode_token, get_current_user
 from app.db.models import Notification, User
-from app.db.session import get_db
+from app.db.session import get_db, SessionLocal
 from app.services.notification_service import notification_ws_manager
 
 router = APIRouter(prefix="/notifications", tags=["notifications"])
@@ -129,12 +129,28 @@ def delete_notification(
 async def notifications_ws(
     websocket: WebSocket,
     user_id: int,
-    db: Session = Depends(get_db),
+    token: str = Query(...),
 ):
     """
-    Per-user WebSocket.  The frontend connects here after login.
+    Per-user WebSocket.  The frontend connects here after login with ?token=<jwt>.
     The server pushes new notifications as JSON objects as they arrive.
     """
+    # Validate the JWT token from the query string
+    db = SessionLocal()
+    try:
+        try:
+            username = decode_token(token)
+        except Exception:
+            await websocket.close(code=4001)
+            return
+
+        user = db.query(User).filter(User.username == username, User.is_active == True).first()
+        if not user or user.id != user_id:
+            await websocket.close(code=4001)
+            return
+    finally:
+        db.close()
+
     await notification_ws_manager.connect(websocket, user_id)
     try:
         while True:

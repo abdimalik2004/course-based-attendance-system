@@ -98,9 +98,16 @@ export function AccountSettings() {
   };
 
   const handleRemovePicture = async () => {
-    // Optimistically clear avatar; no dedicated DELETE endpoint, so just clear locally
-    setAvatarUrl(null);
     setUploadError('');
+    setIsUploading(true);
+    try {
+      await api.delete('/users/me/profile-image');
+      setAvatarUrl(null);
+    } catch {
+      setUploadError('Failed to remove picture. Please try again.');
+    } finally {
+      setIsUploading(false);
+    }
   };
 
   const displayAvatar = avatarUrl

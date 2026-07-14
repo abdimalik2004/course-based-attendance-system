@@ -58,6 +58,7 @@ export default function RolesManagement() {
   // Edit state
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editName, setEditName] = useState("");
+  const [createError, setCreateError] = useState("");
   const [editError, setEditError] = useState("");
   const [deleteError, setDeleteError] = useState("");
   const [editSaving, setEditSaving] = useState(false);
@@ -77,12 +78,13 @@ export default function RolesManagement() {
   }, [fetchRolesAndFaculties]);
 
   const onCreateSubmit = async (data: RoleFormData) => {
+    setCreateError("");
     try {
       await addRole(data.name);
       reset();
       setCreateModalOpen(false);
-    } catch (err) {
-      console.error(err);
+    } catch (err: any) {
+      setCreateError(err?.message ?? "Failed to create role. Please try again.");
     }
   };
 
@@ -240,7 +242,7 @@ export default function RolesManagement() {
           <div className="grid grid-cols-3 gap-4 border-b border-gray-100 dark:border-white/5 pb-4">
             <div className="text-sm font-medium text-gray-500">Role Name</div>
             <div className="col-span-2 text-sm font-medium text-gray-900 dark:text-white">
-              {selectedRole?.name}
+              {selectedRole ? (roleLabelMap[selectedRole.name] ?? selectedRole.name) : null}
             </div>
           </div>
           <div className="flex justify-end pt-4">
@@ -252,7 +254,7 @@ export default function RolesManagement() {
       {/* Create Role Modal */}
       <Modal
         isOpen={createModalOpen}
-        onClose={() => setCreateModalOpen(false)}
+        onClose={() => { setCreateModalOpen(false); reset(); setCreateError(""); }}
         title="Create New Role"
         className="md:max-w-md"
       >
@@ -272,6 +274,10 @@ export default function RolesManagement() {
             />
           </div>
 
+          {createError && (
+            <p className="text-sm text-red-400">{createError}</p>
+          )}
+
           <div className="flex items-center justify-end gap-3 pt-6 border-t border-gray-100 dark:border-white/5 mt-6">
             <Button
               type="button"
@@ -279,6 +285,7 @@ export default function RolesManagement() {
               onClick={() => {
                 setCreateModalOpen(false);
                 reset();
+                setCreateError("");
               }}
             >
               Cancel

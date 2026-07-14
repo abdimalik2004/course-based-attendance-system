@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, Link } from "react-router-dom";
+import { useAuthStore } from "@/store/useAuthStore";
 import {
   Users,
   GraduationCap,
@@ -30,6 +31,7 @@ import type { ActivityLog } from "@/services/activityService";
 
 function AdminDashboard() {
   const navigate = useNavigate();
+  const username = useAuthStore((s) => s.user?.username ?? "Admin");
   const [recentActivities, setRecentActivities] = useState<ActivityLog[]>([]);
   const [isWebSocketConnected, setIsWebSocketConnected] = useState(false);
 
@@ -75,13 +77,11 @@ function AdminDashboard() {
       });
     };
 
-    const handleError = (error: Event) => {
-      console.error("WebSocket error:", error);
+    const handleError = (_error: Event) => {
       setIsWebSocketConnected(false);
     };
 
-    const handleClose = (event: CloseEvent) => {
-      console.log("WebSocket closed:", event);
+    const handleClose = (_event: CloseEvent) => {
       setIsWebSocketConnected(false);
     };
 
@@ -103,8 +103,8 @@ function AdminDashboard() {
         clearInterval(statusCheckInterval);
         // Don't disconnect on unmount in case other components use it
       };
-    } catch (e) {
-      console.error("Failed to setup WebSocket:", e);
+    } catch {
+      // WebSocket setup failed — UI will reflect disconnected state
     }
   }, []);
 
@@ -147,7 +147,7 @@ function AdminDashboard() {
     },
   ];
 
-  if (error) console.error("Failed to load admin overview", error);
+  // error is surfaced via the UI query error state below
 
   return (
     <div className="space-y-6">
@@ -156,7 +156,7 @@ function AdminDashboard() {
           Overview
         </h2>
         <p className="text-sm text-gray-500 dark:text-gray-400">
-          Welcome back, Admin. Here's what's happening today.
+          Welcome back, <span className="font-medium text-gray-700 dark:text-gray-300">{username}</span>. Here's what's happening today.
         </p>
       </div>
 
@@ -214,17 +214,25 @@ function AdminDashboard() {
                   )}
                 </p>
               </div>
-              <button
-                onClick={() => refetchActivity()}
-                disabled={activityFetching}
-                className="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-white/10 transition-colors disabled:opacity-40"
-                title="Refresh activity"
-              >
-                <RefreshCw
-                  size={15}
-                  className={`text-gray-400 ${activityFetching ? "animate-spin" : ""}`}
-                />
-              </button>
+              <div className="flex items-center gap-2">
+                <Link
+                  to="/admin/activity-log"
+                  className="text-xs text-primary hover:underline whitespace-nowrap"
+                >
+                  View all →
+                </Link>
+                <button
+                  onClick={() => refetchActivity()}
+                  disabled={activityFetching}
+                  className="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-white/10 transition-colors disabled:opacity-40"
+                  title="Refresh activity"
+                >
+                  <RefreshCw
+                    size={15}
+                    className={`text-gray-400 ${activityFetching ? "animate-spin" : ""}`}
+                  />
+                </button>
+              </div>
             </div>
             <div className="overflow-auto max-h-[340px] custom-scrollbar">
               <Table>

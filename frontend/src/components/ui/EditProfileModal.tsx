@@ -6,6 +6,7 @@ import { Modal } from "@/components/ui/Modal";
 import { useAuthStore } from "@/store/useAuthStore";
 import { useUIStore } from "@/store/useUIStore";
 import { api } from "@/services/api";
+import { useQueryClient } from "@tanstack/react-query";
 
 const API_URL = import.meta.env.VITE_API_URL ?? "";
 
@@ -17,6 +18,7 @@ function resolveUrl(url: string | null | undefined): string | null {
 export function EditProfileModal() {
   const { user, updateProfileImage, login } = useAuthStore();
   const { isEditProfileOpen, closeEditProfile } = useUIStore();
+  const queryClient = useQueryClient();
 
   const [username, setUsername] = useState("");
   const [email, setEmail] = useState("");
@@ -82,6 +84,8 @@ export function EditProfileModal() {
         const res = await api.patch("/users/me", payload);
         // Re-sync auth store with returned user data
         login(res.data);
+        // Invalidate student profile cache so the Contact section refreshes
+        queryClient.invalidateQueries({ queryKey: ["studentProfile"] });
         changed = true;
       }
 

@@ -90,13 +90,31 @@ api.interceptors.response.use(
       }
     }
 
+    // Normalize backend error envelope → inject `detail` so all stores work.
+    // main.py wraps every HTTPException as { error: { message, details, ... } }
+    // instead of FastAPI's default { detail: "..." }. Shim it here once so that
+    // the 25+ store/component error handlers that read `err.response.data.detail`
+    // don't need to be updated.
+    if (error.response?.data) {
+      const data = error.response.data as any;
+      if (data?.error !== undefined && data.detail === undefined) {
+        // Prefer `details` (structured data for complex errors / validation arrays);
+        // fall back to the human-readable `message` string.
+        if (data.error.details !== null && data.error.details !== undefined) {
+          data.detail = data.error.details;
+        } else if (typeof data.error.message === "string") {
+          data.detail = data.error.message;
+        }
+      }
+    }
+
     // Handle forbidden — show a non-blocking toast instead of alert()
     if (status === 403) {
       const data = error.response?.data as any;
-      // Backend wraps errors as { error: { message: "..." } }; fall back to legacy { detail: "..." }
+      // `detail` is now always normalised (see above), but keep the fallback for safety.
       const message =
-        (typeof data?.error?.message === "string" ? data.error.message : null) ??
         (typeof data?.detail === "string" ? data.detail : null) ??
+        (typeof data?.error?.message === "string" ? data.error.message : null) ??
         "You don't have permission to perform this action.";
       toast.error(message);
     }

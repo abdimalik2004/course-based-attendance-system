@@ -5,10 +5,11 @@ from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy import and_
 
-from app.core.security import require_roles
+from app.core.security import get_current_user, require_roles
 from app.db.faculty_scope import enforce_faculty_scope, get_optional_faculty_scope_context
-from app.db.models import Course, CourseSchedule, CourseScheduleWeekday
+from app.db.models import Course, CourseSchedule, CourseScheduleWeekday, User
 from app.db.role_scoped import get_role_scoped_db
+from app.utils.activity_logger import log_activity
 from app.utils.weekday_utils import (
     weekday_code,
     decode_weekday_codes,
@@ -162,6 +163,7 @@ def create_schedule(
     payload: CourseScheduleCreate,
     db: Session = Depends(get_role_scoped_db),
     faculty_scope = Depends(get_optional_faculty_scope_context),
+    current_user: User = Depends(get_current_user),
 ):
     _validate_schedule_window(payload.start_time, payload.end_time)
     try:
@@ -202,6 +204,14 @@ def create_schedule(
         db.rollback()
         raise HTTPException(status_code=409, detail="Schedule already exists for this course/day/time") from exc
     db.refresh(obj)
+    course = db.query(Course).filter(Course.id == payload.course_id).first()
+    course_label = course.title if course else f"Course #{payload.course_id}"
+    day_labels = ", ".join(weekday_code(w) for w in weekdays) if weekdays else ""
+    log_activity(
+        action=f"Course Scheduled - {course_label} ({day_labels} {payload.start_time}–{payload.end_time})",
+        user=current_user,
+        db=db,
+    )
     return _to_read_model(obj)
 
 

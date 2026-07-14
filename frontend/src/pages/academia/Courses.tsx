@@ -1,5 +1,6 @@
 import { useEffect, useState, useMemo } from "react";
 import { Plus, Edit2, Trash2, BookOpen } from "lucide-react";
+import { Pagination } from "@/components/academia/Pagination";
 import { Card, CardContent } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
 import {
@@ -32,6 +33,8 @@ export default function Courses() {
   const [deleteId, setDeleteId] = useState<string | null>(null);
   const [viewCourse, setViewCourse] = useState<Course | null>(null);
   const [searchTerm, setSearchTerm] = useState("");
+  const [page, setPage] = useState(1);
+  const PAGE_SIZE = 10;
 
   useEffect(() => {
     fetchData();
@@ -46,6 +49,7 @@ export default function Courses() {
   };
 
   const filteredCourses = useMemo(() => {
+    setPage(1);
     return courses.filter((c) => {
       const searchMatch =
         c.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -59,6 +63,12 @@ export default function Courses() {
       return searchMatch || facultyMatch || deptMatch;
     });
   }, [courses, searchTerm, faculties, departments]);
+
+  const totalPages = Math.max(1, Math.ceil(filteredCourses.length / PAGE_SIZE));
+  const paginatedCourses = filteredCourses.slice(
+    (page - 1) * PAGE_SIZE,
+    page * PAGE_SIZE,
+  );
 
   return (
     <div className="space-y-6">
@@ -123,7 +133,7 @@ export default function Courses() {
                     </TableCell>
                   </TableRow>
                 ) : (
-                  filteredCourses.map((course) => (
+                  paginatedCourses.map((course) => (
                     <TableRow key={course.id}>
                       <TableCell className="font-medium text-gray-900 dark:text-white">
                         {course.code}
@@ -163,6 +173,13 @@ export default function Courses() {
               </TableBody>
             </Table>
           </div>
+          <Pagination
+            page={page}
+            totalPages={totalPages}
+            totalItems={filteredCourses.length}
+            pageSize={PAGE_SIZE}
+            onPageChange={setPage}
+          />
         </CardContent>
       </Card>
 
@@ -170,7 +187,7 @@ export default function Courses() {
       <ConfirmDeleteModal
         isOpen={!!deleteId}
         onClose={() => setDeleteId(null)}
-        onConfirm={() => deleteId && deleteCourse(deleteId)}
+        onConfirm={async () => { if (deleteId) await deleteCourse(deleteId); }}
       />
 
       <ViewModal

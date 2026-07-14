@@ -1,5 +1,5 @@
-import { useEffect, useState } from "react";
-import { Plus, Edit2, Trash2, Eye } from "lucide-react";
+import { useEffect, useState, useMemo } from "react";
+import { Plus, Edit2, Trash2, Eye, Search } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
 import {
@@ -12,10 +12,21 @@ import {
 } from "@/components/ui/Table";
 import { Badge } from "@/components/ui/Badge";
 import { Modal } from "@/components/ui/Modal";
+import { Input } from "@/components/ui/Input";
 import { useUsersStore } from "@/store/useUsersStore";
 import { AddUserModal } from "./components/AddUserModal";
 import { EditUserModal } from "./components/EditUserModal";
 import type { User } from "@/types/users.types";
+
+const ROLE_LABEL_MAP: Record<string, string> = {
+  SUPER_ADMIN: "Administrator",
+  ACADEMIA: "Academic Office",
+  ADMISSIONS: "Admissions",
+  HR: "Human Resources",
+  FACULTY: "Faculty Admin",
+  TEACHER: "Teacher",
+  STUDENT: "Student",
+};
 
 type RoleFilter = "ALL" | "SUPER_ADMIN" | "ADMISSIONS" | "ACADEMIA" | "HR" | "FACULTY" | "TEACHER" | "STUDENT";
 
@@ -31,14 +42,16 @@ const ROLE_FILTERS: { label: string; value: RoleFilter }[] = [
 ];
 
 export default function UsersManagement() {
-  const { users, isLoading, fetchUsers, setModalOpen, deleteUser } =
+  const { users, faculties, isLoading, fetchUsers, setModalOpen, deleteUser } =
     useUsersStore();
 
   const [selectedUser, setSelectedUser] = useState<User | null>(null);
   const [isViewModalOpen, setIsViewModalOpen] = useState(false);
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
   const [activeFilter, setActiveFilter] = useState<RoleFilter>("ALL");
+  const [searchQuery, setSearchQuery] = useState("");
 
   useEffect(() => {
     fetchUsers();
@@ -59,18 +72,30 @@ export default function UsersManagement() {
     setIsDeleteModalOpen(true);
   };
 
-  const confirmDelete = () => {
-    if (selectedUser) {
-      deleteUser(selectedUser.id);
+  const confirmDelete = async () => {
+    if (!selectedUser) return;
+    setDeleteError(null);
+    try {
+      await deleteUser(selectedUser.id);
       setIsDeleteModalOpen(false);
       setSelectedUser(null);
+    } catch (err: any) {
+      setDeleteError(err.message || "Failed to delete user. Please try again.");
     }
   };
 
-  const filteredUsers =
-    activeFilter === "ALL"
-      ? users
-      : users.filter((u) => u.role === activeFilter);
+  const filteredUsers = useMemo(() => {
+    let result = activeFilter === "ALL" ? users : users.filter((u) => u.role === activeFilter);
+    if (searchQuery.trim()) {
+      const q = searchQuery.toLowerCase();
+      result = result.filter(
+        (u) =>
+          u.username.toLowerCase().includes(q) ||
+          (u.email ?? "").toLowerCase().includes(q)
+      );
+    }
+    return result;
+  }, [users, activeFilter, searchQuery]);
 
   return (
     <div className="space-y-6">
@@ -93,6 +118,18 @@ export default function UsersManagement() {
             Add New User
           </Button>
         </div>
+
+        {/* Search bar */}
+        <div className="relative mt-3 max-w-sm">
+          <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
+          <Input
+            placeholder="Search by name or email…"
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            className="pl-9"
+          />
+        </div>
+
         {/* Role filter pills */}
         <div className="flex flex-nowrap gap-1.5 mt-3 overflow-x-auto pb-1 scrollbar-none">
           {ROLE_FILTERS.map(({ label, value }) => {
@@ -127,6 +164,25 @@ export default function UsersManagement() {
         </div>
       </div>
 
+      {/* Count indicator */}
+      {!isLoading && (
+        <p className="text-sm text-gray-500 dark:text-gray-400 -mt-2">
+          Showing{" "}
+          <span className="font-medium text-gray-900 dark:text-gray-100">{filteredUsers.length}</span>
+          {" "}of{" "}
+          <span className="font-medium text-gray-900 dark:text-gray-100">{users.length}</span>
+          {" "}users
+          {(searchQuery || activeFilter !== "ALL") && (
+            <button
+              onClick={() => { setSearchQuery(""); setActiveFilter("ALL"); }}
+              className="ml-2 text-primary hover:underline"
+            >
+              Clear filters
+            </button>
+          )}
+        </p>
+      )}
+
       <Card className="glass-card shadow-2xl shadow-primary/5">
         <CardContent className="p-0">
           <div className="overflow-x-auto custom-scrollbar w-full">
@@ -135,7 +191,6 @@ export default function UsersManagement() {
                 <TableRow>
                   <TableHead>User Name</TableHead>
                   <TableHead>Email</TableHead>
-                  <TableHead>Password</TableHead>
                   <TableHead>Role</TableHead>
                   <TableHead>Faculty ID</TableHead>
                   <TableHead>Status</TableHead>
@@ -159,9 +214,6 @@ export default function UsersManagement() {
                         <div className="h-4 w-16 bg-gray-200 dark:bg-white/10 rounded animate-pulse" />
                       </TableCell>
                       <TableCell>
-                        <div className="h-4 w-16 bg-gray-200 dark:bg-white/10 rounded animate-pulse" />
-                      </TableCell>
-                      <TableCell>
                         <div className="h-6 w-16 bg-gray-200 dark:bg-white/10 rounded-full animate-pulse" />
                       </TableCell>
                       <TableCell>
@@ -171,7 +223,7 @@ export default function UsersManagement() {
                   ))
                 ) : filteredUsers.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={7} className="h-24 text-center">
+                    <TableCell colSpan={6} className="h-24 text-center">
                       No users found{activeFilter !== "ALL" ? ` for role "${activeFilter}"` : ""}.
                     </TableCell>
                   </TableRow>
@@ -184,12 +236,9 @@ export default function UsersManagement() {
                       <TableCell className="text-gray-500 dark:text-gray-400">
                         {user.email}
                       </TableCell>
-                      <TableCell className="text-gray-400 dark:text-gray-500 text-lg tracking-[0.2em] font-medium pt-3">
-                        ••••••••
-                      </TableCell>
                       <TableCell>
                         <span className="text-sm text-gray-700 dark:text-gray-300">
-                          {user.role}
+                          {ROLE_LABEL_MAP[user.role] ?? user.role}
                         </span>
                       </TableCell>
                       <TableCell>
@@ -272,25 +321,20 @@ export default function UsersManagement() {
                   Role
                 </label>
                 <div className="mt-1 text-gray-900 dark:text-gray-100">
-                  {selectedUser.role}
+                  {ROLE_LABEL_MAP[selectedUser.role] ?? selectedUser.role}
                 </div>
               </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-500 dark:text-gray-400">
-                  Password
-                </label>
-                <div className="mt-1 text-gray-900 dark:text-gray-100 text-lg tracking-[0.2em] font-medium pt-1">
-                  ••••••••
+              {selectedUser.facultyId && (
+                <div>
+                  <label className="block text-sm font-medium text-gray-500 dark:text-gray-400">
+                    Assigned Faculty
+                  </label>
+                  <div className="mt-1 text-gray-900 dark:text-gray-100">
+                    {faculties.find((f) => String(f.id) === String(selectedUser.facultyId))?.name
+                      ?? `Faculty #${selectedUser.facultyId}`}
+                  </div>
                 </div>
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-500 dark:text-gray-400">
-                  Faculty ID
-                </label>
-                <div className="mt-1 text-gray-900 dark:text-gray-100 font-mono">
-                  {selectedUser.facultyId || "-"}
-                </div>
-              </div>
+              )}
               <div>
                 <label className="block text-sm font-medium text-gray-500 dark:text-gray-400">
                   Status
@@ -322,7 +366,7 @@ export default function UsersManagement() {
       {/* Delete Confirmation Modal */}
       <Modal
         isOpen={isDeleteModalOpen}
-        onClose={() => setIsDeleteModalOpen(false)}
+        onClose={() => { setIsDeleteModalOpen(false); setDeleteError(null); }}
         title="Confirm Deletion"
       >
         <div className="space-y-4">
@@ -333,10 +377,15 @@ export default function UsersManagement() {
             </span>
             ? This action cannot be undone.
           </p>
+          {deleteError && (
+            <div className="flex items-center gap-2 text-sm text-red-500 bg-red-50 dark:bg-red-500/10 rounded-lg px-3 py-2">
+              <span>{deleteError}</span>
+            </div>
+          )}
           <div className="pt-4 flex justify-end gap-2">
             <Button
               variant="secondary"
-              onClick={() => setIsDeleteModalOpen(false)}
+              onClick={() => { setIsDeleteModalOpen(false); setDeleteError(null); }}
             >
               Cancel
             </Button>

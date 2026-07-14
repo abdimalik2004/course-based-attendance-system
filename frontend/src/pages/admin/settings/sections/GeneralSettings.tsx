@@ -123,11 +123,12 @@ export function GeneralSettings() {
               <Select
                 options={[
                   { value: 'en', label: 'English' },
-                  { value: 'ar', label: 'Arabic' },
+                  { value: 'ar', label: 'Arabic (Coming Soon)', disabled: true },
                 ]}
                 value={form.language}
                 onChange={(e) => update('language', e.target.value)}
               />
+              <p className="text-xs text-gray-500 ml-1">Arabic / RTL support is planned for a future release.</p>
             </div>
           </div>
 

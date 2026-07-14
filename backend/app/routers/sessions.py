@@ -8,7 +8,7 @@ from sqlalchemy import false as sa_false
 
 from app.core.security import get_current_user, require_roles
 from app.db.faculty_scope import enforce_faculty_scope, get_optional_faculty_scope_context
-from app.db.models import AcademicYear, AcademicYearStatus, AttendanceRecord, AttendanceSession, Course, CourseAssignment, CourseSemesterAssignment, SessionStatus, Student, Teacher, User
+from app.db.models import AcademicYear, AcademicYearStatus, AttendanceRecord, AttendanceSession, AttendanceStatus, Course, CourseAssignment, CourseSemesterAssignment, SessionStatus, Student, Teacher, User
 from app.db.role_scoped import get_role_scoped_db
 from app.schemas.attendance import AttendanceSessionEndRequest, AttendanceSessionRead, AttendanceSessionStartRequest
 from app.services.attendance_service import attendance_service
@@ -22,8 +22,42 @@ router = APIRouter(prefix="/sessions", tags=["sessions"])
 
 # Roles that can start/end sessions (must be a teacher or admin actor)
 _SESSION_MGMT_ROLES = ("SUPER_ADMIN", "ACADEMIA", "FACULTY", "TEACHER")
-# Roles that can READ sessions (includes report-only admin role)
-_SESSION_ROLES = ("SUPER_ADMIN", "ADMIN", "HR", "ACADEMIA", "FACULTY", "TEACHER")
+
+
+def _notify_absent_students(db: Session, session: AttendanceSession) -> None:
+    """Send an in-app notification to every student marked ABSENT in this session."""
+    absent_records = (
+        db.query(AttendanceRecord)
+        .filter(
+            AttendanceRecord.session_id == session.id,
+            AttendanceRecord.status == AttendanceStatus.ABSENT,
+        )
+        .all()
+    )
+
+    course_title = session.course.title if session.course else f"Course #{session.course_id}"
+
+    for record in absent_records:
+        student_user = (
+            db.query(User)
+            .filter(User.student_id == record.student_id)
+            .first()
+        )
+        if not student_user:
+            continue
+        create_notification(
+            db,
+            student_user.id,
+            f"Absent — {course_title}",
+            (
+                f"You were marked absent for today's {course_title} session. "
+                f"If you were present, you can submit an excuse request from your Attendance page."
+            ),
+            NotificationType.WARNING,
+            "/student/attendance",
+        )
+# Roles that can READ sessions
+_SESSION_ROLES = ("SUPER_ADMIN", "HR", "ACADEMIA", "FACULTY", "TEACHER")
 
 
 @router.post(
@@ -39,6 +73,23 @@ def start_session(
 ):
     # Auto-deactivate any expired semesters before we check
     _sync_semester_statuses(db)
+
+    # Auto-close any ACTIVE sessions from a previous day that were never ended
+    # (e.g. browser was closed without clicking End Session).
+    from datetime import date as _date
+    today = _date.today()
+    stale_sessions = (
+        db.query(AttendanceSession)
+        .filter(
+            AttendanceSession.status == SessionStatus.ACTIVE,
+            AttendanceSession.session_date < today,
+        )
+        .all()
+    )
+    for stale in stale_sessions:
+        attendance_service.close_session_and_mark_absent(db, stale)
+    if stale_sessions:
+        db.commit()
 
     course = db.query(Course).filter(Course.id == payload.course_id).first()
     if not course:
@@ -82,6 +133,7 @@ def start_session(
         schedule_id=payload.schedule_id,
         session_type=payload.session_type,
         actor_id=current_user.id,
+        notes=payload.notes,
     )
     if not result["ok"]:
         _bad_request_codes = {"WRONG_DAY", "TOO_EARLY", "TOO_LATE", "SESSION_ALREADY_COMPLETED"}
@@ -121,6 +173,10 @@ def end_session(
         user=current_user,
         db=db,
     )
+    # Notify every absent student — only fires when the session was actually
+    # closed just now (not if it was already closed before this call)
+    if result.get("ended"):
+        _notify_absent_students(db, session)
     return result["session"]
 
 
@@ -129,6 +185,8 @@ def list_sessions(
     db: Session = Depends(get_role_scoped_db),
     current_user: User = Depends(get_current_user),
     faculty_scope = Depends(get_optional_faculty_scope_context),
+    limit: int = Query(default=200, ge=1, le=2000),
+    skip: int = Query(default=0, ge=0),
 ):
     query = db.query(AttendanceSession).join(Course, Course.id == AttendanceSession.course_id)
     if faculty_scope is not None:
@@ -144,13 +202,13 @@ def list_sessions(
             # No Teacher record linked to this user account — return nothing
             query = query.filter(sa_false())
 
-    return query.order_by(AttendanceSession.start_time.desc()).all()
+    return query.order_by(AttendanceSession.start_time.desc()).offset(skip).limit(limit).all()
 
 
 @router.get(
     "/active",
     response_model=list[AttendanceSessionRead],
-    dependencies=[Depends(require_roles("ADMIN", "TEACHER"))],
+    dependencies=[Depends(require_roles(*_SESSION_MGMT_ROLES))],
 )
 def list_active_sessions(
     db: Session = Depends(get_role_scoped_db),
@@ -160,10 +218,31 @@ def list_active_sessions(
     course_id: int | None = Query(default=None, description="Filter by course id"),
     faculty_id: int | None = Query(default=None, description="Filter by faculty id"),
 ):
+    from datetime import date as _date
+    today = _date.today()
+
+    # Auto-close any ACTIVE sessions left open from a previous day so they
+    # never resurface as "active" in the banner on future days.
+    stale = (
+        db.query(AttendanceSession)
+        .filter(
+            AttendanceSession.status == SessionStatus.ACTIVE,
+            AttendanceSession.session_date < today,
+        )
+        .all()
+    )
+    for s in stale:
+        attendance_service.close_session_and_mark_absent(db, s)
+    if stale:
+        db.commit()
+
     query = (
         db.query(AttendanceSession)
         .join(Course, Course.id == AttendanceSession.course_id)
-        .filter(AttendanceSession.status == SessionStatus.ACTIVE)
+        .filter(
+            AttendanceSession.status == SessionStatus.ACTIVE,
+            AttendanceSession.session_date == today,   # only today's sessions
+        )
     )
 
     if faculty_scope is not None:

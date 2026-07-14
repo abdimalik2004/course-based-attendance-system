@@ -127,6 +127,7 @@ class UserRead(BaseModel):
     email: str | None
     is_active: bool
     faculty_id: int | None
+    faculty_name: str | None = None
     teacher_id: int | None = None
     student_id: int | None = None
     student_number: str | None = None

@@ -29,6 +29,16 @@ const editUserSchema = z.object({
 
 type EditUserFormData = z.infer<typeof editUserSchema>;
 
+const ROLE_LABEL_MAP: Record<string, string> = {
+  SUPER_ADMIN: 'Administrator',
+  ACADEMIA: 'Academic Office',
+  ADMISSIONS: 'Admissions Office',
+  HR: 'Human Resources',
+  FACULTY: 'Faculty Admin',
+  TEACHER: 'Teacher',
+  STUDENT: 'Student',
+};
+
 interface EditUserModalProps {
   isOpen: boolean;
   onClose: () => void;
@@ -38,6 +48,7 @@ interface EditUserModalProps {
 export function EditUserModal({ isOpen, onClose, user }: EditUserModalProps) {
   const { editUser, roles, faculties, fetchRolesAndFaculties } = useUsersStore();
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState<string | null>(null);
 
   const {
     register,
@@ -55,6 +66,7 @@ export function EditUserModal({ isOpen, onClose, user }: EditUserModalProps) {
 
   useEffect(() => {
     if (isOpen) {
+      setSubmitError(null);
       fetchRolesAndFaculties();
       if (user) {
         setValue('username', user.username);
@@ -72,7 +84,7 @@ export function EditUserModal({ isOpen, onClose, user }: EditUserModalProps) {
 
   const onSubmit = async (data: EditUserFormData) => {
     if (!user) return;
-    
+    setSubmitError(null);
     setIsSubmitting(true);
     try {
       await editUser(user.id, {
@@ -80,8 +92,8 @@ export function EditUserModal({ isOpen, onClose, user }: EditUserModalProps) {
         facultyId: isFacultyRole ? data.facultyId : null
       });
       onClose();
-    } catch (error) {
-      console.error(error);
+    } catch (err: any) {
+      setSubmitError(err.message || "Failed to update user. Please try again.");
     } finally {
       setIsSubmitting(false);
     }
@@ -124,7 +136,7 @@ export function EditUserModal({ isOpen, onClose, user }: EditUserModalProps) {
               Role <span className="text-primary">*</span>
             </label>
             <Select
-              options={roles.map(r => ({ value: r.name, label: r.name }))}
+              options={roles.map(r => ({ value: r.name, label: ROLE_LABEL_MAP[r.name] ?? r.name }))}
               {...register('role')}
               error={errors.role?.message}
             />
@@ -162,6 +174,12 @@ export function EditUserModal({ isOpen, onClose, user }: EditUserModalProps) {
               error={errors.status?.message}
             />
           </div>
+
+          {submitError && (
+            <div className="flex items-center gap-2 text-sm text-red-500 bg-red-50 dark:bg-red-500/10 rounded-lg px-3 py-2 mt-2">
+              <span>{submitError}</span>
+            </div>
+          )}
 
           <div className="flex items-center justify-end gap-3 pt-6 border-t border-gray-100 dark:border-white/5 mt-6">
             <Button

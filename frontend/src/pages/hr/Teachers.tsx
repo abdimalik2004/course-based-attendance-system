@@ -1,6 +1,5 @@
 import { useState, useEffect } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
-import { Plus, Search, Edit2, Trash2 } from 'lucide-react';
+import { Plus, Search, Edit2, Trash2, Link2, Link2Off } from 'lucide-react';
 import { useSearchParams } from 'react-router-dom';
 import { useHrStore } from '@/store/useHrStore';
 import type { Teacher } from '@/services/hrService';
@@ -11,9 +10,10 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { TeacherModal } from '@/components/hr/TeacherModal';
 import { ViewButton } from '@/components/ui/ViewButton';
 import { ViewModal } from '@/components/ui/ViewModal';
+import { ConfirmDeleteModal } from '@/components/academia/ConfirmDeleteModal';
 
 export default function Teachers() {
-  const { teachers, faculties, departments, fetchTeachers, fetchFaculties, fetchDepartments, deleteTeacher, isLoading } = useHrStore();
+  const { teachers, faculties, departments, fetchAll, deleteTeacher, isLoading } = useHrStore();
   const [modalState, setModalState] = useState<{ isOpen: boolean; mode: 'create' | 'edit'; record: Teacher | null }>({
     isOpen: false,
     mode: 'create',
@@ -26,7 +26,7 @@ export default function Teachers() {
   const [searchParams] = useSearchParams();
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>(searchParams.get('status') ?? 'All');
-  const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<Teacher | null>(null);
 
   // Sync status filter if URL param changes (e.g. back-navigate from dashboard)
   useEffect(() => {
@@ -34,10 +34,8 @@ export default function Teachers() {
   }, [searchParams]);
 
   useEffect(() => {
-    fetchTeachers();
-    fetchFaculties();
-    fetchDepartments();
-  }, [fetchTeachers, fetchFaculties, fetchDepartments]);
+    fetchAll();
+  }, [fetchAll]);
 
   const filteredTeachers = teachers.filter(t => {
     const matchesSearch =
@@ -49,13 +47,6 @@ export default function Teachers() {
 
   const getFacultyName = (id: string) => faculties.find(f => f.id === id)?.name || id;
   const getDepartmentName = (id: string) => departments.find(d => d.id === id)?.name || id;
-
-  const handleDelete = async () => {
-    if (deleteConfirmId) {
-      await deleteTeacher(deleteConfirmId);
-      setDeleteConfirmId(null);
-    }
-  };
 
   return (
     <div className="space-y-6">
@@ -179,9 +170,9 @@ export default function Teachers() {
                           >
                             <Edit2 size={16} />
                           </button>
-                          <button 
-                            onClick={() => setDeleteConfirmId(teacher.id)}
-                            className="p-1.5 rounded-lg text-red-500 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-500/10 transition-colors" 
+                          <button
+                            onClick={() => setDeleteTarget(teacher)}
+                            className="p-1.5 rounded-lg text-red-500 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-500/10 transition-colors"
                             title="Delete"
                           >
                             <Trash2 size={16} />
@@ -197,11 +188,12 @@ export default function Teachers() {
         </CardContent>
       </Card>
 
-      <TeacherModal 
+      <TeacherModal
         isOpen={modalState.isOpen}
         mode={modalState.mode}
         record={modalState.record}
         onClose={() => setModalState(prev => ({ ...prev, isOpen: false }))}
+        onSave={(updated) => setModalState(prev => ({ ...prev, record: updated }))}
       />
 
       <ViewModal
@@ -213,60 +205,46 @@ export default function Teachers() {
           { label: 'Name', value: viewModalState.record.fullName },
           { label: 'Faculty', value: getFacultyName(viewModalState.record.facultyId) },
           { label: 'Department', value: getDepartmentName(viewModalState.record.departmentId) },
-          { label: 'User ID', value: viewModalState.record.userId },
           { label: 'Role', value: viewModalState.record.role },
+          ...(viewModalState.record.phone ? [{ label: 'Phone', value: viewModalState.record.phone }] : []),
+          ...(viewModalState.record.email ? [{ label: 'Email', value: viewModalState.record.email }] : []),
+          ...(viewModalState.record.hireDate ? [{ label: 'Hire Date', value: new Date(viewModalState.record.hireDate).toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' }) }] : []),
+          { label: 'Login Account', value: viewModalState.record.linkedUsername ? (
+            <span className="flex items-center gap-1.5 text-sm font-medium text-primary">
+              <Link2 size={13} />
+              @{viewModalState.record.linkedUsername}
+            </span>
+          ) : (
+            <span className="flex items-center gap-1.5 text-sm text-gray-400 dark:text-gray-500">
+              <Link2Off size={13} />
+              Not linked
+            </span>
+          )},
           { label: 'Status', value: (
             <span className={`px-2.5 py-1 rounded-full text-xs font-medium border ${
-              viewModalState.record.status === 'Active' 
-                ? 'bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-500/10 dark:text-emerald-400 dark:border-emerald-500/20' 
+              viewModalState.record.status === 'Active'
+                ? 'bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-500/10 dark:text-emerald-400 dark:border-emerald-500/20'
                 : viewModalState.record.status === 'On Leave'
                 ? 'bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-500/10 dark:text-amber-400 dark:border-amber-500/20'
                 : 'bg-rose-50 text-rose-700 border-rose-200 dark:bg-rose-500/10 dark:text-rose-400 dark:border-rose-500/20'
             }`}>
               {viewModalState.record.status}
             </span>
-          ) }
+          )}
         ] : null}
       />
 
-      {/* Delete Confirmation Modal */}
-      <AnimatePresence>
-        {deleteConfirmId && (
-          <div className="fixed inset-0 z-[80] flex items-center justify-center p-4">
-            <motion.div
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              className="absolute inset-0 bg-black/50 backdrop-blur-sm"
-              onClick={() => setDeleteConfirmId(null)}
-            />
-            <motion.div
-              initial={{ scale: 0.95, opacity: 0 }}
-              animate={{ scale: 1, opacity: 1 }}
-              exit={{ scale: 0.95, opacity: 0 }}
-              className="relative w-full max-w-sm glass-card p-6 rounded-2xl shadow-xl border border-gray-200 dark:border-white/10"
-            >
-              <div className="mb-6 text-center">
-                <div className="w-12 h-12 rounded-full bg-red-100 dark:bg-red-500/20 text-red-600 dark:text-red-400 flex items-center justify-center mx-auto mb-4">
-                  <Trash2 size={24} />
-                </div>
-                <h3 className="text-lg font-bold text-gray-900 dark:text-white">Confirm Deletion</h3>
-                <p className="text-sm text-gray-500 dark:text-gray-400 mt-2">
-                  Are you sure you want to delete this teacher? This action cannot be undone.
-                </p>
-              </div>
-              <div className="flex gap-3">
-                <Button variant="secondary" className="flex-1" onClick={() => setDeleteConfirmId(null)}>
-                  Cancel
-                </Button>
-                <Button className="flex-1 bg-red-600 hover:bg-red-700 text-white" onClick={handleDelete} isLoading={isLoading}>
-                  Delete
-                </Button>
-              </div>
-            </motion.div>
-          </div>
-        )}
-      </AnimatePresence>
+      <ConfirmDeleteModal
+        isOpen={!!deleteTarget}
+        onClose={() => setDeleteTarget(null)}
+        onConfirm={async () => {
+          if (deleteTarget) await deleteTeacher(deleteTarget.id);
+        }}
+        title="Delete Teacher"
+        message={deleteTarget
+          ? `Are you sure you want to delete "${deleteTarget.fullName}" (${deleteTarget.teacherNumber || deleteTarget.id})? This action cannot be undone.`
+          : undefined}
+      />
     </div>
   );
 }

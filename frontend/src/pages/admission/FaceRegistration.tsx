@@ -55,8 +55,8 @@ export default function FaceRegistration() {
       try {
         const data = await admissionService.listFaculties();
         setFacultyOptions(data);
-      } catch (error) {
-        console.error("Failed to load faculty codes", error);
+      } catch {
+        // Faculty dropdown will stay empty; user will see no options
       }
     };
 
@@ -80,6 +80,7 @@ export default function FaceRegistration() {
 
   // Save & Train result state
   const [formError, setFormError] = useState<string | null>(null);
+  const [saveErrorModal, setSaveErrorModal] = useState<{ title: string; message: string } | null>(null);
   const [trainingJobId, setTrainingJobId] = useState<string | null>(null);
   const [trainingStatus, setTrainingStatus] = useState<
     "queued" | "running" | "succeeded" | "failed" | null
@@ -163,8 +164,7 @@ export default function FaceRegistration() {
       if (videoRef.current) {
         videoRef.current.srcObject = stream;
       }
-    } catch (err) {
-      console.error("Error accessing camera:", err);
+    } catch {
       setFormError("Could not access camera. Please check browser permissions and try again.");
       handleStopCapture();
     }
@@ -424,6 +424,7 @@ export default function FaceRegistration() {
 
     setIsUploading(true);
     setFormError(null);
+    setSaveErrorModal(null);
     setTrainingJobId(null);
     setTrainingStatus(null);
     setTrainingError(null);
@@ -445,13 +446,26 @@ export default function FaceRegistration() {
         setTrainingStatus("queued");
       }
     } catch (err: unknown) {
-      // 409 means the student already has images on disk — ask user to confirm overwrite
-      const status = (err as { response?: { status?: number } })?.response?.status;
-      if (status === 409) {
+      const response = (err as { response?: { status?: number; data?: { detail?: string } } })?.response;
+      const httpStatus = response?.status;
+      const detail = response?.data?.detail;
+      if (httpStatus === 409) {
+        // Student already has images on disk — ask user to confirm overwrite
         setNeedsOverwrite(true);
+      } else if (httpStatus === 404) {
+        // Student number does not exist in the database
+        setSaveErrorModal({
+          title: "Student Not Found",
+          message: detail ?? `Student number "${studentId}" was not found in the system. Please register the student first before capturing their face.`,
+        });
+      } else if (httpStatus === 400) {
+        // Validation error — e.g. faculty code doesn't match the student's faculty
+        setSaveErrorModal({
+          title: "Faculty Mismatch",
+          message: detail ?? "The selected faculty code does not match the student's registered faculty. Please select the correct faculty and try again.",
+        });
       } else {
-        console.error("Save and train failed", err);
-        setFormError("Failed to save images or start training. Please try again.");
+        setFormError(detail ?? "Failed to save images or start training. Please try again.");
       }
     } finally {
       setIsUploading(false);
@@ -824,6 +838,32 @@ export default function FaceRegistration() {
                 Close
               </Button>
             </div>
+          </div>
+        </div>
+      </Modal>
+
+      {/* Save Validation Error Modal (404 student not found / 400 faculty mismatch) */}
+      <Modal
+        isOpen={!!saveErrorModal}
+        onClose={() => setSaveErrorModal(null)}
+        title={saveErrorModal?.title ?? "Error"}
+      >
+        <div className="space-y-5">
+          <div className="flex items-start gap-4 p-4 rounded-xl bg-red-50 dark:bg-red-500/10 border border-red-100 dark:border-red-500/20">
+            <div className="w-10 h-10 rounded-full bg-red-100 dark:bg-red-500/20 flex items-center justify-center shrink-0">
+              <AlertTriangle className="text-red-600 dark:text-red-400" size={20} />
+            </div>
+            <p className="text-sm text-red-700 dark:text-red-300 mt-1">
+              {saveErrorModal?.message}
+            </p>
+          </div>
+          <p className="text-sm text-gray-500 dark:text-gray-400">
+            Go to the <span className="font-medium text-gray-700 dark:text-gray-300">Students</span> page to verify the student's details, then return here with the correct faculty code and student number.
+          </p>
+          <div className="flex justify-end">
+            <Button onClick={() => setSaveErrorModal(null)}>
+              Got It
+            </Button>
           </div>
         </div>
       </Modal>

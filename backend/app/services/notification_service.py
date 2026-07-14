@@ -1,8 +1,8 @@
 """Notification service — create, persist and broadcast per-user notifications.
 
 Supports both async callers (await create_notification_async(...)) and sync
-callers (create_notification(...)) — the latter uses asyncio.create_task() for
-the WebSocket push, matching the same pattern as activity_logger.py.
+callers (create_notification(...)) — the latter uses run_coroutine_threadsafe
+to schedule the WebSocket push onto the app's event loop from threadpool threads.
 """
 from __future__ import annotations
 
@@ -16,6 +16,16 @@ from sqlalchemy.orm import Session
 from app.db.models import Notification, NotificationType, User, Role
 
 logger = logging.getLogger(__name__)
+
+# Event loop captured at startup (set by main.py lifespan) so that sync route
+# handlers running in uvicorn's threadpool can still schedule coroutines.
+_app_event_loop: asyncio.AbstractEventLoop | None = None
+
+
+def set_app_event_loop(loop: asyncio.AbstractEventLoop) -> None:
+    """Call once from the lifespan startup to register the running event loop."""
+    global _app_event_loop
+    _app_event_loop = loop
 
 
 # ---------------------------------------------------------------------------
@@ -60,7 +70,8 @@ notification_ws_manager = NotificationWebSocketManager()
 # ---------------------------------------------------------------------------
 
 def _notif_to_dict(n: Notification) -> dict:
-    return {
+    """Return the notification wrapped in the WS envelope the frontend expects."""
+    payload = {
         "id": n.id,
         "title": n.title,
         "message": n.message,
@@ -69,22 +80,33 @@ def _notif_to_dict(n: Notification) -> dict:
         "link": n.link,
         "created_at": n.created_at.isoformat(),
     }
+    # Frontend useNotificationsStore expects: {type: "notification", payload: {...}}
+    return {"type": "notification", "payload": payload}
 
 
-async def _push_ws(user_id: int, payload: dict):
+async def _push_ws(user_id: int, envelope: dict):
     try:
-        await notification_ws_manager.push(user_id, payload)
+        await notification_ws_manager.push(user_id, envelope)
     except Exception as exc:
         logger.debug("WS push failed for user %s: %s", user_id, exc)
 
 
-def _schedule_ws_push(user_id: int, payload: dict):
-    """Schedule a WS push from synchronous code (fire-and-forget)."""
-    try:
-        loop = asyncio.get_running_loop()
-        asyncio.create_task(_push_ws(user_id, payload))
-    except RuntimeError:
-        logger.debug("No running event loop; skipping WS push for user %s", user_id)
+def _schedule_ws_push(user_id: int, envelope: dict):
+    """Schedule a WS push from synchronous code (fire-and-forget).
+
+    Sync FastAPI route handlers run in a threadpool — there is no running event
+    loop in that thread, so asyncio.create_task() raises RuntimeError.  Instead
+    we use run_coroutine_threadsafe with the loop captured at startup.
+    """
+    if _app_event_loop is not None and _app_event_loop.is_running():
+        asyncio.run_coroutine_threadsafe(_push_ws(user_id, envelope), _app_event_loop)
+    else:
+        # Fallback for async callers (e.g. async route handlers)
+        try:
+            loop = asyncio.get_running_loop()
+            loop.create_task(_push_ws(user_id, envelope))
+        except RuntimeError:
+            logger.debug("No event loop available; skipping WS push for user %s", user_id)
 
 
 # ---------------------------------------------------------------------------

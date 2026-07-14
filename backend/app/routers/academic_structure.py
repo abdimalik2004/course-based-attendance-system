@@ -152,10 +152,28 @@ def create_academic_year(
             status_code=409,
             detail=f"A term '{payload.term_name}' already exists for academic year '{payload.academic_year}'.",
         )
-    if payload.status == AcademicYearStatus.ACTIVE and _academic_year_active_exists(db):
-        raise HTTPException(status_code=409, detail="Only one academic year can be active at a time")
 
-    obj = AcademicYear(**payload.model_dump())
+    # Auto-derive status from dates so the status is always consistent with the
+    # date range regardless of what the client sends.
+    today = date.today()
+    if payload.start_date <= today <= payload.end_date:
+        derived_status = AcademicYearStatus.ACTIVE
+    elif today > payload.end_date:
+        derived_status = AcademicYearStatus.INACTIVE
+    else:
+        derived_status = AcademicYearStatus.DRAFT
+
+    if derived_status == AcademicYearStatus.ACTIVE and _academic_year_active_exists(db):
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "This term's date range makes it Active, but another academic year is "
+                "already active. Deactivate the current active term first, or choose "
+                "dates that don't overlap with today."
+            ),
+        )
+
+    obj = AcademicYear(**{**payload.model_dump(), "status": derived_status})
     db.add(obj)
     try:
         db.commit()
@@ -239,15 +257,34 @@ def update_academic_year(
         obj.start_date = payload.start_date
     if payload.end_date is not None:
         obj.end_date = payload.end_date
-    if payload.status is not None:
-        # Only one semester can be ACTIVE at a time
-        if payload.status == AcademicYearStatus.ACTIVE and _academic_year_active_exists(db, exclude_id=academic_year_id):
-            raise HTTPException(status_code=409, detail="Only one academic year can be active at a time")
-        obj.status = payload.status
 
-    # Validate date order after applying updates
+    # Validate date order after applying updates (before status derivation)
     if obj.end_date <= obj.start_date:
         raise HTTPException(status_code=400, detail="end_date must be later than start_date")
+
+    # Auto-derive status from the final dates so that changing dates always
+    # produces the correct status without requiring a separate manual update.
+    today = date.today()
+    if obj.start_date <= today <= obj.end_date:
+        derived_status = AcademicYearStatus.ACTIVE
+    elif today > obj.end_date:
+        derived_status = AcademicYearStatus.INACTIVE
+    else:
+        derived_status = AcademicYearStatus.DRAFT
+
+    # If derived status is ACTIVE but another term is already active, reject.
+    if derived_status == AcademicYearStatus.ACTIVE and _academic_year_active_exists(
+        db, exclude_id=academic_year_id
+    ):
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "This term's date range makes it Active, but another academic year is "
+                "already active. Deactivate the current active term first, or adjust "
+                "this term's dates so they don't overlap with today."
+            ),
+        )
+    obj.status = derived_status
 
     # Check uniqueness of (academic_year, term_name)
     if _academic_year_duplicate_exists(db, obj.academic_year, obj.term_name, exclude_id=academic_year_id):
@@ -456,6 +493,7 @@ def create_class_course_assignment(
     payload: ClassCourseAssignmentCreate,
     db: Session = Depends(get_role_scoped_db),
     faculty_scope=Depends(get_optional_faculty_scope_context),
+    current_user: User = Depends(get_current_user),
 ):
     faculty = get_faculty_or_404(db, payload.faculty_id)
     if faculty_scope is not None:
@@ -506,6 +544,7 @@ def create_class_course_assignment(
             raise HTTPException(status_code=400, detail="Class course assignment references invalid data") from exc
         raise HTTPException(status_code=400, detail="Class course assignment could not be created") from exc
     db.refresh(obj)
+    log_activity(action=f"Class Assigned to Course - {class_batch.name} → {course.title}", user=current_user, db=db)
     notify_faculty_admins(
         db,
         faculty.id,

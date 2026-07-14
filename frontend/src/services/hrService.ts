@@ -7,8 +7,18 @@ export interface Teacher {
   facultyId: string;
   departmentId: string;
   userId: string;
+  linkedUsername: string | null;
   status: "Active" | "On Leave" | "Inactive";
   role: string;
+  phone: string | null;
+  email: string | null;
+  hireDate: string | null; // ISO date string "YYYY-MM-DD"
+}
+
+export interface AvailableUser {
+  id: number;
+  username: string;
+  email: string | null;
 }
 
 export interface Faculty {
@@ -20,6 +30,24 @@ export interface Department {
   id: string;
   facultyId: string;
   name: string;
+  code: string;
+}
+
+function mapTeacher(t: any): Teacher {
+  return {
+    id: String(t.id),
+    teacherNumber: t.teacher_number ?? "",
+    fullName: t.full_name ?? t.name ?? "",
+    facultyId: String(t.faculty_id ?? ""),
+    departmentId: String(t.department_id ?? ""),
+    userId: t.user_id != null ? String(t.user_id) : "",
+    linkedUsername: t.linked_username ?? null,
+    status: t.status ?? "Active",
+    role: t.role ?? "Lecturer",
+    phone: t.phone ?? null,
+    email: t.email ?? null,
+    hireDate: t.hire_date ?? null,
+  };
 }
 
 export const hrService = {
@@ -27,20 +55,11 @@ export const hrService = {
     const response = await api.get("/teachers", {
       params: { skip: 0, limit: 200 },
     });
-    return (response.data?.items ?? []).map((teacher: any) => ({
-      id: String(teacher.id),
-      teacherNumber: teacher.teacher_number ?? "",
-      fullName: teacher.full_name ?? teacher.name ?? "",
-      facultyId: String(teacher.faculty_id ?? ""),
-      departmentId: String(teacher.department_id ?? ""),
-      userId: teacher.user_id != null ? String(teacher.user_id) : "",
-      status: teacher.status ?? "Active",
-      role: teacher.role ?? "Lecturer",
-    }));
+    return (response.data?.items ?? []).map((teacher: any) => mapTeacher(teacher));
   },
 
   addTeacher: async (
-    data: Omit<Teacher, "id" | "status" | "userId">,
+    data: Omit<Teacher, "id" | "status" | "userId" | "linkedUsername">,
   ): Promise<Teacher> => {
     const response = await api.post("/teachers", {
       full_name: data.fullName,
@@ -48,18 +67,11 @@ export const hrService = {
       department_id: Number(data.departmentId),
       role: data.role,
       status: "Active",
+      phone: data.phone || null,
+      email: data.email || null,
+      hire_date: data.hireDate || null,
     });
-    const teacher = response.data;
-    return {
-      id: String(teacher.id),
-      teacherNumber: teacher.teacher_number ?? "",
-      fullName: teacher.full_name ?? teacher.name ?? data.fullName,
-      facultyId: String(teacher.faculty_id ?? data.facultyId),
-      departmentId: String(teacher.department_id ?? data.departmentId),
-      userId: teacher.user_id != null ? String(teacher.user_id) : "",
-      status: teacher.status ?? "Active",
-      role: teacher.role ?? data.role,
-    };
+    return mapTeacher(response.data);
   },
 
   deleteTeacher: async (id: string): Promise<boolean> => {
@@ -77,18 +89,23 @@ export const hrService = {
       department_id: data.departmentId ? Number(data.departmentId) : undefined,
       status: data.status,
       role: data.role,
+      phone: data.phone !== undefined ? (data.phone || null) : undefined,
+      email: data.email !== undefined ? (data.email || null) : undefined,
+      hire_date: data.hireDate !== undefined ? (data.hireDate || null) : undefined,
     });
-    const teacher = response.data;
-    return {
-      id: String(teacher.id),
-      teacherNumber: teacher.teacher_number ?? "",
-      fullName: teacher.full_name ?? teacher.name ?? data.fullName ?? "",
-      facultyId: String(teacher.faculty_id ?? data.facultyId ?? ""),
-      departmentId: String(teacher.department_id ?? data.departmentId ?? ""),
-      userId: teacher.user_id != null ? String(teacher.user_id) : "",
-      status: teacher.status ?? data.status ?? "Active",
-      role: teacher.role ?? data.role ?? "Lecturer",
-    };
+    return mapTeacher(response.data);
+  },
+
+  linkUser: async (teacherId: string, userId: string | null): Promise<Teacher> => {
+    const response = await api.patch(`/teachers/${teacherId}/link-user`, {
+      user_id: userId != null ? Number(userId) : null,
+    });
+    return mapTeacher(response.data);
+  },
+
+  getAvailableUsers: async (): Promise<AvailableUser[]> => {
+    const response = await api.get("/teachers/available-users");
+    return response.data ?? [];
   },
 
   getFaculties: async (): Promise<Faculty[]> => {
@@ -109,6 +126,7 @@ export const hrService = {
       id: String(department.id),
       facultyId: String(department.faculty_id),
       name: department.name,
+      code: department.code ?? "",
     }));
   },
 
@@ -120,6 +138,7 @@ export const hrService = {
       id: String(department.id),
       facultyId: String(department.faculty_id),
       name: department.name,
+      code: department.code ?? "",
     }));
   },
 };

@@ -77,18 +77,21 @@ export default function FacultyDepartments() {
                 <TableRow>
                   <TableHead>#</TableHead>
                   <TableHead>Department Name</TableHead>
+                  <TableHead>Code</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {isLoading ? (
-                  <TableRow>
-                    <TableCell colSpan={2} className="h-32 text-center text-gray-500">
-                      Loading departments...
-                    </TableCell>
-                  </TableRow>
+                  Array.from({ length: 4 }).map((_, i) => (
+                    <TableRow key={`sk-${i}`}>
+                      <TableCell><div className="h-4 w-6 rounded bg-gray-200 dark:bg-white/10 animate-pulse" /></TableCell>
+                      <TableCell><div className="h-4 rounded bg-gray-200 dark:bg-white/10 animate-pulse" /></TableCell>
+                      <TableCell><div className="h-4 w-16 rounded bg-gray-200 dark:bg-white/10 animate-pulse" /></TableCell>
+                    </TableRow>
+                  ))
                 ) : filtered.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={2} className="h-32 text-center text-gray-500">
+                    <TableCell colSpan={3} className="h-32 text-center text-gray-500">
                       No departments found.
                     </TableCell>
                   </TableRow>
@@ -101,6 +104,9 @@ export default function FacultyDepartments() {
                       <TableCell className="text-gray-400 text-sm">{i + 1}</TableCell>
                       <TableCell className="font-medium text-gray-900 dark:text-gray-100">
                         {d.name}
+                      </TableCell>
+                      <TableCell className="font-mono text-gray-600 dark:text-gray-400">
+                        {d.code || "—"}
                       </TableCell>
                     </TableRow>
                   ))

@@ -2,10 +2,10 @@
 from __future__ import annotations
 
 import logging
-from datetime import timedelta
+from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, Query, WebSocket, WebSocketDisconnect
-from sqlalchemy import and_
+from sqlalchemy import and_, or_
 from sqlalchemy.orm import Session
 
 from app.core.security import require_roles
@@ -164,48 +164,159 @@ def activity_stats(
     }
 
 
+@router.get(
+    "/logs",
+    dependencies=[Depends(require_roles("SUPER_ADMIN"))],
+)
+def list_activity_logs(
+    skip: int = Query(default=0, ge=0),
+    limit: int = Query(default=50, ge=1, le=200),
+    username: str | None = Query(default=None, description="Filter by exact or partial username"),
+    status: str | None = Query(default=None, description="Filter by status: Success, Failed, Pending"),
+    action: str | None = Query(default=None, description="Keyword search in action text"),
+    date_from: str | None = Query(default=None, description="ISO date string, e.g. 2024-01-01"),
+    date_to: str | None = Query(default=None, description="ISO date string, e.g. 2024-12-31"),
+    db: Session = Depends(get_db),
+):
+    """
+    Return paginated activity logs with optional filters.
+
+    Supports filtering by username (partial match), status, action keyword, and date range.
+    Returns total count so the frontend can render pagination controls.
+    """
+    query = db.query(ActivityLog)
+
+    if username:
+        query = query.filter(ActivityLog.username.ilike(f"%{username.strip()}%"))
+
+    if status:
+        status_upper = status.strip().capitalize()
+        try:
+            status_enum = ActivityLogStatus(status_upper)
+            query = query.filter(ActivityLog.status == status_enum)
+        except ValueError:
+            pass  # unknown status value — ignore filter
+
+    if action:
+        query = query.filter(ActivityLog.action.ilike(f"%{action.strip()}%"))
+
+    if date_from:
+        try:
+            dt_from = datetime.fromisoformat(date_from).replace(tzinfo=timezone.utc)
+            query = query.filter(ActivityLog.created_at >= dt_from)
+        except ValueError:
+            pass
+
+    if date_to:
+        try:
+            dt_to = datetime.fromisoformat(date_to).replace(hour=23, minute=59, second=59, tzinfo=timezone.utc)
+            query = query.filter(ActivityLog.created_at <= dt_to)
+        except ValueError:
+            pass
+
+    total = query.count()
+    rows = query.order_by(ActivityLog.created_at.desc()).offset(skip).limit(limit).all()
+
+    return {
+        "total": total,
+        "skip": skip,
+        "limit": limit,
+        "items": [
+            {
+                "id": r.id,
+                "username": r.username,
+                "action": r.action,
+                "status": _safe_status(r.status),
+                "created_at": r.created_at.isoformat() if r.created_at else None,
+            }
+            for r in rows
+        ],
+    }
+
+
+@router.get(
+    "/hr-recent",
+    dependencies=[Depends(require_roles("HR", "SUPER_ADMIN"))],
+)
+def hr_recent_activity(
+    limit: int = Query(default=8, ge=1, le=50),
+    db: Session = Depends(get_db),
+):
+    """Return recent teacher-related activity logs for the HR dashboard.
+
+    Scoped to log entries whose action text contains 'Teacher', so HR users
+    only see their own domain — not attendance sessions, login events, etc.
+    """
+    rows = (
+        db.query(ActivityLog)
+        .filter(ActivityLog.action.ilike("%teacher%"))
+        .order_by(ActivityLog.created_at.desc())
+        .limit(limit)
+        .all()
+    )
+    return [
+        {
+            "id": r.id,
+            "username": r.username,
+            "action": r.action,
+            "status": _safe_status(r.status),
+            "created_at": r.created_at.isoformat() if r.created_at else None,
+        }
+        for r in rows
+    ]
+
+
 @router.websocket("/ws/recent")
-async def websocket_recent_activity(websocket: WebSocket):
+async def websocket_recent_activity(websocket: WebSocket, token: str | None = None):
     """
     WebSocket endpoint for real-time activity updates.
 
-    Clients connecting to this endpoint will receive real-time notifications
-    whenever a new activity is logged in the system.
+    Requires a valid SUPER_ADMIN access token passed as a query parameter:
+        ws://host/activity/ws/recent?token=<access_token>
 
     Connection flow:
-    1. Client connects via WebSocket
-    2. Manager accepts and registers connection
-    3. Client receives activity updates as they occur
-    4. Client/server disconnect cleans up resources
-
-    Expected client code:
-        const ws = new WebSocket('ws://localhost:8000/activity/ws/recent');
-        ws.onmessage = (event) => {
-            const message = JSON.parse(event.data);
-            if (message.type === 'activity') {
-                // Handle new activity
-                console.log(message.data);
-            }
-        };
-
-    Error handling:
-        - Connection failures are logged and ignored
-        - Disconnects are handled gracefully
+    1. Client connects with ?token= query param
+    2. Server validates token and role — closes with 4001 if unauthorized
+    3. Manager accepts and registers the authenticated connection
+    4. Client receives activity updates as they occur
     """
+    from app.core.security import decode_token, TokenPayloadError, SUPER_ADMIN_ROLE
+    from app.db.session import SessionLocal
+    from app.db.models import User
+
+    # Validate bearer token passed via query param (WebSocket can't use Authorization header)
+    if not token:
+        await websocket.close(code=4001, reason="Missing token")
+        return
+
+    db = SessionLocal()
+    try:
+        try:
+            username = decode_token(token)
+        except TokenPayloadError:
+            await websocket.close(code=4001, reason="Invalid token")
+            return
+
+        user = db.query(User).filter(User.username == username, User.is_active == True).first()  # noqa: E712
+        if not user:
+            await websocket.close(code=4001, reason="Unauthorized")
+            return
+
+        assigned_roles = {role.name for role in user.roles}
+        if SUPER_ADMIN_ROLE not in assigned_roles:
+            await websocket.close(code=4003, reason="Forbidden: SUPER_ADMIN role required")
+            return
+    finally:
+        db.close()
+
     await activity_ws_manager.connect(websocket)
     try:
         while True:
-            # Keep connection alive and listen for messages
-            # In a real scenario, clients might send control messages
             data = await websocket.receive_text()
-            # For now, we just ignore incoming messages
-            # Could implement ping/pong or control commands here
+            # Ignore incoming messages — this is a server-push-only channel
     except WebSocketDisconnect:
         await activity_ws_manager.disconnect(websocket)
-    except Exception as e:
-        # Log error but don't crash
-        import logging
-        logger = logging.getLogger(__name__)
-        logger.error(f"WebSocket error: {e}")
+    except Exception as exc:
+        logger.error("WebSocket error: %s", exc)
         await activity_ws_manager.disconnect(websocket)
 

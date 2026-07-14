@@ -1,0 +1,51 @@
+# Python environments
+.venv/
+venv/
+env/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.egg-info/
+.eggs/
+dist/
+build/
+
+# Environment files (Railway uses its own env vars panel)
+.env
+.env.*
+!.env.production.example
+
+# Test and dev files
+tests/
+test_*.py
+*_test.py
+pytest.ini
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Git
+.git/
+.gitignore
+
+# Docs
+*.md
+docs/
+
+# Local databases
+*.db
+*.sqlite
+
+# IDE / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+logs/
+
+# Node (if frontend was accidentally inside backend)
+node_modules/

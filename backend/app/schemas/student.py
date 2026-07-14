@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import date, datetime
 from enum import Enum
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, EmailStr, Field
 
 
 class StudentStatus(str, Enum):
@@ -28,6 +28,9 @@ class StudentCreate(BaseModel):
                 "full_name": "Abdimalik Hassan",
                 "faculty_id": 1,
                 "department_id": 1,
+                "date_of_birth": "2000-05-14",
+                "phone": "+252612345678",
+                "email": "abdimalik@example.com",
             }
         }
     )
@@ -35,15 +38,18 @@ class StudentCreate(BaseModel):
     full_name: str
     faculty_id: int = Field(gt=0)
     department_id: int = Field(gt=0)
+    date_of_birth: date | None = None
+    phone: str | None = None
+    email: str | None = None
 
 
 class StudentUpdate(BaseModel):
     model_config = ConfigDict(
         json_schema_extra={
             "example": {
-                "full_name": "Updated Student Name",
+                "full_name": "Updated Name",
                 "department_id": 2,
-                "embedding_ref": "2201999"
+                "phone": "+252612345679",
             }
         }
     )
@@ -54,6 +60,9 @@ class StudentUpdate(BaseModel):
     department_id: int | None = Field(default=None, gt=0)
     embedding_ref: str | None = None
     status: StudentStatus | None = None
+    date_of_birth: date | None = None
+    phone: str | None = None
+    email: str | None = None
 
 
 class StudentRead(StudentBase):
@@ -61,7 +70,12 @@ class StudentRead(StudentBase):
 
     id: int
     created_at: datetime
-    # Only populated on first creation — shows the auto-generated login credentials
+    date_of_birth: date | None = None
+    phone: str | None = None
+    email: str | None = None
+    # Computed from the filesystem dataset folder — always populated by the router
+    face_images_count: int = 0
+    # Only populated once: when login credentials are first generated
     generated_password: str | None = None
 
 

@@ -10,10 +10,10 @@ import {
   Trash2,
   Filter,
   AlertTriangle,
-  Copy,
   CheckCircle2,
-  User,
-  KeyRound,
+  XCircle,
+  ChevronLeft,
+  ChevronRight,
 } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
@@ -31,7 +31,6 @@ import {
 import { Select } from "@/components/ui/Select";
 import { useAdmissionStore } from "@/store/useAdmissionStore";
 import type { Student } from "@/store/useAdmissionStore";
-import admissionService from "@/services/admissionService";
 import { ViewButton } from "@/components/ui/ViewButton";
 import { ViewModal } from "@/components/ui/ViewModal";
 
@@ -39,6 +38,16 @@ const studentSchema = z.object({
   fullName: z.string().min(2, "Full name must be at least 2 characters"),
   faculty: z.string().min(1, "Faculty is required"),
   department: z.string().min(1, "Department is required"),
+  dateOfBirth: z.string().optional().nullable(),
+  phone: z.string().optional().nullable(),
+  email: z
+    .string()
+    .optional()
+    .nullable()
+    .refine(
+      (val) => !val || val === "" || /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(val),
+      { message: "Invalid email address" },
+    ),
 });
 
 type StudentForm = z.infer<typeof studentSchema>;
@@ -48,6 +57,9 @@ export default function Students() {
     students,
     faculties,
     departments,
+    total,
+    currentPage,
+    pageSize,
     isLoading,
     isSaving,
     error,
@@ -64,8 +76,18 @@ export default function Students() {
 
   // Sync status filter when URL params change (e.g. clicking stat cards on dashboard)
   useEffect(() => {
-    setStatusFilter(searchParams.get("status") || "All");
-  }, [searchParams]);
+    const urlStatus = searchParams.get("status") || "All";
+    setStatusFilter(urlStatus);
+    void fetchAdmissionData({ page: 1, status: urlStatus, search: "" });
+  }, [searchParams]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Debounce search — send to server after 300ms
+  useEffect(() => {
+    const t = setTimeout(() => {
+      void fetchAdmissionData({ page: 1, search: searchTerm, status: statusFilter });
+    }, 300);
+    return () => clearTimeout(t);
+  }, [searchTerm]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Modal states
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
@@ -73,9 +95,7 @@ export default function Students() {
   const [isViewModalOpen, setIsViewModalOpen] = useState(false);
   const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
   const [selectedStudent, setSelectedStudent] = useState<Student | null>(null);
-  const [viewImageCount, setViewImageCount] = useState<number | null>(null);
-  const [credentials, setCredentials] = useState<{ studentNumber: string; password: string } | null>(null);
-  const [copiedField, setCopiedField] = useState<"username" | "password" | null>(null);
+  const [addModalError, setAddModalError] = useState<string | null>(null);
 
   const {
     register,
@@ -91,49 +111,52 @@ export default function Students() {
       fullName: "",
       faculty: "",
       department: "",
+      dateOfBirth: "",
+      phone: "",
+      email: "",
     },
   });
 
   useEffect(() => {
-    void fetchAdmissionData();
-  }, [fetchAdmissionData]);
+    // Initial load — respect URL status param if present
+    void fetchAdmissionData({ page: 1, status: searchParams.get("status") || "All" });
+  }, [fetchAdmissionData]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const selectedFaculty = watch("faculty");
 
-  const filteredStudents = useMemo(() => {
-    return students.filter((student) => {
-      const matchesSearch =
-        student.fullName.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        student.studentNumber.toLowerCase().includes(searchTerm.toLowerCase());
-      const matchesStatus =
-        statusFilter === "All" ||
-        student.status.toLowerCase() === statusFilter.toLowerCase();
-      return matchesSearch && matchesStatus;
-    });
-  }, [students, searchTerm, statusFilter]);
+  // students is already server-filtered — no client-side filter needed
+  const filteredStudents = students;
 
   const availableDepartments = useMemo(() => {
     return selectedFaculty ? departments[selectedFaculty] || [] : [];
   }, [selectedFaculty, departments]);
 
-  const copyToClipboard = (text: string, field: "username" | "password") => {
-    navigator.clipboard.writeText(text).then(() => {
-      setCopiedField(field);
-      setTimeout(() => setCopiedField(null), 2000);
-    });
+  // Pagination helpers
+  const totalPages = Math.max(1, Math.ceil(total / pageSize));
+
+  const goToPage = (page: number) => {
+    if (page < 1 || page > totalPages) return;
+    // fetchAdmissionData will preserve currentSearch/currentStatus from store state
+    void fetchAdmissionData({ page });
   };
 
   // Handle Add Submit
   const onAddSubmit = async (data: StudentForm) => {
-    const result = await addStudent({
-      fullName: data.fullName,
-      faculty: data.faculty,
-      department: data.department,
-    });
-    setIsAddModalOpen(false);
-    reset();
-    if (result?.generatedPassword) {
-      setCredentials({ studentNumber: result.studentNumber, password: result.generatedPassword });
+    setAddModalError(null);
+    try {
+      await addStudent({
+        fullName: data.fullName,
+        faculty: data.faculty,
+        department: data.department,
+        dateOfBirth: data.dateOfBirth || null,
+        phone: data.phone || null,
+        email: data.email || null,
+      });
+      setIsAddModalOpen(false);
+      reset();
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : "Failed to create student. Please try again.";
+      setAddModalError(msg);
     }
   };
 
@@ -144,6 +167,9 @@ export default function Students() {
       fullName: data.fullName,
       faculty: data.faculty,
       department: data.department,
+      dateOfBirth: data.dateOfBirth || null,
+      phone: data.phone || null,
+      email: data.email || null,
     });
     setIsEditModalOpen(false);
     setSelectedStudent(null);
@@ -151,7 +177,8 @@ export default function Students() {
   };
 
   const openAddModal = () => {
-    reset({ fullName: "", faculty: "", department: "" });
+    reset({ fullName: "", faculty: "", department: "", dateOfBirth: "", phone: "", email: "" });
+    setAddModalError(null);
     setIsAddModalOpen(true);
   };
 
@@ -161,18 +188,16 @@ export default function Students() {
       fullName: student.fullName,
       faculty: student.faculty,
       department: student.department,
+      dateOfBirth: student.dateOfBirth ?? "",
+      phone: student.phone ?? "",
+      email: student.email ?? "",
     });
     setIsEditModalOpen(true);
   };
 
   const openViewModal = (student: Student) => {
     setSelectedStudent(student);
-    setViewImageCount(null); // reset while loading
     setIsViewModalOpen(true);
-    admissionService
-      .getStudentCapturedImages(Number(student.id))
-      .then((res) => setViewImageCount(res.image_count))
-      .catch(() => setViewImageCount(0));
   };
 
   const openDeleteModal = (student: Student) => {
@@ -194,9 +219,49 @@ export default function Students() {
     setIsViewModalOpen(false);
     setIsDeleteModalOpen(false);
     setSelectedStudent(null);
-    setViewImageCount(null);
+    setAddModalError(null);
     reset();
   };
+
+  /** Reusable personal-info fields used in both add + edit forms */
+  const PersonalInfoFields = () => (
+    <>
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        <div className="space-y-1.5">
+          <label className="text-sm font-medium text-gray-700 dark:text-gray-300">
+            Date of Birth <span className="text-gray-400 font-normal">(optional)</span>
+          </label>
+          <Input
+            type="date"
+            {...register("dateOfBirth")}
+            error={errors.dateOfBirth?.message ?? undefined}
+          />
+        </div>
+        <div className="space-y-1.5">
+          <label className="text-sm font-medium text-gray-700 dark:text-gray-300">
+            Phone <span className="text-gray-400 font-normal">(optional)</span>
+          </label>
+          <Input
+            type="tel"
+            {...register("phone")}
+            placeholder="+252 6X XXX XXXX"
+            error={errors.phone?.message ?? undefined}
+          />
+        </div>
+      </div>
+      <div className="space-y-1.5">
+        <label className="text-sm font-medium text-gray-700 dark:text-gray-300">
+          Email <span className="text-gray-400 font-normal">(optional)</span>
+        </label>
+        <Input
+          type="email"
+          {...register("email")}
+          placeholder="student@example.com"
+          error={errors.email?.message ?? undefined}
+        />
+      </div>
+    </>
+  );
 
   return (
     <div className="space-y-6">
@@ -244,12 +309,16 @@ export default function Students() {
               <Filter className="text-gray-400" size={18} />
               <Select
                 value={statusFilter}
-                onChange={(e) => setStatusFilter(e.target.value)}
+                onChange={(e) => {
+                  const v = e.target.value;
+                  setStatusFilter(v);
+                  void fetchAdmissionData({ page: 1, status: v, search: searchTerm });
+                }}
                 options={[
                   { value: "All", label: "All Statuses" },
-                  { value: "Approved", label: "Approved" },
-                  { value: "Pending", label: "Pending" },
-                  { value: "Rejected", label: "Rejected" },
+                  { value: "approved", label: "Approved" },
+                  { value: "pending", label: "Pending" },
+                  { value: "rejected", label: "Rejected" },
                 ]}
               />
             </div>
@@ -262,6 +331,7 @@ export default function Students() {
                 <TableHead>ST-Name</TableHead>
                 <TableHead>Faculty</TableHead>
                 <TableHead>Department</TableHead>
+                <TableHead>Face</TableHead>
                 <TableHead>Status</TableHead>
                 <TableHead className="text-right">Actions</TableHead>
               </TableRow>
@@ -270,24 +340,11 @@ export default function Students() {
               {isLoading ? (
                 Array.from({ length: 6 }).map((_, i) => (
                   <TableRow key={`skeleton-${i}`}>
-                    <TableCell>
-                      <div className="h-4 w-20 bg-gray-200 dark:bg-white/10 rounded animate-pulse" />
-                    </TableCell>
-                    <TableCell>
-                      <div className="h-4 w-32 bg-gray-200 dark:bg-white/10 rounded animate-pulse" />
-                    </TableCell>
-                    <TableCell>
-                      <div className="h-4 w-24 bg-gray-200 dark:bg-white/10 rounded animate-pulse" />
-                    </TableCell>
-                    <TableCell>
-                      <div className="h-4 w-24 bg-gray-200 dark:bg-white/10 rounded animate-pulse" />
-                    </TableCell>
-                    <TableCell>
-                      <div className="h-6 w-20 bg-gray-200 dark:bg-white/10 rounded-full animate-pulse" />
-                    </TableCell>
-                    <TableCell>
-                      <div className="ml-auto h-8 w-20 bg-gray-200 dark:bg-white/10 rounded animate-pulse" />
-                    </TableCell>
+                    {Array.from({ length: 7 }).map((__, j) => (
+                      <TableCell key={j}>
+                        <div className="h-4 w-full max-w-[80px] bg-gray-200 dark:bg-white/10 rounded animate-pulse" />
+                      </TableCell>
+                    ))}
                   </TableRow>
                 ))
               ) : filteredStudents.length > 0 ? (
@@ -301,6 +358,19 @@ export default function Students() {
                     </TableCell>
                     <TableCell>{student.faculty}</TableCell>
                     <TableCell>{student.department}</TableCell>
+                    <TableCell>
+                      {student.faceImagesCount > 0 ? (
+                        <span className="inline-flex items-center gap-1 text-xs font-medium text-green-700 dark:text-green-400">
+                          <CheckCircle2 size={14} />
+                          {student.faceImagesCount}
+                        </span>
+                      ) : (
+                        <span className="inline-flex items-center gap-1 text-xs font-medium text-amber-600 dark:text-amber-400">
+                          <XCircle size={14} />
+                          None
+                        </span>
+                      )}
+                    </TableCell>
                     <TableCell>
                       <Badge
                         variant={
@@ -353,6 +423,67 @@ export default function Students() {
               )}
             </TableBody>
           </Table>
+
+          {/* Pagination */}
+          {total > pageSize && (
+            <div className="mt-4 flex items-center justify-between text-sm text-gray-500 dark:text-gray-400">
+              <span>
+                Showing {Math.min((currentPage - 1) * pageSize + 1, total)}–
+                {Math.min(currentPage * pageSize, total)} of {total} students
+              </span>
+              <div className="flex items-center gap-1">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-8 w-8 p-0"
+                  disabled={currentPage <= 1 || isLoading}
+                  onClick={() => goToPage(currentPage - 1)}
+                >
+                  <ChevronLeft size={16} />
+                </Button>
+                {Array.from({ length: totalPages }, (_, i) => i + 1)
+                  .filter(
+                    (p) =>
+                      p === 1 ||
+                      p === totalPages ||
+                      Math.abs(p - currentPage) <= 1,
+                  )
+                  .reduce<(number | "…")[]>((acc, p, idx, arr) => {
+                    if (idx > 0 && p - (arr[idx - 1] as number) > 1)
+                      acc.push("…");
+                    acc.push(p);
+                    return acc;
+                  }, [])
+                  .map((p, idx) =>
+                    p === "…" ? (
+                      <span key={`ellipsis-${idx}`} className="px-1">
+                        …
+                      </span>
+                    ) : (
+                      <Button
+                        key={p}
+                        variant={p === currentPage ? "primary" : "ghost"}
+                        size="sm"
+                        className="h-8 w-8 p-0"
+                        disabled={isLoading}
+                        onClick={() => goToPage(p as number)}
+                      >
+                        {p}
+                      </Button>
+                    ),
+                  )}
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-8 w-8 p-0"
+                  disabled={currentPage >= totalPages || isLoading}
+                  onClick={() => goToPage(currentPage + 1)}
+                >
+                  <ChevronRight size={16} />
+                </Button>
+              </div>
+            </div>
+          )}
         </CardContent>
       </Card>
 
@@ -423,7 +554,20 @@ export default function Students() {
             />
           </div>
 
-          <div className="pt-4 flex justify-end gap-3">
+          <div className="border-t border-gray-100 dark:border-white/10 pt-4 space-y-4">
+            <p className="text-xs font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wide">
+              Personal Information
+            </p>
+            <PersonalInfoFields />
+          </div>
+
+          {addModalError && (
+            <div className="rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700 dark:border-red-500/20 dark:bg-red-500/10 dark:text-red-300">
+              {addModalError}
+            </div>
+          )}
+
+          <div className="pt-2 flex justify-end gap-3">
             <Button type="button" variant="secondary" onClick={closeModals}>
               Cancel
             </Button>
@@ -501,7 +645,14 @@ export default function Students() {
             />
           </div>
 
-          <div className="pt-4 flex justify-end gap-3">
+          <div className="border-t border-gray-100 dark:border-white/10 pt-4 space-y-4">
+            <p className="text-xs font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wide">
+              Personal Information
+            </p>
+            <PersonalInfoFields />
+          </div>
+
+          <div className="pt-2 flex justify-end gap-3">
             <Button type="button" variant="secondary" onClick={closeModals}>
               Cancel
             </Button>
@@ -524,13 +675,32 @@ export default function Students() {
                 { label: "Faculty", value: selectedStudent.faculty },
                 { label: "Department", value: selectedStudent.department },
                 {
-                  label: "Images Captured",
+                  label: "Date of Birth",
+                  value: selectedStudent.dateOfBirth
+                    ? new Date(selectedStudent.dateOfBirth).toLocaleDateString(undefined, {
+                        year: "numeric",
+                        month: "long",
+                        day: "numeric",
+                      })
+                    : "—",
+                },
+                { label: "Phone", value: selectedStudent.phone || "—" },
+                { label: "Email", value: selectedStudent.email || "—" },
+                {
+                  label: "Face Images",
                   value:
-                    viewImageCount === null
-                      ? "Loading..."
-                      : viewImageCount > 0
-                        ? `${viewImageCount} image${viewImageCount !== 1 ? "s" : ""}`
-                        : "None",
+                    selectedStudent.faceImagesCount > 0 ? (
+                      <span className="inline-flex items-center gap-1 text-sm font-medium text-green-700 dark:text-green-400">
+                        <CheckCircle2 size={15} />
+                        {selectedStudent.faceImagesCount} image
+                        {selectedStudent.faceImagesCount !== 1 ? "s" : ""} captured
+                      </span>
+                    ) : (
+                      <span className="inline-flex items-center gap-1 text-sm font-medium text-amber-600 dark:text-amber-400">
+                        <XCircle size={15} />
+                        No face images yet
+                      </span>
+                    ),
                 },
                 {
                   label: "Status",
@@ -593,73 +763,6 @@ export default function Students() {
             </Button>
           </div>
         </div>
-      </Modal>
-
-      {/* Credentials Modal — shown once after a new student is registered */}
-      <Modal
-        isOpen={!!credentials}
-        onClose={() => setCredentials(null)}
-        title="Student Account Created"
-      >
-        {credentials && (
-          <div className="space-y-5">
-            {/* Success banner */}
-            <div className="flex items-center gap-3 p-4 rounded-xl bg-green-50 dark:bg-green-500/10 border border-green-200 dark:border-green-500/20">
-              <CheckCircle2 className="text-green-600 dark:text-green-400 shrink-0" size={22} />
-              <p className="text-sm text-green-800 dark:text-green-300">
-                A login account has been automatically created for this student. Share these credentials with them.
-              </p>
-            </div>
-
-            {/* Username */}
-            <div>
-              <label className="block text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide mb-1.5">
-                Username
-              </label>
-              <div className="flex items-center gap-2 p-3 rounded-lg bg-gray-50 dark:bg-white/5 border border-gray-200 dark:border-white/10">
-                <User size={16} className="text-gray-400 shrink-0" />
-                <span className="flex-1 font-mono text-sm font-semibold text-gray-900 dark:text-gray-100">
-                  {credentials.studentNumber}
-                </span>
-                <button
-                  onClick={() => copyToClipboard(credentials.studentNumber, "username")}
-                  className="p-1.5 rounded-md hover:bg-gray-200 dark:hover:bg-white/10 transition-colors text-gray-500 dark:text-gray-400"
-                  title="Copy username"
-                >
-                  {copiedField === "username" ? <CheckCircle2 size={15} className="text-green-500" /> : <Copy size={15} />}
-                </button>
-              </div>
-            </div>
-
-            {/* Password */}
-            <div>
-              <label className="block text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide mb-1.5">
-                Default Password
-              </label>
-              <div className="flex items-center gap-2 p-3 rounded-lg bg-gray-50 dark:bg-white/5 border border-gray-200 dark:border-white/10">
-                <KeyRound size={16} className="text-gray-400 shrink-0" />
-                <span className="flex-1 font-mono text-sm font-semibold text-gray-900 dark:text-gray-100">
-                  {credentials.password}
-                </span>
-                <button
-                  onClick={() => copyToClipboard(credentials.password, "password")}
-                  className="p-1.5 rounded-md hover:bg-gray-200 dark:hover:bg-white/10 transition-colors text-gray-500 dark:text-gray-400"
-                  title="Copy password"
-                >
-                  {copiedField === "password" ? <CheckCircle2 size={15} className="text-green-500" /> : <Copy size={15} />}
-                </button>
-              </div>
-            </div>
-
-            <p className="text-xs text-gray-400 dark:text-gray-500">
-              The student should change their password after first login. These credentials will not be shown again.
-            </p>
-
-            <div className="flex justify-end">
-              <Button onClick={() => setCredentials(null)}>Done</Button>
-            </div>
-          </div>
-        )}
       </Modal>
     </div>
   );

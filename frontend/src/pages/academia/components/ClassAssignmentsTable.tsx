@@ -23,6 +23,7 @@ export function ClassAssignmentsTable() {
     courses,
     faculties,
     departments,
+    isLoading,
     openModal,
     deleteClassAssignment,
   } = useAcademiaStore();
@@ -85,7 +86,15 @@ export function ClassAssignmentsTable() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {filteredAssignments.length === 0 ? (
+                {isLoading ? (
+                  Array.from({ length: 3 }).map((_, i) => (
+                    <TableRow key={`skeleton-${i}`}>
+                      <TableCell colSpan={6}>
+                        <div className="h-4 bg-gray-200 dark:bg-white/10 rounded animate-pulse" />
+                      </TableCell>
+                    </TableRow>
+                  ))
+                ) : filteredAssignments.length === 0 ? (
                   <TableRow>
                     <TableCell
                       colSpan={6}
@@ -148,12 +157,7 @@ export function ClassAssignmentsTable() {
       <ConfirmDeleteModal
         isOpen={!!deleteId}
         onClose={() => setDeleteId(null)}
-        onConfirm={() => {
-          if (deleteId) {
-            deleteClassAssignment(deleteId);
-            setDeleteId(null);
-          }
-        }}
+        onConfirm={async () => { if (deleteId) await deleteClassAssignment(deleteId); }}
       />
 
       <ViewModal

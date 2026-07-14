@@ -1,4 +1,5 @@
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useCallback } from "react";
+import { useSearchParams } from "react-router-dom";
 import {
   Plus,
   Edit2,
@@ -8,6 +9,7 @@ import {
   BookOpen,
   Users,
 } from "lucide-react";
+import { ConfirmDeleteModal } from "@/components/academia/ConfirmDeleteModal";
 import { Card, CardContent } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
 import {
@@ -32,8 +34,11 @@ import { ViewModal } from "@/components/ui/ViewModal";
 import type { AcademicStructure as AcademicStructureType } from "@/types/academia.types";
 
 export default function AcademicStructure() {
-  const [activeTab, setActiveTab] = useState<"terms" | "courses" | "classes">(
-    "terms",
+  const [searchParams, setSearchParams] = useSearchParams();
+  const activeTab = (searchParams.get("tab") as "terms" | "courses" | "classes") ?? "terms";
+  const setActiveTab = useCallback(
+    (tab: "terms" | "courses" | "classes") => setSearchParams({ tab }, { replace: true }),
+    [setSearchParams],
   );
   const {
     structures,
@@ -45,6 +50,7 @@ export default function AcademicStructure() {
   } = useAcademiaStore();
   const [viewStructure, setViewStructure] =
     useState<AcademicStructureType | null>(null);
+  const [deleteId, setDeleteId] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState("");
 
   useEffect(() => {
@@ -61,11 +67,7 @@ export default function AcademicStructure() {
   }, [structures, searchTerm]);
 
   const handleDelete = (id: string) => {
-    if (
-      window.confirm("Are you sure you want to delete this term structure?")
-    ) {
-      deleteStructure(id);
-    }
+    setDeleteId(id);
   };
 
   return (
@@ -261,6 +263,13 @@ export default function AcademicStructure() {
       <AddStructureModal />
       <CourseAssignModal />
       <ClassAssignModal />
+      <ConfirmDeleteModal
+        isOpen={!!deleteId}
+        onClose={() => setDeleteId(null)}
+        onConfirm={async () => { if (deleteId) await deleteStructure(deleteId); }}
+        title="Delete Academic Term"
+        message="Are you sure you want to delete this term? This will also remove all related semester assignments."
+      />
 
       <ViewModal
         isOpen={!!viewStructure}
